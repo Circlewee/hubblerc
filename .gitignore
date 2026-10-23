@@ -1,0 +1,9 @@
+# Machine-local Claude Code settings (local-scope install of this marketplace)
+.claude/settings.local.json
+
+# Types the engine writes beside a loaded plugin
+plugins/*/.claude-plugin/types/
+
+.DS_Store
+*.log
+node_modules/

@@ -1,0 +1,12 @@
+{
+  "name": "hubblerc",
+  "owner": { "name": "hubble" },
+  "description": "hubble's Claude Code environment",
+  "plugins": [
+    {
+      "name": "hubblerc",
+      "source": "./plugins/hubblerc",
+      "description": "hubble's Claude Code environment: mods, skills and hooks in one plugin"
+    }
+  ]
+}
