@@ -1,5 +1,5 @@
 import { atom, update } from 'claude-code'
-import type { On, ToolCallResult } from 'claude-code'
+import type { EngineInterface, On, ToolCallResult, TurnCompleteInput, TurnStartInput } from 'claude-code'
 
 import type { ToolRun, TurnRecord } from '../types'
 
@@ -7,60 +7,50 @@ const MAX_TURNS = 100
 const MAX_RUNS_PER_TURN = 400
 
 /** Calls the engine makes for its own bookkeeping, not work the person would count. */
-const IGNORED_TOOLS = new Set(['SubagentHandback'])
+export const IGNORED_TOOLS = new Set(['SubagentHandback'])
 
 /** The session's main-loop turns, oldest first, each with the tool calls made while it ran. */
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 
-type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
+export type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
 
-/** Records every main-loop turn and the tool calls made during it into `turns`. */
-export function trackActivity(on: On): void {
-  on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) {
-      const turn: TurnRecord = {
-        id: e.turnId,
-        prompt: promptLabel(e.text),
-        startedAt: await $.clock.now(),
-        durationMs: null,
-        runs: [],
-      }
-      await update($, turns, list => [...list, turn].slice(-MAX_TURNS))
-    }
+/** At turn.start: a main-loop turn opens a record. */
+export async function startTurn($: EngineInterface, e: TurnStartInput): Promise<void> {
+  if (e.agentId !== undefined) return
 
-    return next(e)
-  }).catch(($, e, next) => next(e))
+  const turn: TurnRecord = {
+    id: e.turnId,
+    prompt: promptLabel(e.text),
+    startedAt: await $.clock.now(),
+    durationMs: null,
+    runs: [],
+  }
+  await update($, turns, list => [...list, turn].slice(-MAX_TURNS))
+}
 
-  on('tool.call', async ($, e, next) => {
-    if (IGNORED_TOOLS.has(String(e.tool))) return next(e)
+/** After a tool call ran: it joins its turn (a subagent's joins the turn that started the subagent). */
+export async function recordRun($: EngineInterface, e: CallInput, ran: ToolCallResult, ms: number): Promise<void> {
+  const run = describeRun(e, ran, ms)
+  const spawned = run.tool === 'Agent' && !run.isError ? spawnedAgent(ran.result) : undefined
+  await update($, turns, list => addRun(list, run, spawned))
+}
 
-    const startedAt = await $.clock.now()
-    const ran = await next(e)
+/**
+ * At turn.complete, before the engine appends the row that closes the turn: the turn gets its
+ * duration, so the row can be tied to it as it lands.
+ */
+export async function completeTurn($: EngineInterface, e: TurnCompleteInput): Promise<void> {
+  if (e.agentId !== undefined) return
 
-    try {
-      const run = describeRun(e, ran, (await $.clock.now()) - startedAt)
-      const spawned = run.tool === 'Agent' && !run.isError ? spawnedAgent(ran.result) : undefined
-      await update($, turns, list => addRun(list, run, spawned))
-    } catch {
-      // Recording is best effort: the call's result stands either way.
-    }
+  await update($, turns, list => list.map(turn => (turn.id === e.turnId ? { ...turn, durationMs: e.durationMs } : turn)))
+}
 
-    return ran
-  }).catch(($, e, next) => next(e))
-
-  on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined) {
-      await update($, turns, list =>
-        list.map(turn => (turn.id === e.turnId ? { ...turn, durationMs: e.durationMs } : turn)),
-      )
-    }
-
-    return next(e)
-  }).catch(($, e, next) => next(e))
-
-  // The row that closes a turn is appended as the turn completes: its id ties the drawn line to
-  // the turn exactly. The time the line shows can differ from the turn's own (after a background
-  // agent the engine may count from an earlier prompt), so matching by time alone can miss.
+/**
+ * The row that closes a turn is appended as the turn completes: its id ties the drawn line to the
+ * turn exactly. The time the line shows can differ from the turn's own (after a background agent
+ * the engine may count from an earlier prompt), so matching by time alone can miss.
+ */
+export function trackLines(on: On): void {
   on('session.append', { door: 'notice' }, async ($, e, next) => {
     const stored = await next(e)
 

@@ -11,17 +11,23 @@ hubble의 Claude Code 환경. mod(함수 훅) + skill + 훅 + 에이전트를 �
 ### F1. 상태 밴드: claude-hud 대체
 작은 모니터용. 프롬프트 바로 위 3줄(`AbovePrompt`).
 
+구현된 모습 (2026-10-26):
 ```
-opus·xhigh auto │ ctx ████░░░░ 45% │ 5h ██░░░░ 25% ↻1h30m │ main*
-◐ Edit register.tsx │ ◐ explore [haiku] 2m15s │ ▸ 인증 버그 수정 2/5
-직전 2m13s · 3파일 +24 −3 · Read 5 · Bash 2   [low][med][high][max]
+Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻1h30m │ 7d 12% │ hubblerc main*
+◐ Bash 테스트 실행 12s +1 │ ◐ Explore: 인증 코드 찾기 2m15s │ ▸ 인증 버그 수정 2/5
+직전 2m13s · 파일 +24 −3 · Read 5 · Bash 2
 ```
+3줄은 effort 슬라이더가 열리면 `effort  1: low  2: med  3: high  4: xhigh  5: max  0: 엔진 설정`으로 바뀐다.
 
-- 1줄(항상): 모델·effort(auto 여부), 컨텍스트 %, 5시간 한도 %와 리셋까지 남은 시간, 브랜치
-- 2줄: 실행 중 도구, 서브에이전트, 할 일 진행
-- 3줄: 직전 답변 요약 + effort 버튼
-- claude-hud가 보여주던 것(모델, 프로젝트, 브랜치, 컨텍스트, 한도, 도구, 에이전트, 할 일)을 빠짐없이 담는다. 프로젝트 경로를 어디에 둘지는 미정.
-- 수치 출처: `$.session.usage()` = 상태줄과 같은 context / rateLimits / cost [확인]
+- 1줄(항상): 모델·effort(auto 여부), 컨텍스트 %, 5시간 한도 %와 리셋까지 남은 시간, 7일 한도, 프로젝트 이름·브랜치·미커밋(*). 폭이 모자라면 7일 → 프로젝트 이름 → 막대 그래프 순으로 덜어낸다. 비용은 기본 숨김.
+- 2줄: 실행 중 도구(Bash는 용도), 서브에이전트(종류·설명·경과), 할 일 진행. 대기 중에도 줄을 유지하고 할 일 또는 "대기 중"을 보여준다(높이 고정).
+- 3줄: 직전 답변 요약.
+- 스타일(2026-10-26, 두 번째): 배경색 없이 터미널 기본 글자색을 쓰고, 색은 필요한 곳에만 터미널 색 이름(green/yellow/red/cyan/magenta/blue/gray)으로 칠한다. 그러면 터미널 테마(사용자는 Orca 다크 + Kanagawa)가 색을 정한다. 막대는 얇은 선(`━━━━────`)이고 채운 부분이 사용률 단계색(초록 → 60% 노랑 → 85% 빨강), 숫자는 60% 이상일 때만 색. 라벨과 구분선은 흐리게, 브랜치는 magenta, 미커밋 `*`는 yellow, effort는 cyan(세션 고정이면 yellow + `(세션)`). 상태바형 배경은 가독성이 나빠서 버림.
+- 간격: 밴드 위에 빈 줄 하나. 밴드 아래 빈 줄은 엔진의 알림 자리("Update installed …")라 줄일 수 없다(음수 여백으로 당기면 3줄이 가려짐 [확인]).
+- effort 슬라이더(2026-10-26 결정): `ctrl+x e`(또는 1줄의 effort 값 클릭)로 3줄 자리에 `effort 1: low 2: med 3: high 4: xhigh 5: max 0: 엔진 설정`이 열린다. 숫자 하나로 고르면 이 세션에 적용되고 닫힌다. 다시 `ctrl+x e`, 10초 경과, 다음 질문 시작 때도 닫힌다. Esc로는 닫을 수 없다: Esc는 입력창(엔진)이 먼저 받고, 버튼에는 조합키만 연결되며, 밴드가 키보드를 놓을 때 알려 주는 이벤트도 없다 [확인: 타입 문서]. Esc로 닫히는 건 패널(`closeOnEscape`)뿐인데, 전체 화면에서는 사이드 패널로 열려서 밴드 슬라이더를 택했다(2026-10-26). 숫자 핫키 버튼은 열려 있을 때만 존재한다(빈 입력창에서 숫자를 치면 밴드 버튼이 눌리는 엔진 동작을 이용).
+  - 단축키: mod는 키 바인딩을 직접 만들 수 없다. effort 버튼에 엔진 동작 이름 `app:cycleDiffBase`(diff 패널용)를 붙이고, `~/.claude/keybindings.json`의 Chat 문맥에 `ctrl+x e` → 그 동작을 등록했다. `Option+E`(meta+e)는 macOS에서 악센트(´) 입력 키라 터미널이 단축키로 보내지 않아서 바꿨다 [확인]. diff 패널이 열려 있을 때만 이 키가 원래 동작을 한다. 이 파일은 플러그인에 들어가지 않으므로 기기마다 등록해야 한다.
+  - 엔진의 `Option+P`는 모델 선택까지 함께 열려서, effort만 조정하는 용도로는 쓰지 않기로 했다.
+- 수치 출처: `$.session.usage()` = 상태줄과 같은 context / rateLimits(percentUsed, resetsAt) / cost [확인]. 모델 `$.session.model()` [확인]. 서브에이전트 `$.agent.list()`(id, type, description, status; 시작 시각은 없음 → 직접 기록) [확인]. 브랜치는 SessionRepo에 없어서 git으로 읽는다.
 - 전환 시점: 개발 중에는 이 폴더에서만 켜지므로 claude-hud(전역 statusLine)를 유지. 배포할 때 statusLine 설정을 뺀다.
 
 ### F2. 레이아웃 두 가지 + config
@@ -38,6 +44,8 @@ opus·xhigh auto │ ctx ████░░░░ 45% │ 5h ██░░░░ 
   - 직접 고른 값이 auto보다 우선. 서브에이전트 요청(`e.agentId`)은 건드리지 않는다.
   - 라벨 초안: 간단한 질문 → medium / 일반 수정 → high / 설계·디버깅·큰 작업 → xhigh
 - 현재 설정: opus xhigh, fable high (모델별 effortLevel)
+- 수동 변경은 밴드의 effort 슬라이더(`ctrl+x e`)로 한다. 이 세션에만 적용(`turn.step`에서 교체).
+- 적용 방식(auto용): `/config`(`$.config`)에는 effort 항목이 없다 [확인: config.list에 model은 있고 effort는 없음]. 엔진 커맨드 `/effort`는 있다 [확인: command.list]. `/effort`는 설정 파일에 저장될 수 있어(미확인) 우선 mod가 `turn.step`에서 이 세션의 요청마다 바꿔 끼우는 방식으로 만든다. `/effort` 동작 확인은 설정 파일을 바꿔야 해서 사용자 허락 후에.
 
 ### F4. Bash 행에 용도 표시
 - Bash 행(`ToolUse` 렌더)을 다시 그려 `input.description`을 앞에 두고, 명령어는 흐리게 하거나 접는다 [확인: props에 input 있음].
@@ -90,7 +98,7 @@ opus·xhigh auto │ ctx ████░░░░ 45% │ 5h ██░░░░ 
 ## 구현 상태
 - [x] 1단계: 기록 수집 + 답변 끝 요약 줄 + `/activity` (2026-10-25, 테스트 세션에서 확인)
 - [x] 2단계: Bash 용도 표시 (2026-10-25, 테스트 세션에서 확인)
-- [ ] 3단계: 상태 밴드 3줄 + effort 버튼
+- [x] 3단계: 상태 밴드 3줄 + effort 슬라이더 (2026-10-26, 테스트 세션에서 확인)
 - [ ] 4단계: 사이드바 타임라인 + layout config
 - [ ] 5단계: auto effort
 
@@ -100,6 +108,9 @@ opus·xhigh auto │ ctx ████░░░░ 45% │ 5h ██░░░░ 
 - 백그라운드 서브에이전트는 띄운 턴이 끝난 뒤에도 도구를 쓴다. Agent 결과의 `agentId`로 띄운 턴에 붙인다. `SubagentHandback`은 엔진 내부 호출이라 세지 않는다.
 - 크로스 세션 메시지로 시작된 턴의 `turn.start` 텍스트는 `Another Claude session sent a message:` + `<cross-session-message …>` 태그로 감싸져 있다.
 - Bash 호출 1,995건(최근 기록 29개) 모두 `description`이 있었다. 그래서 haiku 예비 요약은 아직 넣지 않았다.
+- 이 환경의 세션에는 할 일 도구(TodoWrite, TaskCreate/TaskUpdate)가 없다. 밴드의 할 일 표시는 테스트로만 확인했다.
+- `settings.read` 이벤트의 결과는 병합된 설정 객체 전체이고, `{ key }` 읽기는 그 객체에서 꺼낸 값이다.
+- 같은 이벤트에 매처 없는 훅은 모듈 전체에서 하나만 등록할 수 있다(validate가 거부). 그래서 `session.start`, `turn.start`, `tool.call`, `turn.complete`는 `register.tsx`에서 한 번씩만 걸고 각 기능의 함수를 부른다.
 - 엔진은 파일을 바꾸는 Bash(`touch`)까지 Read, `ls`와 함께 한 줄로 접는다("Read 1 file, listed 1 directory, ran 2 shell commands"). Bash 용도는 `ToolUse` 행과 `ToolGroup` 줄 양쪽에 붙여야 보인다.
 
 ## 테스트 방법

@@ -41,10 +41,70 @@ export type TurnRecord = {
   agents?: string[]
 }
 
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** A tool call still running, on the main loop or in a subagent. */
+export type RunningCall = {
+  id: string
+  tool: string
+  /** What the band names it by: a Bash call's purpose, a file's name, ... ('' when nothing fits). */
+  label: string
+  startedAt: number
+  agentId?: string
+}
+
+/** A todo of the main loop, from TodoWrite or TaskCreate/TaskUpdate. */
+export type TodoItem = {
+  id: string
+  subject: string
+  activeForm?: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+/** A subagent as `$.agent.list()` last reported it, with when it started when known. */
+export type AgentSeen = {
+  id: string
+  type: string
+  description: string
+  status: string
+  startedAt?: number
+}
+
+export type RateWindow = { percent: number; resetsAt?: string }
+
+/** The status line's figures, as `$.session.usage()` last reported them. */
+export type UsageSnapshot = {
+  contextPercent?: number
+  fiveHour?: RateWindow
+  sevenDay?: RateWindow
+  costUsd?: number
+}
+
+export type GitInfo = { branch: string; isDirty: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     hubblerc: {
       turns: TurnRecord[]
+      running: RunningCall[]
+      todos: TodoItem[]
+      agents: AgentSeen[]
+      /** When each subagent this session started was started, by agent id. */
+      agentStarts: Record<string, number>
+      usage: UsageSnapshot | null
+      git: GitInfo | null
+      /** The working folder's name. */
+      project: string
+      /** The session's model id (`claude-opus-5-5`). */
+      model: string
+      /** The effort this session's requests are sent with in place of the engine's; null: the engine's. */
+      effortOverride: EffortLevel | null
+      /** The effort the engine sends with, as the last main-loop request carried it or settings say. */
+      engineEffort: string | null
+      /** Bumped by the band's timer so elapsed times and countdowns redraw. */
+      tick: number
+      /** When the effort slider was opened (it stands in line 3); null while closed. */
+      effortPicker: number | null
     }
   }
 }
