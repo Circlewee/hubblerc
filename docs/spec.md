@@ -89,7 +89,7 @@ opus·xhigh auto │ ctx ████░░░░ 45% │ 5h ██░░░░ 
 
 ## 구현 상태
 - [x] 1단계: 기록 수집 + 답변 끝 요약 줄 + `/activity` (2026-10-25, 테스트 세션에서 확인)
-- [ ] 2단계: Bash 용도 표시
+- [x] 2단계: Bash 용도 표시 (2026-10-25, 테스트 세션에서 확인)
 - [ ] 3단계: 상태 밴드 3줄 + effort 버튼
 - [ ] 4단계: 사이드바 타임라인 + layout config
 - [ ] 5단계: auto effort
@@ -99,7 +99,8 @@ opus·xhigh auto │ ctx ████░░░░ 45% │ 5h ██░░░░ 
 - 엔진이 그 줄에 표시하는 시간은 틀릴 수 있다. 백그라운드 서브에이전트를 띄운 뒤의 답변은 이전 질문의 시작 시각부터 잰다(14초 답변이 23분으로 표시됨). `turn.complete`의 `durationMs`는 맞다. 그래서 시간으로 짝짓는 것은 예비 수단으로만 쓴다. 엔진 버그로 보고함(/feedback).
 - 백그라운드 서브에이전트는 띄운 턴이 끝난 뒤에도 도구를 쓴다. Agent 결과의 `agentId`로 띄운 턴에 붙인다. `SubagentHandback`은 엔진 내부 호출이라 세지 않는다.
 - 크로스 세션 메시지로 시작된 턴의 `turn.start` 텍스트는 `Another Claude session sent a message:` + `<cross-session-message …>` 태그로 감싸져 있다.
-- Bash 호출 1,995건(최근 기록 29개) 모두 `description`이 있었다.
+- Bash 호출 1,995건(최근 기록 29개) 모두 `description`이 있었다. 그래서 haiku 예비 요약은 아직 넣지 않았다.
+- 엔진은 파일을 바꾸는 Bash(`touch`)까지 Read, `ls`와 함께 한 줄로 접는다("Read 1 file, listed 1 directory, ran 2 shell commands"). Bash 용도는 `ToolUse` 행과 `ToolGroup` 줄 양쪽에 붙여야 보인다.
 
 ## 테스트 방법
 - 같은 폴더에서 Claude 세션을 하나 더 열어 테스트 세션으로 쓴다. 개발 세션이 SendMessage로 "시나리오 N · …" 메시지를 보내고(`notify_when_idle`), 테스트 세션은 적힌 도구만 쓰고 끝에 `실제: …`를 적는다.

@@ -2,6 +2,7 @@ import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import { trackActivity } from './activity'
+import { showBashPurpose } from './bash-purpose'
 import { registerCommands } from './commands'
 import { findTurnForLine, summarize } from './summary'
 
@@ -11,6 +12,7 @@ const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 export const register: Register = on => {
   trackActivity(on)
   registerCommands(on)
+  showBashPurpose(on)
 
   // The line that closes a turn ("Baked for 2m 13s") gets the turn's activity on the line under it.
   // Under it, not beside it: the engine's line takes the row's free width and squeezes a sibling to the edge.
