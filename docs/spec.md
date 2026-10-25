@@ -83,3 +83,25 @@ opus·xhigh auto │ ctx ████░░░░ 45% │ 5h ██░░░░ 
 ## 개발 메모
 - 로드: 이 폴더를 마켓플레이스로 `--scope local` 등록, `hubblerc@hubblerc`도 local 설치 → 이 폴더에서만 켜짐. 수정 반영은 `/reload-plugins`.
 - 검증: `claude plugin validate plugins/hubblerc`, 테스트는 `claude plugin test plugins/hubblerc`
+- 타입 검사: `bunx -p typescript@5.6.3 tsc -p plugins/hubblerc`. 엔진 타입 정의는 git에 넣지 않으므로, 새 기기에서는 plugin-authoring 스킬이 만든 `claude-code.d.ts`를 `plugins/hubblerc/.claude-plugin/types/claude-code/index.d.ts`로 복사한다.
+- 규칙: `read`/`update`에 넘기는 atom은 그 파일 안의 `const`로 `atom(...)` 해야 한다. 다른 파일에서 import한 atom은 validate가 거부한다.
+- 커맨드 출력 앞에는 엔진이 플러그인 이름(`hubblerc:`)을 붙인다. 출력 문구에 이름을 또 넣지 않는다.
+
+## 구현 상태
+- [x] 1단계: 기록 수집 + 답변 끝 요약 줄 + `/activity` (2026-10-25, 테스트 세션에서 확인)
+- [ ] 2단계: Bash 용도 표시
+- [ ] 3단계: 상태 밴드 3줄 + effort 버튼
+- [ ] 4단계: 사이드바 타임라인 + layout config
+- [ ] 5단계: auto effort
+
+## 실행해서 확인한 사실 (2.1.308)
+- "… for Ns" 줄(`TurnDuration`)의 `e.requestId`는 그 줄의 대화 기록 행 uuid와 같다. `session.append`(door `notice`, `message.name === 'turn_duration'`)에서 그 uuid를 턴에 저장해 두면 줄과 턴을 정확히 짝지을 수 있다.
+- 엔진이 그 줄에 표시하는 시간은 틀릴 수 있다. 백그라운드 서브에이전트를 띄운 뒤의 답변은 이전 질문의 시작 시각부터 잰다(14초 답변이 23분으로 표시됨). `turn.complete`의 `durationMs`는 맞다. 그래서 시간으로 짝짓는 것은 예비 수단으로만 쓴다. 엔진 버그로 보고함(/feedback).
+- 백그라운드 서브에이전트는 띄운 턴이 끝난 뒤에도 도구를 쓴다. Agent 결과의 `agentId`로 띄운 턴에 붙인다. `SubagentHandback`은 엔진 내부 호출이라 세지 않는다.
+- 크로스 세션 메시지로 시작된 턴의 `turn.start` 텍스트는 `Another Claude session sent a message:` + `<cross-session-message …>` 태그로 감싸져 있다.
+- Bash 호출 1,995건(최근 기록 29개) 모두 `description`이 있었다.
+
+## 테스트 방법
+- 같은 폴더에서 Claude 세션을 하나 더 열어 테스트 세션으로 쓴다. 개발 세션이 SendMessage로 "시나리오 N · …" 메시지를 보내고(`notify_when_idle`), 테스트 세션은 적힌 도구만 쓰고 끝에 `실제: …`를 적는다.
+- 정답은 테스트 세션의 기록 파일(`~/.claude/projects/<폴더>/<세션 id>.jsonl`)의 도구 호출과 `turn_duration` 행에서 뽑고, 화면 쪽은 `/activity` 출력과 대조한다.
+- 코드를 고치면 테스트 세션에서도 `/reload-plugins`를 해야 한다.
