@@ -3,12 +3,14 @@ import type { On } from 'claude-code'
 
 const SURFACES = ['terminal', 'desktop'] as const
 
-// Nothing draws beneath the plugin: this hook stands for the engine's own row.
+// Nothing draws beneath the plugin: this hook stands for the engine's own row, which names the
+// command it was handed.
 function engineDraws(on: On): void {
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
+    const command = e.component === 'ToolUse' ? (e.props.input as { command?: string }).command : undefined
 
-    return <Text>engine row</Text>
+    return <Text>engine row{command === undefined ? '' : `: ${command}`}</Text>
   })
 }
 
@@ -32,10 +34,24 @@ test('a Bash row shows what the command is for under it, on each surface', async
       props: useProps('Bash', { command: 'grep -n effort types.d.ts', description: '타입 정의에서 effort 검색' }),
     })
 
-    expect((await ui.find({ type: 'Text', text: /engine row/ }))?.text).toBe('engine row')
+    expect((await ui.find({ type: 'Text', text: /engine row/ }))?.text).toBe('engine row: grep -n effort types.d.ts')
     expect((await ui.find({ type: 'Text', text: /effort 검색/ }))?.text).toBe('타입 정의에서 effort 검색')
     await ui.unmount()
   }
+})
+
+test('in the full view the purpose rides on the command line as a shell comment', async ($, on) => {
+  engineDraws(on)
+
+  const ui = await $.ui.mount({
+    ...ROW,
+    surface: 'terminal',
+    props: { ...useProps('Bash', { command: 'touch flag.txt', description: '플래그 파일 만들기' }), isExpanded: true },
+  })
+
+  expect((await ui.find({ type: 'Text', text: /engine row/ }))?.text).toBe('engine row: touch flag.txt  # 플래그 파일 만들기')
+  expect(await ui.find({ type: 'Text', text: /↳/ })).toBeUndefined()
+  await ui.unmount()
 })
 
 test('a Bash call with no description, and any other tool, is drawn as the engine drew it', async ($, on) => {

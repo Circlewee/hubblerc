@@ -14,10 +14,19 @@ export function bashPurpose(input: unknown): string | undefined {
 export function showBashPurpose(on: On): void {
   // A Bash call drawn as its own row: the purpose goes under the command line, above its result.
   on('ui.render', { component: 'ToolUse', props: { tool: 'Bash' } }, async ($, e, next) => {
-    const drawn = await next(e)
     const purpose = bashPurpose(e.props.input)
-    if (purpose === undefined) return drawn
+    if (purpose === undefined) return next(e)
 
+    // The full view (ctrl+o) draws the result inside this row, so a line under it would land after
+    // the output. There the purpose goes on the command line itself, as a shell comment.
+    if (e.props.isExpanded === true) {
+      const input = e.props.input as Record<string, unknown>
+      if (typeof input.command !== 'string') return next(e)
+
+      return next({ ...e, props: { ...e.props, input: { ...input, command: `${input.command}  # ${purpose}` } } })
+    }
+
+    const drawn = await next(e)
     const { Box, Text } = $.ui.resolve(e)
 
     return (
