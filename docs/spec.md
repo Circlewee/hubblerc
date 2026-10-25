@@ -1,0 +1,85 @@
+# hubblerc 기획
+
+hubble의 Claude Code 환경. mod(함수 훅) + skill + 훅 + 에이전트를 플러그인 하나(`plugins/hubblerc`)에 담아 이 맥, 회사 스튜디오, 집 미니에서 같이 쓴다.
+
+- 기준 빌드: Claude Code 2.1.308 (mod API는 early access라 버전마다 바뀔 수 있음)
+- 방향: 일을 편하게 만드는 도구 + 내 취향대로 꾸미기, 둘 다
+- 표시: [확인] 타입 정의·실행으로 확인함 / [추정] 아직 확인 안 함
+
+## 결정한 기능 (v0.1 범위)
+
+### F1. 상태 밴드: claude-hud 대체
+작은 모니터용. 프롬프트 바로 위 3줄(`AbovePrompt`).
+
+```
+opus·xhigh auto │ ctx ████░░░░ 45% │ 5h ██░░░░ 25% ↻1h30m │ main*
+◐ Edit register.tsx │ ◐ explore [haiku] 2m15s │ ▸ 인증 버그 수정 2/5
+직전 2m13s · 3파일 +24 −3 · Read 5 · Bash 2   [low][med][high][max]
+```
+
+- 1줄(항상): 모델·effort(auto 여부), 컨텍스트 %, 5시간 한도 %와 리셋까지 남은 시간, 브랜치
+- 2줄: 실행 중 도구, 서브에이전트, 할 일 진행
+- 3줄: 직전 답변 요약 + effort 버튼
+- claude-hud가 보여주던 것(모델, 프로젝트, 브랜치, 컨텍스트, 한도, 도구, 에이전트, 할 일)을 빠짐없이 담는다. 프로젝트 경로를 어디에 둘지는 미정.
+- 수치 출처: `$.session.usage()` = 상태줄과 같은 context / rateLimits / cost [확인]
+- 전환 시점: 개발 중에는 이 폴더에서만 켜지므로 claude-hud(전역 statusLine)를 유지. 배포할 때 statusLine 설정을 뺀다.
+
+### F2. 레이아웃 두 가지 + config
+- 큰 모니터: 사이드바(`Pane`). 전체 화면 모드(`tui: fullscreen`, 지금 설정)에서 대화 옆에 붙는다.
+- 작은 모니터: F1 밴드
+- config `layout: auto | sidebar | band`. auto는 터미널 폭 기준. 엔진은 mod가 스스로 여는 패널을 144칸 이상일 때만 옆에 붙인다 [확인: 문서].
+- mod 옵션(`userConfig`)은 `/config` 메뉴 항목이 되고 선택지형도 된다. 값은 기기별 사용자 설정(`pluginConfigs`)에 저장되고 프로젝트 설정은 읽지 않는다 [확인: 디버그 로그]. 그래서 기기마다 다른 레이아웃을 쓸 수 있다.
+- 구조: 데이터 수집은 한 곳(`$.state`), 그리는 부분만 사이드바용과 밴드용 두 벌.
+
+### F3. effort 제어
+- 수동: 밴드의 effort 버튼. 엔진 키 동작에는 "effort 올리기/내리기"가 없다 [확인: 키바인딩 목록]. 그래서 버튼은 클릭하거나 `ctrl+x tab` 후 hotkey로 누른다. 엔진 기본 방법(`meta+p` → ←/→)도 있다.
+- 자동(auto): 켜고 끄는 모드, 기본은 꺼짐.
+  - 프롬프트 제출 → `$.model.classify(프롬프트, 라벨)`(엔진의 작은 모델) → 라벨을 effort로 매핑 → `turn.step` 훅에서 그 답변의 모델 요청마다 effort를 바꿔 넣음 [확인: API 존재]
+  - 직접 고른 값이 auto보다 우선. 서브에이전트 요청(`e.agentId`)은 건드리지 않는다.
+  - 라벨 초안: 간단한 질문 → medium / 일반 수정 → high / 설계·디버깅·큰 작업 → xhigh
+- 현재 설정: opus xhigh, fable high (모델별 effortLevel)
+
+### F4. Bash 행에 용도 표시
+- Bash 행(`ToolUse` 렌더)을 다시 그려 `input.description`을 앞에 두고, 명령어는 흐리게 하거나 접는다 [확인: props에 input 있음].
+- 최근 대화 기록 29개에서 Bash 1,995건 모두 설명이 붙어 있었다 → haiku 요약은 설명이 빠진 경우에만 쓰는 예비 수단.
+- `ctrl+o`(펼친 보기)에서는 원래 행을 그대로 보여준다.
+
+### F5. 활동 기록: 답변별 타임라인 + 답변 끝 요약 줄
+사이드바(A):
+```
+▾ #14 effort 질문 정리          2m13s
+   변경  register.tsx        +24 −3
+         README.md            +5
+   읽음  claude-code.d.ts, settings.json
+   검색  "effort", "statusLine"
+   Bash  타입 정의에서 effort API 검색  0.4s
+▸ #13 디렉토리 이름 변경         48s
+```
+대화 안(C), 답변이 끝나는 줄:
+```
+  2m13s · 3파일 +24 −3 · Read 5 · Grep 2 · Bash 2
+```
+- +/- 줄 수: Edit/Write 결과의 `structuredPatch` [확인: 타입]. git 없이 세고 새 파일도 센다.
+- Bash로 바꾼 파일은 잡히지 않음 → git 저장소면 `git diff --numstat`로 보완 [추정]
+- 엔진 내장 diff 패널은 git 기준·세션 단위라 "어느 답변에서 바꿨나", 읽은 파일, Bash 기록은 없다(스크린샷 확인). F5는 이 빈자리를 채운다.
+- 상세를 볼 커맨드도 둔다(`/activity <번호>` 등, 이름 미정).
+
+## 후보 (아직 결정 안 함)
+- 5시간 한도 소진 예측 (지금 속도면 언제 바닥나는지)
+- 오늘 누적 비용·작업 시간 (`$.store`로 세션 넘어 누적)
+- 기기 라벨 (이 맥 / 스튜디오 / 미니)
+- 컨텍스트 경고 (자동 압축 직전에 색 변경)
+- 백그라운드 작업·서브에이전트 진행
+- MCP 연결 끊김 경고 [추정: API 미확인]
+- 나만의 skill, 훅을 같은 플러그인에 묶기 (가능 [확인: 묶음 플러그인 로드 실험])
+
+## 확인할 것
+- auto effort: 답변마다 effort가 바뀌면 프롬프트 캐시 적중률이 떨어지는가 → 사용량의 cache_read 수치로 측정
+- auto effort: 판정 호출 때문에 답변 시작이 얼마나 늦어지는가
+- `turn.step`에서 바꾼 effort가 Spinner나 상태 표시에 반영되는가
+- 엔진 effort 슬라이더를 여는 방법
+- 회사 스튜디오에서 플러그인 설치가 관리 정책에 막히는지
+
+## 개발 메모
+- 로드: 이 폴더를 마켓플레이스로 `--scope local` 등록, `hubblerc@hubblerc`도 local 설치 → 이 폴더에서만 켜짐. 수정 반영은 `/reload-plugins`.
+- 검증: `claude plugin validate plugins/hubblerc`, 테스트는 `claude plugin test plugins/hubblerc`
