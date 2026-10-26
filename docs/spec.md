@@ -179,7 +179,7 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - 회사 스튜디오에서 플러그인 설치가 관리 정책에 막히는지
 
 ## 개발 메모
-- 로드(2026-10-26 바꿈): 마켓플레이스 `hubblerc`는 GitHub(`Circlewee/hubblerc`)이고 `hubblerc@hubblerc`는 사용자 범위로 설치돼 모든 프로젝트에서 켜진다. 이 저장소에서는 `.claude/settings.local.json`에서 배포판을 끄고(`"hubblerc@hubblerc": false`), `hcc` 별칭(`claude --plugin-dir ~/vault/project/hubblerc/plugins/hubblerc`, `~/.zshrc`)으로 디스크의 개발판을 띄운다 [확인: 이 폴더 disabled·다른 폴더 enabled, `--plugin-dir`로 `/setup` 실행됨]. `--plugin-dir`는 저장하면 자동 리로드된다고 문서에 있다. 로컬 마켓플레이스와 GitHub 마켓플레이스는 이름이 같아(`hubblerc`) 함께 등록할 수 없다. 다른 프로젝트의 배포판은 버전을 올리고 푸시한 뒤 `claude plugin marketplace update hubblerc`로 받는다 [추정: 자동 갱신 여부 미확인].
+- 로드(2026-10-26 바꿈): 마켓플레이스 `hubblerc`는 GitHub(`Circlewee/hubblerc`)이고 `hubblerc@hubblerc`는 사용자 범위로 설치돼 모든 프로젝트에서 켜진다. 이 저장소에서는 `.claude/settings.local.json`에서 배포판을 끄고(`"hubblerc@hubblerc": false`), `hcc` 별칭(`claude --plugin-dir ~/vault/project/hubblerc/plugins/hubblerc`, `~/.zshrc`)으로 디스크의 개발판을 띄운다 [확인: 이 폴더 disabled·다른 폴더 enabled, `--plugin-dir`로 `/setup` 실행됨]. `--plugin-dir`는 저장하면 자동 리로드된다고 문서에 있다. 로컬 마켓플레이스와 GitHub 마켓플레이스는 이름이 같아(`hubblerc`) 함께 등록할 수 없다. 다른 프로젝트의 배포판은 버전을 올리고 푸시한 뒤 `claude plugin marketplace update hubblerc` → `claude plugin update hubblerc@hubblerc --scope user`로 받고, 재시작하면 적용된다 [확인: 0.2.1 → 0.2.2]. 자동 갱신 여부는 미확인.
 - 검증: `claude plugin validate plugins/hubblerc`, 테스트는 `claude plugin test plugins/hubblerc`
 - 타입 검사: `bunx -p typescript@5.6.3 tsc -p plugins/hubblerc`. 엔진 타입 정의는 git에 넣지 않으므로, 새 기기에서는 plugin-authoring 스킬이 만든 `claude-code.d.ts`를 `plugins/hubblerc/.claude-plugin/types/claude-code/index.d.ts`로 복사한다.
 - 규칙: `read`/`update`에 넘기는 atom은 그 파일 안의 `const`로 `atom(...)` 해야 한다. 다른 파일에서 import한 atom은 validate가 거부한다.
