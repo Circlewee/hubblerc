@@ -18,6 +18,8 @@ const project = atom({ plugin: 'hubblerc', key: 'project' } as const, '')
 const model = atom({ plugin: 'hubblerc', key: 'model' } as const, '')
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
+const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null)
+const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 
 export const SIDEBAR_ID = 'hubblerc'
@@ -127,7 +129,7 @@ export async function toggleSidebar($: EngineInterface, layout: Layout, presenta
  * the answers that changed them; and the contents, the session's answers newest first, each a press
  * away from its place in the conversation. What each answer did is on its own closing line, not here.
  */
-export function showSidebar(on: On, layout: Layout): void {
+export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): void {
   on('ui.render', { component: 'Pane', requestId: SIDEBAR_ID }, async ($, e) => {
     // Under auto the sidebar does not sit above the prompt (the terminal narrowed): it closes and the band takes over.
     if (e.props.placement === 'dock') isPeeking = false
@@ -141,7 +143,7 @@ export function showSidebar(on: On, layout: Layout): void {
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -153,6 +155,8 @@ export function showSidebar(on: On, layout: Layout): void {
         read($, model),
         read($, effortOverride),
         read($, engineEffort),
+        read($, effortAuto),
+        read($, autoPick),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
@@ -161,8 +165,10 @@ export function showSidebar(on: On, layout: Layout): void {
     const { Box, Text, Button } = $.ui.resolve(e)
     const width = e.props.bodyColumns
 
+    const isAuto = (auto ?? autoByDefault) && override === null
+    const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
     const status = statusParts(
-      { model: modelId, effort: override ?? engine, isOverridden: override !== null, usage: figures, project: projectName, git: gitInfo, now },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now },
       Number.POSITIVE_INFINITY,
     )
     const isWorking = turnList.at(-1)?.durationMs === null

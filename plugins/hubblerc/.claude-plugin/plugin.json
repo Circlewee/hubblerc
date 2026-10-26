@@ -17,6 +17,12 @@
         "sidebar",
         "band"
       ]
+    },
+    "autoEffort": {
+      "type": "boolean",
+      "title": "auto effort",
+      "description": "새 세션에서 질문마다 작은 모델이 effort(medium/high/xhigh)를 고르게 할지. 세션 중에는 effort 슬라이더(ctrl+x ctrl+e)의 6: auto와 0: 엔진 설정으로 켜고 끕니다.",
+      "default": false
     }
   }
 }

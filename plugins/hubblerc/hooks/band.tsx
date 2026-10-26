@@ -20,6 +20,8 @@ const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as con
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const effortPicker = atom({ plugin: 'hubblerc', key: 'effortPicker' } as const, null)
+const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null)
+const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
 
 const LEVEL_LABELS: Record<EffortLevel, string> = { low: 'low', medium: 'med', high: 'high', xhigh: 'xhigh', max: 'max' }
 
@@ -31,12 +33,12 @@ const LEVEL_LABELS: Record<EffortLevel, string> = { low: 'low', medium: 'med', h
  *
  * Colors only where something needs attention, by the terminal's own color names.
  */
-export function showBand(on: On, layout: Layout): void {
+export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const isSidebarUp = await syncSidebar($, layout, e.viewport).catch(() => false)
     if (e.props.hasSurvey) return next(e)
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt, auto, pick] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -49,14 +51,17 @@ export function showBand(on: On, layout: Layout): void {
         read($, effortOverride),
         read($, engineEffort),
         read($, effortPicker),
+        read($, effortAuto),
+        read($, autoPick),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
 
-    const effort = override ?? engine
+    const isAuto = (auto ?? autoByDefault) && override === null
+    const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
     const line1 = statusParts(
-      { model: modelId, effort, isOverridden: override !== null, usage: figures, project: projectName, git: gitInfo, now },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now },
       e.props.bodyColumns,
     )
     const line2 = activityParts(runningList, agentList, todoList, e.props.isWorking, now).join(SEPARATOR)
@@ -79,7 +84,7 @@ export function showBand(on: On, layout: Layout): void {
               void choose($, level)
             }}
           >
-            {level === effort ? (
+            {!isAuto && level === effort ? (
               <Text color={COLORS.effort} bold>
                 {LEVEL_LABELS[level]}
               </Text>
@@ -88,6 +93,22 @@ export function showBand(on: On, layout: Layout): void {
             )}
           </Button>
         ))}
+        <Button
+          key="effort-auto"
+          plain
+          hotkey="6"
+          onPress={() => {
+            void choose($, 'auto')
+          }}
+        >
+          {isAuto ? (
+            <Text color={COLORS.effort} bold>
+              auto
+            </Text>
+          ) : (
+            <Text>auto</Text>
+          )}
+        </Button>
         <Button
           key="effort-reset"
           plain

@@ -57,6 +57,25 @@ export type TurnRecord = {
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+/** Whose effort a main-loop request went out with: the engine's, the slider's, or auto's pick. */
+export type EffortSource = 'engine' | 'manual' | 'auto'
+
+/** What auto effort picked for a turn, and how long the pick took. */
+export type AutoPick = { turnId: string; level: EffortLevel; ms: number }
+
+/** One main-loop request: the effort it went out with, and its tokens as the API reported them. */
+export type EffortSample = {
+  turnId: string
+  /** The request's place in its turn, from 0. */
+  index: number
+  effort: string
+  source: EffortSource
+  input: number
+  cacheRead: number
+  cacheWrite: number
+  output: number
+}
+
 /** A tool call still running, on the main loop or in a subagent. */
 export type RunningCall = {
   id: string
@@ -121,6 +140,12 @@ declare module 'claude-code' {
       tick: number
       /** When the effort slider was opened (it stands in line 3); null while closed. */
       effortPicker: number | null
+      /** Auto effort on (true) or off (false) for this session; null: as the `autoEffort` option says. */
+      effortAuto: boolean | null
+      /** Auto effort's latest pick. */
+      autoPick: AutoPick | null
+      /** The session's last main-loop requests, oldest first: what `/effort-log` shows. */
+      effortLog: EffortSample[]
     }
   }
 }

@@ -6,6 +6,7 @@ import { isEffortLevel } from './band-format'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const effortPicker = atom({ plugin: 'hubblerc', key: 'effortPicker' } as const, null)
+const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null)
 
 /**
  * The engine keybinding action the effort control answers to. A mod cannot add a keybinding of its
@@ -35,9 +36,13 @@ export async function togglePicker($: EngineInterface): Promise<void> {
   })
 }
 
-/** Sends this session's requests at `level` from now on (null: at the engine's), and closes the slider. */
-export async function choose($: EngineInterface, level: EffortLevel | null): Promise<void> {
-  await update($, effortOverride, () => (level !== null && isEffortLevel(level) ? level : null))
+/**
+ * Sends this session's requests at `level` from now on, or at auto's pick for each question
+ * (`auto`), or at the engine's (null); and closes the slider.
+ */
+export async function choose($: EngineInterface, level: EffortLevel | 'auto' | null): Promise<void> {
+  await update($, effortOverride, () => (level !== null && level !== 'auto' && isEffortLevel(level) ? level : null))
+  await update($, effortAuto, () => level === 'auto')
   await update($, effortPicker, () => null)
 }
 

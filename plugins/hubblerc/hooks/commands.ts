@@ -1,11 +1,14 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
+import { effortLogTable } from './effort-log'
 import { toggleSidebar } from './sidebar'
 import type { Layout } from './sidebar'
 import { activityTable } from './summary'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
+const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
+const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
 
 /**
  * At session.start: `/activity`, every recorded answer of the session with its summary, and
@@ -18,6 +21,11 @@ export async function registerCommand($: EngineInterface): Promise<void> {
     immediate: true,
   })
   await $.command.register({
+    name: 'effort-log',
+    description: '이번 세션의 모델 요청별 effort와 토큰, effort가 바뀔 때의 캐시 읽기 비율 (hubblerc)',
+    immediate: true,
+  })
+  await $.command.register({
     name: 'panel',
     description: '상태와 답변별 타임라인을 보여 주는 사이드바 열기/닫기 (hubblerc)',
     immediate: true,
@@ -26,6 +34,9 @@ export async function registerCommand($: EngineInterface): Promise<void> {
 
 export function answerCommands(on: On, layout: Layout): void {
   on('command.run', { command: 'activity' }, async $ => ({ text: activityTable(await read($, turns)) }))
+  on('command.run', { command: 'effort-log' }, async $ => ({
+    text: effortLogTable(await read($, effortLog), await read($, turns), await read($, autoPick)),
+  }))
   on('command.run', { command: 'panel' }, async ($, e) => {
     const text = await toggleSidebar($, layout, e.presentation)
 

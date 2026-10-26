@@ -54,6 +54,11 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
   - 직접 고른 값이 auto보다 우선. 서브에이전트 요청(`e.agentId`)은 건드리지 않는다.
   - 라벨 초안: 간단한 질문 → medium / 일반 수정 → high / 설계·디버깅·큰 작업 → xhigh
 - 현재 설정: opus xhigh, fable high (모델별 effortLevel)
+- auto 구현(2026-10-26):
+  - 켜기: effort 슬라이더의 `6: auto`(이 세션), `/config`의 `autoEffort`(새 세션 기본값, 기본 꺼짐). `1~5`로 직접 고르면 auto는 꺼지고, `0: 엔진 설정`은 둘 다 끈다. 밴드·사이드바에는 `auto high`처럼 마지막 판정이 보인다.
+  - 판정: 메인 답변의 `turn.start`에서 `$.model.complete`(haiku, 최대 8토큰, 4초 제한)로 medium/high/xhigh 중 하나를 고른다. `classify`는 고정 프롬프트라 기준을 줄 수 없어 직접 프롬프트를 쓴다. "이어서 진행하자"처럼 짧지만 큰 작업을 여는 메시지가 있어서 직전 답변 끝 1000자를 함께 준다. 직전 답변은 `turn.complete`의 `answer`를 모듈에 기억해 두고, 리로드 직후처럼 없을 때만 대화 기록을 읽는다. low와 max는 auto가 고르지 않는다.
+  - 적용: 그 답변의 `turn.step`마다 판정한 effort로 바꿔 보낸다. 첫 요청은 판정을 최대 2.5초 기다리고(처음 4초에서 측정 후 줄임), 실패·시간 초과·알 수 없는 답이면 엔진 effort로 보낸다. 첫 요청 뒤에 온 판정은 같은 답변의 다음 요청부터 쓴다(effort가 바뀌어도 캐시는 유지되므로 문제없다). 우선순위는 직접 고른 값 > auto > 엔진. 서브에이전트 요청과 서브에이전트 답변 시작은 건드리지 않는다.
+  - 측정: 메인 요청마다 effort, 출처(엔진/직접/auto), 입력·캐시 읽기·캐시 쓰기·출력 토큰을 기록한다(최근 300개). `/effort-log`가 표와 "effort가 바뀐 직후 요청 vs 그대로인 요청"의 캐시 읽기 비율 평균, 마지막 판정 시간을 보여 준다.
 - 수동 변경은 밴드의 effort 슬라이더(`ctrl+x ctrl+e`)로 한다. 이 세션에만 적용(`turn.step`에서 교체).
 - 적용 방식(auto용): `/config`(`$.config`)에는 effort 항목이 없다 [확인: config.list에 model은 있고 effort는 없음]. 엔진 커맨드 `/effort`는 있다 [확인: command.list]. `/effort`는 설정 파일에 저장될 수 있어(미확인) 우선 mod가 `turn.step`에서 이 세션의 요청마다 바꿔 끼우는 방식으로 만든다. `/effort` 동작 확인은 설정 파일을 바꿔야 해서 사용자 허락 후에.
 
@@ -101,8 +106,6 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - 나만의 skill, 훅을 같은 플러그인에 묶기 (가능 [확인: 묶음 플러그인 로드 실험])
 
 ## 확인할 것
-- auto effort: 답변마다 effort가 바뀌면 프롬프트 캐시 적중률이 떨어지는가 → 사용량의 cache_read 수치로 측정
-- auto effort: 판정 호출 때문에 답변 시작이 얼마나 늦어지는가
 - `turn.step`에서 바꾼 effort가 Spinner나 상태 표시에 반영되는가
 - 엔진 effort 슬라이더를 여는 방법
 - 회사 스튜디오에서 플러그인 설치가 관리 정책에 막히는지
@@ -119,7 +122,7 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - [x] 2단계: Bash 용도 표시 (2026-10-25, 테스트 세션에서 확인)
 - [x] 3단계: 상태 밴드 3줄 + effort 슬라이더 (2026-10-26, 테스트 세션에서 확인)
 - [x] 4단계: 사이드바(상태 · 변경 파일 · 목차) + layout config + `/panel` + resume한 세션 복원 (2026-10-26, 테스트 세션에서 확인. 목차 이동은 화면에 그려진 질문 행까지만 된다)
-- [ ] 5단계: auto effort
+- [x] 5단계: auto effort (2026-10-26, 테스트 세션에서 측정: 캐시 영향 없음, 첫 요청 지연 약 1초, 상한 2.5초)
 
 ## 실행해서 확인한 사실 (2.1.308)
 - "… for Ns" 줄(`TurnDuration`)의 `e.requestId`는 그 줄의 대화 기록 행 uuid와 같다. `session.append`(door `notice`, `message.name === 'turn_duration'`)에서 그 uuid를 턴에 저장해 두면 줄과 턴을 정확히 짝지을 수 있다.
@@ -131,6 +134,12 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - `settings.read` 이벤트의 결과는 병합된 설정 객체 전체이고, `{ key }` 읽기는 그 객체에서 꺼낸 값이다.
 - 같은 이벤트에 매처 없는 훅은 모듈 전체에서 하나만 등록할 수 있다(validate가 거부). 그래서 `session.start`, `turn.start`, `tool.call`, `turn.complete`는 `register.tsx`에서 한 번씩만 걸고 각 기능의 함수를 부른다.
 - 테스트 키트의 `$`에는 `ui.close`가 없어서 "사람이 패널을 닫음"은 테스트로 일으킬 수 없다. `/panel`로 닫는 경로만 테스트하고, 사람이 닫는 경로는 실제 세션에서 확인한다.
+- auto effort 측정(2026-10-26, 테스트 세션, Opus 5.5, 엔진 설정 xhigh). 실제로 보낸 effort는 기록 파일의 `api-request` 행 `params.output_config.effort`, 캐시는 응답의 usage에서 읽었다.
+  - `turn.step`에서 바꾼 effort가 실제 API 요청에 그대로 나간다 [확인]. 슬라이더 수동 변경도 같은 경로다.
+  - 판정: 간단한 질문 → medium, 한 줄 파일 만들기 → medium(예상은 high, 작은 작업이라 가볍게 본 것), 설계 검토 → xhigh, 직전 답변에 대한 짧은 정리 요청 → medium.
+  - 캐시: effort가 바뀐 직후 요청의 캐시 읽기 비율이 96%(xhigh→medium), 99%(medium→xhigh), 96%(xhigh→medium)였다. 쓰기 분량은 새 메시지 크기 정도라, effort를 바꿔도 프롬프트 캐시는 깨지지 않는다 [확인: 3건].
+  - 지연: 메시지부터 첫 API 요청까지 auto 전 0.07~0.13초, auto 후 0.78~3.09초(4건, 평균 약 1.5초). 판정 호출 시간이 그대로 더해진다.
+  - 대기 상한을 2.5초로 줄이고 직전 답변 조회를 없앤 뒤 재측정(3건): 0.77~1.38초(평균 약 1.0초, 1.38초는 리로드 직후라 대화 기록을 읽은 경우). 3건 모두 상한 안이라 auto로 나갔다. 표본이 적어 개선 폭은 확정하지 않는다. 판정은 간단한 질문 → medium, Read+Edit 수정 → high, 대안 2가지를 짧게 제시하는 설계 질문 → high(예상 xhigh). 캐시 읽기는 effort가 바뀐 직후에도 99%.
 - 밴드 훅이 `next(e)`로 넘기면 테스트에서는 아래에 그릴 것이 없어 오류가 난다. 테스트에서는 빈 `Box`를 그리는 대역을 둔다.
 - 엔진은 파일을 바꾸는 Bash(`touch`)까지 Read, `ls`와 함께 한 줄로 접는다("Read 1 file, listed 1 directory, ran 2 shell commands"). Bash 용도는 `ToolUse` 행과 `ToolGroup` 줄 양쪽에 붙여야 보인다.
 

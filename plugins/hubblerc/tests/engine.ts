@@ -18,6 +18,9 @@ export type StandIn = {
   agentMessages: Record<string, SessionMessage[]>
   /** Every toast the plugin showed. */
   toasts: unknown[]
+  /** What the small model answers a completion (null: the call fails), and every request made. */
+  completion: string | null
+  completions: { model: string; system?: unknown; prompt: unknown }[]
 }
 
 /**
@@ -25,7 +28,7 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [] }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [] }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } as never }))
@@ -74,6 +77,15 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     standIn.panes = standIn.panes.filter(pane => pane.id !== e.id)
 
     return { value: undefined }
+  })
+  on('model.complete', (_, e) => {
+    standIn.completions.push(e)
+    const usage = { input_tokens: 120, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    if (standIn.completion === null) {
+      return { value: { isAnswered: false as const, reason: 'api-error' as const, status: 529, error: 'overloaded' as never, usage } }
+    }
+
+    return { value: { isAnswered: true as const, text: standIn.completion, usage } }
   })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))

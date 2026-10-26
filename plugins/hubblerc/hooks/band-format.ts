@@ -119,6 +119,8 @@ export type StatusInput = {
   model: string
   effort: string | null
   isOverridden: boolean
+  /** Auto effort is on: `effort` is its latest pick (null before the first). */
+  isAuto?: boolean
   usage: UsageSnapshot | null
   project: string
   git: GitInfo | null
@@ -155,8 +157,9 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
 
   const model = input.model === '' ? '모델 ?' : modelLabel(input.model)
   const head: Segment[] = [{ text: model, bold: true }, { text: ' · ', dim: true }]
+  const effort = input.isAuto === true && !input.isOverridden ? `auto${input.effort === null ? '' : ` ${input.effort}`}` : (input.effort ?? 'effort')
   head.push({
-    text: input.effort ?? 'effort',
+    text: effort,
     role: 'effort',
     color: input.isOverridden ? COLORS.sessionEffort : COLORS.effort,
   })
