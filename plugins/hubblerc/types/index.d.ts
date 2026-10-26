@@ -11,9 +11,14 @@ export type ToolRun = {
   isError: boolean
   /** The file the call read or changed. */
   path?: string
-  /** Bash: what the model said the command is for, and the command. */
+  /** Bash: what the model said the command is for, and the command. Agent: the task it was given. */
   description?: string
   command?: string
+  /** Grep and Glob: the pattern. WebSearch: the query. */
+  pattern?: string
+  /** Agent: the kind of subagent and the id of the one it started. */
+  agentType?: string
+  spawned?: string
   /** Edit and Write: lines added and removed. */
   added?: number
   removed?: number
@@ -30,6 +35,10 @@ export type TurnRecord = {
    * from. Absent until the engine appends that row.
    */
   lineId?: string
+  /** The id of the transcript row of the question that began the turn, when the person typed it. */
+  promptRowId?: string
+  /** What that row shows, flattened (`promptKey`): how the contents find the row without its id. */
+  promptKey?: string
   startedAt: number
   /** Set when the turn completes; null while it runs. */
   durationMs: number | null
@@ -39,6 +48,11 @@ export type TurnRecord = {
    * (a background agent keeps working). Absent on records made before this field existed.
    */
   agents?: string[]
+  /**
+   * Rebuilt from the transcript when the session was opened again (--resume, /resume): the
+   * transcript keeps no times, so `durationMs` is 0 and each run's `ms` is unknown (0).
+   */
+  restored?: true
 }
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -86,6 +100,8 @@ declare module 'claude-code' {
   interface PluginState {
     hubblerc: {
       turns: TurnRecord[]
+      /** The session the turns belong to: another one (a resume, /clear) rebuilds them. */
+      sessionId: string
       running: RunningCall[]
       todos: TodoItem[]
       agents: AgentSeen[]

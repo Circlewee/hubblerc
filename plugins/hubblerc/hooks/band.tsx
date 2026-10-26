@@ -1,9 +1,12 @@
-import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On } from 'claude-code'
+import { atom, read } from 'claude-code'
+import type { On } from 'claude-code'
 
 import type { EffortLevel } from '../types'
-import { activityParts, COLORS, EFFORT_LEVELS, isEffortLevel, lastAnswer, SEPARATOR, statusParts } from './band-format'
+import { activityParts, COLORS, EFFORT_LEVELS, lastAnswer, SEPARATOR, statusParts, textStyle } from './band-format'
 import type { Segment } from './band-format'
+import { choose, EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
+import { syncSidebar } from './sidebar'
+import type { Layout } from './sidebar'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
@@ -18,15 +21,6 @@ const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, 
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const effortPicker = atom({ plugin: 'hubblerc', key: 'effortPicker' } as const, null)
 
-/**
- * The engine keybinding action the effort control answers to. A mod cannot add a keybinding of its
- * own, but a Button naming an engine action is pressed by the person's chord for that action from
- * the prompt while the Button is drawn; this one belongs to the diff panel, whose own handler only
- * takes it while that panel is open. ~/.claude/keybindings.json binds ctrl+x e to it (Option+E types an accent on macOS).
- */
-const EFFORT_KEY_ACTION = 'app:cycleDiffBase'
-/** The slider closes by itself after this long. */
-const PICKER_OPEN_MS = 10_000
 const LEVEL_LABELS: Record<EffortLevel, string> = { low: 'low', medium: 'med', high: 'high', xhigh: 'xhigh', max: 'max' }
 
 /**
@@ -37,8 +31,9 @@ const LEVEL_LABELS: Record<EffortLevel, string> = { low: 'low', medium: 'med', h
  *
  * Colors only where something needs attention, by the terminal's own color names.
  */
-export function showBand(on: On): void {
+export function showBand(on: On, layout: Layout): void {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const isSidebarUp = await syncSidebar($, layout, e.viewport).catch(() => false)
     if (e.props.hasSurvey) return next(e)
 
     const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt] =
@@ -69,15 +64,7 @@ export function showBand(on: On): void {
 
     const { Box, Text, Button } = $.ui.resolve(e)
 
-    const segmentText = (segment: Segment) => (
-      <Text
-        {...(segment.color === undefined ? {} : { color: segment.color })}
-        {...(segment.dim === true ? { dimColor: true } : {})}
-        {...(segment.bold === true ? { bold: true } : {})}
-      >
-        {segment.text}
-      </Text>
-    )
+    const segmentText = (segment: Segment) => <Text {...textStyle(segment)}>{segment.text}</Text>
 
     const slider = (
       // Two cells between every control, so a level's hotkey never runs into the label before it.
@@ -111,9 +98,12 @@ export function showBand(on: On): void {
         >
           <Text dimColor>엔진 설정</Text>
         </Button>
-        <Text dimColor>숫자로 선택 · ctrl+x e 닫기</Text>
+        <Text dimColor>숫자로 선택 · ctrl+x ctrl+e 닫기</Text>
       </Box>
     )
+
+    // The sidebar shows the status in the band's place; the slider still opens here, where a bare digit picks.
+    if (isSidebarUp) return pickerOpenedAt === null ? next(e) : <Box marginTop={1}>{slider}</Box>
 
     return (
       // A row of air above, from the transcript's last line. The row under the band is the engine's,
@@ -153,30 +143,4 @@ export function showBand(on: On): void {
       </Box>
     )
   })
-}
-
-/** Opens the effort slider in line 3, or closes it when open. Open, it closes by itself later. */
-async function togglePicker($: EngineInterface): Promise<void> {
-  if ((await read($, effortPicker)) !== null) {
-    await update($, effortPicker, () => null)
-
-    return
-  }
-
-  const openedAt = await $.clock.now()
-  await update($, effortPicker, () => openedAt)
-  $.clock.after(PICKER_OPEN_MS, () => {
-    void update($, effortPicker, current => (current === openedAt ? null : current))
-  })
-}
-
-/** Sends this session's requests at `level` from now on (null: at the engine's), and closes the slider. */
-async function choose($: EngineInterface, level: EffortLevel | null): Promise<void> {
-  await update($, effortOverride, () => (level !== null && isEffortLevel(level) ? level : null))
-  await update($, effortPicker, () => null)
-}
-
-/** At a main-loop turn's start: a slider left open closes. */
-export async function closeEffortPicker($: EngineInterface): Promise<void> {
-  if ((await read($, effortPicker)) !== null) await update($, effortPicker, () => null)
 }

@@ -18,7 +18,7 @@ export function matchTurn(list: readonly TurnRecord[], durationMs: number): Turn
   let bestGap = Number.POSITIVE_INFINITY
 
   for (const turn of list) {
-    if (turn.durationMs === null) continue
+    if (turn.durationMs === null || turn.restored === true) continue
     const gap = Math.abs(turn.durationMs - durationMs)
     if (gap <= bestGap) {
       best = turn
@@ -74,7 +74,7 @@ export function activityTable(list: readonly TurnRecord[], shown = 30): string {
   const start = Math.max(0, list.length - shown)
   const rows = list.slice(start).map((turn, i) => {
     const number = `#${start + i + 1}`.padEnd(4)
-    const time = (turn.durationMs === null ? '진행 중' : formatDuration(turn.durationMs)).padStart(7)
+    const time = (turn.durationMs === null ? '진행 중' : turn.restored === true ? '이전' : formatDuration(turn.durationMs)).padStart(7)
     const prompt = turn.prompt.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
     const label = prompt === '' ? '(이어진 답변)' : `"${clip(prompt, 32)}"`
 
@@ -96,9 +96,9 @@ function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`
 }
 
-type FileTotal = { path: string; added: number; removed: number }
+export type FileTotal = { path: string; added: number; removed: number }
 
-function fileTotals(runs: readonly ToolRun[]): FileTotal[] {
+export function fileTotals(runs: readonly ToolRun[]): FileTotal[] {
   const byPath = new Map<string, FileTotal>()
 
   for (const run of runs) {
@@ -120,13 +120,13 @@ function countByTool(runs: readonly ToolRun[]): [string, number][] {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 }
 
-function signed(added: number, removed: number): string {
+export function signed(added: number, removed: number): string {
   if (removed === 0) return `+${added}`
   if (added === 0) return `−${removed}`
 
   return `+${added} −${removed}`
 }
 
-function basename(path: string): string {
+export function basename(path: string): string {
   return path.split('/').pop() || path
 }

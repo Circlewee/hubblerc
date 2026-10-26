@@ -1,8 +1,7 @@
-import { expect, mock, test } from 'claude-code/testing'
-import type { Engine, MockClock } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import { expect, test } from 'claude-code/testing'
 
-const NOW = Date.parse('2026-10-25T09:00:00Z')
+import { standInForEngine, start } from './engine'
+
 const SURFACES = ['terminal', 'desktop'] as const
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
 const BAND_PROPS = {
@@ -12,48 +11,6 @@ const BAND_PROPS = {
   bodyColumns: 120,
   scroll: { offset: 0, bodyRows: 6 },
   view: {},
-}
-
-// Nothing sits beneath the plugin: these hooks stand for the engine and what it reports.
-function standInForEngine(on: On, agents: unknown[] = []): MockClock {
-  const clock = mock.clock(on, { now: NOW })
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('command.register', () => ({ value: { command: 'activity' } as never }))
-  on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('session.cwd', () => ({ value: '/repo/hubblerc' }))
-  on('session.usage', () => ({
-    value: {
-      startedAt: NOW,
-      context: { window: 1_000_000, percent: 45 },
-      rateLimits: [
-        { kind: 'five_hour', percentUsed: 25, resetsAt: new Date(NOW + 90 * 60_000).toISOString() },
-        { kind: 'seven_day', percentUsed: 12 },
-      ],
-      cost: { usd: 1.2 },
-    } as never,
-  }))
-  on('agent.list', () => ({ value: agents as never }))
-  on('process.run', () => ({
-    value: { exitCode: 0, stdout: '## main...origin/main\n M hooks/band.tsx\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-  }))
-  // The read answers the merged settings; a read of one key is that object, projected.
-  on('settings.read', () => ({
-    value: { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'xhigh' } } } as never,
-  }))
-  on('ui.toast', () => ({ value: undefined as never }))
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', () => ({ text: '' }))
-  on('tool.call', (_, e) => {
-    if (e.tool === 'Agent') return { result: { status: 'async_launched', agentId: 'ag-1' } as never }
-
-    return { result: {} as never }
-  })
-
-  return clock
-}
-
-async function start($: Engine): Promise<void> {
-  await $.session.start({ cwd: '/repo/hubblerc', surface: 'terminal', isInteractive: true })
 }
 
 test('the band shows the model, effort, usage and branch, then idle, then no answer yet', async ($, on) => {
@@ -160,7 +117,7 @@ test("the effort control opens a slider; a level sends this session's requests a
 })
 
 test('the slider closes by itself after a while, and when the next turn starts', async ($, on) => {
-  const clock = standInForEngine(on)
+  const { clock } = standInForEngine(on)
   await start($)
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal', props: BAND_PROPS })
@@ -176,7 +133,7 @@ test('the slider closes by itself after a while, and when the next turn starts',
 })
 
 test('line 2 shows a running subagent and the todo in progress; line 3 the last answer', async ($, on) => {
-  standInForEngine(on, [{ id: 'ag-1', type: 'general-purpose', description: '코드 찾기', status: 'running' }])
+  standInForEngine(on, { agents: [{ id: 'ag-1', type: 'general-purpose', description: '코드 찾기', status: 'running' }] })
   await start($)
 
   await $.turn.start({ text: 'fix the auth bug', turnId: 't1' })

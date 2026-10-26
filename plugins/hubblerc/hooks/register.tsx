@@ -1,11 +1,14 @@
 import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { completeTurn, IGNORED_TOOLS, recordRun, startTurn, trackLines } from './activity'
-import { closeEffortPicker, showBand } from './band'
+import { completeTurn, IGNORED_TOOLS, recordRun, startTurn, trackLines, trackPrompts } from './activity'
+import { showBand } from './band'
 import { showBashPurpose } from './bash-purpose'
 import { answerCommands, registerCommand } from './commands'
 import { controlEffort, startEffort } from './effort'
+import { closeEffortPicker } from './effort-picker'
+import { restoreTurns } from './restore'
+import { layoutOption, showSidebar, startSidebar } from './sidebar'
 import { markRunning, noteCall, refreshStatus, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
 
@@ -14,12 +17,16 @@ const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 
 // One hook per event with no matcher (the engine refuses a second): each feature's part of an
 // event runs from here, each on its own so one failing leaves the others.
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const layout = layoutOption(options.layout)
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await registerCommand($).catch(() => undefined)
+    await restoreTurns($).catch(() => undefined)
     await startStatus($).catch(() => undefined)
     await startEffort($).catch(() => undefined)
+    await startSidebar($, layout).catch(() => undefined)
 
     return started
   })
@@ -59,10 +66,12 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   trackLines(on)
-  answerCommands(on)
+  trackPrompts(on)
+  answerCommands(on, layout)
   controlEffort(on)
   showBashPurpose(on)
-  showBand(on)
+  showBand(on, layout)
+  showSidebar(on, layout)
 
   // The line that closes a turn ("Baked for 2m 13s") gets the turn's activity on the line under it.
   // Under it, not beside it: the engine's line takes the row's free width and squeezes a sibling to the edge.

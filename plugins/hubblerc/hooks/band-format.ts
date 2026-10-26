@@ -32,6 +32,15 @@ export const COLORS = {
   faint: 'gray',
 } as const
 
+/** A segment's style as `Text` props, only those it sets. */
+export function textStyle(segment: Segment): { color?: string; dimColor?: true; bold?: true } {
+  return {
+    ...(segment.color === undefined ? {} : { color: segment.color }),
+    ...(segment.dim === true ? { dimColor: true as const } : {}),
+    ...(segment.bold === true ? { bold: true as const } : {}),
+  }
+}
+
 const BAR_CELLS = 8
 
 /** `claude-opus-5-5` → `Opus 5.5`; an id of another shape as given. */
@@ -249,7 +258,9 @@ export function lastAnswer(turns: readonly TurnRecord[]): string {
     const turn = turns[i]
     if (turn === undefined || turn.durationMs === null) continue
 
-    return `직전 ${formatDuration(turn.durationMs)} · ${summarize(turn) || '도구 없음'}`
+    const time = turn.restored === true ? '' : ` ${formatDuration(turn.durationMs)}`
+
+    return `직전${time} · ${summarize(turn) || '도구 없음'}`
   }
 
   return '직전 답변 없음'

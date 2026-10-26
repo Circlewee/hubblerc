@@ -1,16 +1,24 @@
-import { atom, update } from 'claude-code'
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, ToolCallResult, TurnCompleteInput, TurnStartInput } from 'claude-code'
 
 import type { ToolRun, TurnRecord } from '../types'
 
-const MAX_TURNS = 100
-const MAX_RUNS_PER_TURN = 400
+export const MAX_TURNS = 100
+export const MAX_RUNS_PER_TURN = 400
 
 /** Calls the engine makes for its own bookkeeping, not work the person would count. */
 export const IGNORED_TOOLS = new Set(['SubagentHandback'])
 
 /** The session's main-loop turns, oldest first, each with the tool calls made while it ran. */
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
+/** A question's row ties to the turn that starts within this long of it. */
+const PROMPT_ROW_WINDOW_MS = 10_000
+
+/**
+ * A question's row seen before its turn started, kept for that turn. Module state: a reload
+ * between the two loses the tie, and the contents' entry then scrolls to the answer's end.
+ */
+let pendingPromptRow: { uuid: string; at: number } | undefined
 
 export type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
 
@@ -18,20 +26,52 @@ export type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
 export async function startTurn($: EngineInterface, e: TurnStartInput): Promise<void> {
   if (e.agentId !== undefined) return
 
+  const startedAt = await $.clock.now()
   const turn: TurnRecord = {
     id: e.turnId,
     prompt: promptLabel(e.text),
-    startedAt: await $.clock.now(),
+    startedAt,
     durationMs: null,
     runs: [],
   }
+  const key = promptKey(e.text)
+  if (key !== '') turn.promptKey = key
+  if (pendingPromptRow !== undefined && startedAt - pendingPromptRow.at <= PROMPT_ROW_WINDOW_MS) turn.promptRowId = pendingPromptRow.uuid
+  pendingPromptRow = undefined
   await update($, turns, list => [...list, turn].slice(-MAX_TURNS))
+}
+
+/**
+ * The row of a question the person typed: its id lets the sidebar's contents scroll to it. Tied to
+ * the turn it begins, whichever of the two the engine raises first.
+ */
+export function trackPrompts(on: On): void {
+  on('session.append', { door: 'prompt' }, async ($, e, next) => {
+    const stored = await next(e)
+    if (e.agentId !== undefined) return stored
+
+    try {
+      const now = await $.clock.now()
+      const list = await read($, turns)
+      const last = list.at(-1)
+      if (last !== undefined && last.durationMs === null && last.promptRowId === undefined && now - last.startedAt <= PROMPT_ROW_WINDOW_MS) {
+        await update($, turns, all => all.map(turn => (turn.id === last.id ? { ...turn, promptRowId: e.uuid } : turn)))
+      } else {
+        pendingPromptRow = { uuid: e.uuid, at: now }
+      }
+    } catch {
+      // Best effort: without the row the contents scroll to the answer's end.
+    }
+
+    return stored
+  }).catch(($, e, next) => next(e))
 }
 
 /** After a tool call ran: it joins its turn (a subagent's joins the turn that started the subagent). */
 export async function recordRun($: EngineInterface, e: CallInput, ran: ToolCallResult, ms: number): Promise<void> {
   const run = describeRun(e, ran, ms)
   const spawned = run.tool === 'Agent' && !run.isError ? spawnedAgent(ran.result) : undefined
+  if (spawned !== undefined) run.spawned = spawned
   await update($, turns, list => addRun(list, run, spawned))
 }
 
@@ -73,17 +113,42 @@ function linkLine(list: readonly TurnRecord[], lineId: string): TurnRecord[] {
   return list.map((turn, i) => (i === target ? { ...turn, lineId } : turn))
 }
 
-/** The prompt as a person would name it: the cross-session preamble and wrapper tags taken off. */
+const CROSS_SESSION_PREAMBLE = /^\s*Another Claude session sent a message:\s*/
+const TASK_SUMMARY = /<task-notification>[\s\S]*?<summary>([\s\S]*?)<\/summary>/
+
+/**
+ * The prompt as a person would name it: the cross-session preamble and wrapper tags taken off; a
+ * background task's notification by its summary, a subagent's hand-back by what it is.
+ */
 export function promptLabel(text: string): string {
+  const summary = TASK_SUMMARY.exec(text)?.[1]
+  if (summary !== undefined) return `알림: ${flatten(summary)}`.slice(0, 120)
+  if (text.includes('<task-notification>')) return '(작업 알림)'
+
+  const body = flatten(text.replace(CROSS_SESSION_PREAMBLE, ''))
+  if (body.startsWith('[Subagent hand-back]')) return '(서브에이전트 보고)'
+
+  return body.slice(0, 120)
+}
+
+/**
+ * What the question's row shows, flattened: the key the contents find that row by (a UserMessage
+ * draws a notification's summary, another party's message less its framing).
+ */
+export function promptKey(text: string): string {
+  const summary = TASK_SUMMARY.exec(text)?.[1]
+
+  return flatten(summary ?? text.replace(CROSS_SESSION_PREAMBLE, '')).slice(0, 80)
+}
+
+function flatten(text: string): string {
   return text
-    .replace(/^Another Claude session sent a message:\s*/, '')
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 120)
 }
 
-function describeRun(e: CallInput, ran: ToolCallResult, ms: number): ToolRun {
+export function describeRun(e: CallInput, ran: ToolCallResult, ms: number): ToolRun {
   const args = e as unknown as Record<string, unknown>
   const run: ToolRun = {
     id: e.tool_use_id ?? '',
@@ -102,6 +167,16 @@ function describeRun(e: CallInput, ran: ToolCallResult, ms: number): ToolRun {
     const description = text(args.description)
     if (command !== undefined) run.command = command.slice(0, 400)
     if (description !== undefined) run.description = description.slice(0, 200)
+  }
+
+  const pattern = run.tool === 'WebSearch' ? text(args.query) : run.tool === 'Grep' || run.tool === 'Glob' ? text(args.pattern) : undefined
+  if (pattern !== undefined) run.pattern = pattern.slice(0, 200)
+
+  if (run.tool === 'Agent') {
+    const description = text(args.description)
+    const agentType = text(args.subagent_type)
+    if (description !== undefined) run.description = description.slice(0, 200)
+    if (agentType !== undefined) run.agentType = agentType
   }
 
   if (!run.isError && (run.tool === 'Edit' || run.tool === 'Write')) {
