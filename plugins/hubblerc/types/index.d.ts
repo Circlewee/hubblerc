@@ -172,6 +172,8 @@ declare module 'claude-code' {
       lastRequestAt: number | null
       /** The sidebar's boxes folded to one line, by id; kept across sessions in `$.store`. */
       folded: string[]
+      /** The files box shows every file (a press on "외 N개"), not the first twelve. */
+      filesExpanded: boolean
     }
   }
 }

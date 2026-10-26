@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { TurnRecord } from '../types'
-import { clipCells, sessionFiles, tocEntries, tocPage } from '../hooks/sidebar-format'
+import { clipCells, fileLayout, fileUrl, sessionFiles, shortPath, tocEntries, tocPage } from '../hooks/sidebar-format'
 import { NOW, standInForEngine, start } from './engine'
 
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
@@ -75,12 +75,70 @@ test('a file in the repository with nothing left to commit counts as committed; 
   ]
   const git = { branch: 'main', isDirty: true, root: '/repo', changed: ['/repo/b.ts'] }
 
-  expect(sessionFiles(list, git).map(file => [file.name, file.isCommitted])).toEqual([
-    ['c.ts', false],
-    ['b.ts', false],
-    ['a.ts', true],
+  expect(sessionFiles(list, git).map(file => [file.name, file.isCommitted, file.isOutside])).toEqual([
+    ['c.ts', false, true],
+    ['b.ts', false, false],
+    ['a.ts', true, false],
   ])
-  expect(sessionFiles(list).every(file => !file.isCommitted)).toBe(true)
+  // With no repository known, nothing is committed and nothing is outside.
+  expect(sessionFiles(list).every(file => !file.isCommitted && !file.isOutside)).toBe(true)
+})
+
+test("the repository's files come first, then those outside it by folder, each part saying how many it left out", () => {
+  const edit = (id: string, path: string) => ({ id, tool: 'Edit', ms: 1, isError: false, path, added: 1, removed: 0 })
+  const git = { branch: 'main', isDirty: true, root: '/repo', changed: [] }
+  const limits = { total: 12, minInside: 6, folders: 3, perFolder: 2 }
+  const names = (layout: ReturnType<typeof fileLayout>) => [
+    layout.inside.map(file => file.name),
+    layout.insideHidden,
+    layout.outside.map(group => [group.folder, group.files.map(file => file.name), group.hidden]),
+    layout.foldersHidden,
+  ]
+
+  const few = sessionFiles(
+    [
+      turn('t1', [edit('1', '/repo/a.ts'), edit('2', '/tmp/x/one.ts'), edit('3', '/home/me/.claude/memory/m.md')]),
+      turn('t2', [edit('4', '/repo/b.ts'), edit('5', '/tmp/x/two.ts')]),
+    ],
+    git,
+  )
+  expect(names(fileLayout(few, limits))).toEqual([
+    ['b.ts', 'a.ts'],
+    0,
+    [
+      ['/tmp/x', ['two.ts', 'one.ts'], 0],
+      ['/home/me/.claude/memory', ['m.md'], 0],
+    ],
+    0,
+  ])
+
+  // Many changes in the repository, made after the ones outside it, push nothing outside out of sight.
+  const many = sessionFiles(
+    [
+      turn('t1', [edit('o1', '/tmp/x/one.ts'), edit('o2', '/tmp/x/two.ts'), edit('o3', '/tmp/x/three.ts'), edit('m', '/home/me/.claude/memory/m.md')]),
+      turn('t2', Array.from({ length: 14 }, (_, i) => edit(`r${i}`, `/repo/f${i}.ts`))),
+    ],
+    git,
+  )
+  const crowded = fileLayout(many, limits)
+  expect(crowded.inside).toHaveLength(9)
+  expect(crowded.insideHidden).toBe(5)
+  expect(crowded.outside.map(group => [group.folder, group.files.length, group.hidden])).toEqual([
+    ['/home/me/.claude/memory', 1, 0],
+    ['/tmp/x', 2, 1],
+  ])
+
+  // Past the folders shown, the rest are counted; the repository keeps its least.
+  const tight = fileLayout(many, { total: 3, minInside: 2, folders: 1, perFolder: 1 })
+  expect(names(tight)).toEqual([['f13.ts', 'f12.ts'], 12, [['/home/me/.claude/memory', ['m.md'], 0]], 1])
+})
+
+test("a folder's path is short: home as ~, macOS's /private/tmp as /tmp, its middle as …", () => {
+  expect(shortPath('/Users/me/.claude/projects/-Users-me-vault-project/memory', 30)).toBe('~/.claude/…/memory')
+  expect(shortPath('/Users/me/.claude/projects/x/memory', 40)).toBe('~/.claude/projects/x/memory')
+  expect(shortPath('/private/tmp/claude-502/-Users-me/5cc8ff3a-965a/scratchpad', 31)).toBe('/tmp/…/5cc8ff3a-965a/scratchpad')
+  expect(shortPath('/private/tmp/claude-502/-Users-me/5cc8ff3a-965a/scratchpad', 20)).toBe('/tmp/…/scratchpad')
+  expect(shortPath('/a/very-long-folder-name-indeed', 12)).toBe('…/very-long…')
 })
 
 test('the contents list answers newest first, each with the row a press scrolls to', () => {
@@ -169,7 +227,7 @@ test('the sidebar shows the status, the files changed and the contents', async (
     expect((await ui.find({ type: 'Text', text: /대기 중/ }))?.text).toBe('· 대기 중')
     // The stand-in's git has notes.md in the repository and nothing of it left to commit.
     expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ 파일 ')
-    expect((await ui.find({ type: 'Text', text: 'notes.md' }))?.text).toBe('notes.md')
+    expect(await ui.find({ key: 'file-/repo/hubblerc/notes.md' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: ' ✓' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: ' +2' }))?.text).toBe(' +2')
     expect((await ui.find({ key: 'turn-t2' }))?.text).toBe('#2 두 번째 질문')
@@ -213,14 +271,80 @@ test('a press on a box title folds it to one line and back; the fold is kept for
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   await ui.press({ key: 'fold-files' })
-  expect(await ui.find({ type: 'Text', text: 'notes.md' })).toBeUndefined()
+  expect(await ui.find({ key: 'file-/repo/hubblerc/notes.md' })).toBeUndefined()
   expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▸ 파일 ')
   expect((await ui.find({ key: 'box-files' }))?.props.borderStyle).toBeUndefined()
   expect(stored.sidebarFolded).toEqual(['files'])
 
   await ui.press({ key: 'fold-files' })
-  expect((await ui.find({ type: 'Text', text: 'notes.md' }))?.text).toBe('notes.md')
+  expect(await ui.find({ key: 'file-/repo/hubblerc/notes.md' })).toBeDefined()
   expect(stored.sidebarFolded).toEqual([])
+  await ui.unmount()
+})
+
+test('files outside the repository go dim under a rule naming their folder, after those in it', async ($, on) => {
+  standInForEngine(on)
+  await start($)
+  await twoAnswers($)
+  await $.turn.start({ text: '세 번째 질문', turnId: 't3' })
+  await $.tool.call({ tool: 'Write', file_path: '/private/tmp/claude-502/session/scratchpad/draft.tsx', content: 'x\n' })
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't3', durationMs: 1000 })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  // 56 columns less the box's frame: 52, the path then a rule to the end.
+  const rule = await ui.find({ type: 'Text', text: /^┄┄/ })
+  expect(rule?.text).toBe(`┄┄ /tmp/claude-502/session/scratchpad ${'┄'.repeat(52 - 4 - 34)}`)
+  expect(rule?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: 'draft.tsx' }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: ' +1' }))?.props).toMatchObject({ dimColor: true })
+  // The repository's file stays above the rule, as it was.
+  expect(await ui.find({ key: 'file-/repo/hubblerc/notes.md' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a file name is a link to the file, as a path in the conversation is', async ($, on) => {
+  standInForEngine(on)
+  await start($)
+  await twoAnswers($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  const link = await ui.find({ type: 'Link' })
+  expect(link?.props.href).toBe('file:///repo/hubblerc/notes.md')
+  // The kit's text of a Link carries its URL too; on screen only the name shows.
+  expect(link?.children).toEqual(['notes.md'])
+  await ui.unmount()
+
+  // Each part of the path encoded: a space, Korean, `#` and `?` stay in it.
+  expect(fileUrl('/a b/한글#1?.md')).toBe('file:///a%20b/%ED%95%9C%EA%B8%80%231%3F.md')
+})
+
+test('"외 N개 더 보기" shows every file; "줄이기", where it stood, goes back to twelve', async ($, on) => {
+  standInForEngine(on)
+  await start($)
+  await $.turn.start({ text: '많이 고치기', turnId: 't1' })
+  await $.tool.call({ tool: 'Write', file_path: '/private/tmp/x/out.ts', content: 'x\n' })
+  for (let i = 0; i < 15; i += 1) await $.tool.call({ tool: 'Write', file_path: `/repo/hubblerc/f${i}.ts`, content: 'x\n' })
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 1000 })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  const rows = async () => (await ui.findAll({ type: 'Link' })).length
+  // The folder outside keeps its file; the repository has the other eleven.
+  expect(await rows()).toBe(12)
+  expect((await ui.find({ key: 'inside-more' }))?.text).toBe('외 4개 더 보기')
+  expect(await ui.find({ key: 'files-collapse' })).toBeUndefined()
+
+  await ui.press({ key: 'inside-more' })
+  expect(await rows()).toBe(16)
+  expect(await ui.find({ key: 'inside-more' })).toBeUndefined()
+  // Where "외 N개" stood: after the repository's files, before the folder outside. The title is left alone.
+  const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
+  const shrink = texts.indexOf('줄이기')
+  expect(shrink).toBeGreaterThan(texts.findIndex(text => text.endsWith('f0.ts')))
+  expect(shrink).toBeLessThan(texts.findIndex(text => text.startsWith('┄┄ /tmp/x')))
+  expect((await ui.find({ key: 'title-files' }))?.text).toBe('╭── ▾ 파일 ')
+
+  await ui.press({ key: 'files-collapse' })
+  expect(await rows()).toBe(12)
   await ui.unmount()
 })
 

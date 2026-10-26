@@ -146,7 +146,7 @@ test('a resumed session shows its earlier answers, with no times, and what its s
   expect((await ui.find({ key: 'turn-restored-0' }))?.text).toBe('#1 인증 버그 고쳐줘 실패 1')
   expect((await ui.find({ key: 'turn-restored-0' }))?.type).toBe('Button')
   expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ 파일 ')
-  expect((await ui.find({ key: 'file-/repo/src/auth.ts' }))?.text).toMatch(/^auth\.ts/)
+  expect((await ui.find({ key: 'file-/repo/src/auth.ts' }))?.text).toMatch(/auth\.ts \+2 −1/)
   await ui.unmount()
 })
 

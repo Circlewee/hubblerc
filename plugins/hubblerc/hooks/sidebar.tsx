@@ -6,8 +6,8 @@ import type { Segment } from './band-format'
 import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { burnoutMinutes, cacheAge } from './forecast'
-import { clipCells, sessionFiles, tocEntries, tocPage } from './sidebar-format'
-import type { TocEntry } from './sidebar-format'
+import { clipCells, fileLayout, fileUrl, sessionFiles, shortPath, tocEntries, tocPage } from './sidebar-format'
+import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
@@ -26,6 +26,7 @@ const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
 const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
 const folded = atom({ plugin: 'hubblerc', key: 'folded' } as const, [])
+const filesExpanded = atom({ plugin: 'hubblerc', key: 'filesExpanded' } as const, false)
 
 /** The sidebar's boxes, by the id their fold is kept under. */
 export type SectionId = 'status' | 'activity' | 'files' | 'contents'
@@ -38,7 +39,10 @@ export const SIDEBAR_ID = 'hubblerc'
 const SIDEBAR_TITLE = 'hubblerc'
 /** The width the dock is asked for; the engine holds it to 24..45% of the terminal. */
 const SIDEBAR_COLUMNS = 56
-const MAX_FILES_SHOWN = 12
+/** Twelve files in all; each folder outside the repository shows two, three folders at most; the repository six at least. */
+const FILE_LIMITS: FileLimits = { total: 12, minInside: 6, folders: 3, perFolder: 2 }
+/** Every file, once the person asked for the rest. */
+const NO_FILE_LIMITS: FileLimits = { total: Infinity, minInside: Infinity, folders: Infinity, perFolder: Infinity }
 const MAX_TURN_REFS = 4
 /** Answers on one page of the contents. */
 const TOC_PAGE_SIZE = 10
@@ -176,7 +180,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -194,12 +198,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, fiveHourLog),
         read($, lastRequestAt),
         read($, folded),
+        read($, filesExpanded),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
 
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
     const width = e.props.bodyColumns
     /** What a box holds: the width less the box's frame. */
     const inner = Math.max(1, width - BOX_FRAME)
@@ -318,6 +323,56 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       </Box>,
     )
 
+    // What is left to commit in this repository stands out; a committed file goes dim with a tick,
+    // and a file outside the repository (git never commits it) goes dim under its folder's rule.
+    // Its name is a link to the file, as a path in the conversation is: under the fullscreen layout
+    // the engine opens a clicked `file:` link itself, elsewhere the terminal does.
+    const fileRow = (file: SessionFile) => {
+      const isDim = file.isCommitted || file.isOutside
+      const refs = file.turns.slice(-MAX_TURN_REFS).map(n => `#${n}`)
+      const counts: Segment[] = [
+        ...(file.isCommitted ? [{ text: ' ✓', dim: true }] : []),
+        ...(file.added > 0 ? [{ text: ` +${file.added}`, ...(isDim ? { dim: true } : { color: COLORS.ok }) }] : []),
+        ...(file.removed > 0 ? [{ text: ` −${file.removed}`, ...(isDim ? { dim: true } : { color: COLORS.alert }) }] : []),
+        { text: `  ${file.turns.length > MAX_TURN_REFS ? '… ' : ''}${refs.join(' ')}`, dim: true },
+      ]
+      const room = inner - counts.reduce((sum, segment) => sum + cellWidth(segment.text), 0)
+
+      return (
+        <Box key={`file-${file.path}`}>
+          <Text {...(isDim ? { dimColor: true } : {})}>
+            {file.path.startsWith('/') ? <Link href={fileUrl(file.path)}>{clipCells(file.name, room)}</Link> : clipCells(file.name, room)}
+          </Text>
+          {counts.map((segment, i) => segmentText(segment, `count-${i}`))}
+        </Box>
+      )
+    }
+    /** `┄┄ ~/.claude/…/memory ┄┄┄┄`: a rule with a label on it, as wide as the box holds. */
+    const labelledRule = (label: string, key: string) => {
+      // Two cells of rule at least after the label, so it reads as a rule.
+      const text = shortPath(label, Math.max(1, inner - 6))
+
+      return (
+        <Text key={key} dimColor>
+          {`┄┄ ${text} ${'┄'.repeat(Math.max(0, inner - 4 - cellWidth(text)))}`}
+        </Text>
+      )
+    }
+    // What the twelve left out is a press away: the whole list. Then "줄이기" stands where the
+    // repository's "외 N개" stood, between its files and the folders outside, and puts it back.
+    const expandFiles = () => {
+      void update($, filesExpanded, () => true)
+    }
+    const more = (count: number, key: string) =>
+      count > 0 ? (
+        <Button key={key} plain onPress={expandFiles}>
+          <Text dimColor>{`외 ${count}개 더 보기`}</Text>
+        </Button>
+      ) : null
+    const limited = fileLayout(files, FILE_LIMITS)
+    const isCut = limited.insideHidden > 0 || limited.foldersHidden > 0 || limited.outside.some(group => group.hidden > 0)
+    const shownFiles = isFilesExpanded ? fileLayout(files, NO_FILE_LIMITS) : limited
+
     const filesBox =
       files.length === 0
         ? null
@@ -325,25 +380,31 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             'files',
             '파일',
             <Box flexDirection="column">
-              {files.slice(0, MAX_FILES_SHOWN).map(file => {
-                const refs = file.turns.slice(-MAX_TURN_REFS).map(n => `#${n}`)
-                // A committed file goes dim with a tick: what is left to commit stands out.
-                const counts: Segment[] = [
-                  ...(file.isCommitted ? [{ text: ' ✓', dim: true }] : []),
-                  ...(file.added > 0 ? [{ text: ` +${file.added}`, ...(file.isCommitted ? { dim: true } : { color: COLORS.ok }) }] : []),
-                  ...(file.removed > 0 ? [{ text: ` −${file.removed}`, ...(file.isCommitted ? { dim: true } : { color: COLORS.alert }) }] : []),
-                  { text: `  ${file.turns.length > MAX_TURN_REFS ? '… ' : ''}${refs.join(' ')}`, dim: true },
-                ]
-                const room = inner - counts.reduce((sum, segment) => sum + cellWidth(segment.text), 0)
-
-                return (
-                  <Box key={`file-${file.path}`}>
-                    <Text {...(file.isCommitted ? { dimColor: true } : {})}>{clipCells(file.name, room)}</Text>
-                    {counts.map((segment, i) => segmentText(segment, `count-${i}`))}
-                  </Box>
-                )
-              })}
-              {files.length > MAX_FILES_SHOWN ? <Text dimColor>{`외 ${files.length - MAX_FILES_SHOWN}개`}</Text> : null}
+              {shownFiles.inside.map(fileRow)}
+              {more(shownFiles.insideHidden, 'inside-more')}
+              {isFilesExpanded && isCut ? (
+                <Button
+                  key="files-collapse"
+                  plain
+                  onPress={() => {
+                    void update($, filesExpanded, () => false)
+                  }}
+                >
+                  <Text dimColor>줄이기</Text>
+                </Button>
+              ) : null}
+              {shownFiles.outside.map(group => (
+                <Box key={`outside-${group.folder}`} flexDirection="column">
+                  {labelledRule(group.folder, `folder-${group.folder}`)}
+                  {group.files.map(fileRow)}
+                  {more(group.hidden, `more-${group.folder}`)}
+                </Box>
+              ))}
+              {shownFiles.foldersHidden > 0 ? (
+                <Button key="folders-more" plain onPress={expandFiles}>
+                  {labelledRule(`다른 폴더 ${shownFiles.foldersHidden}개 더 보기`, 'folders-more-rule')}
+                </Button>
+              ) : null}
             </Box>,
           )
 

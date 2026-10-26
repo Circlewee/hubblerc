@@ -37,6 +37,27 @@ export type SessionFile = {
   turns: number[]
   /** In the repository with no change left uncommitted. */
   isCommitted: boolean
+  /** Outside the repository (memory, a temporary folder): git never commits it. False when no repository is known. */
+  isOutside: boolean
+}
+
+/** The files outside the repository that sit in one folder: those shown, and how many more there are. */
+export type OutsideGroup = { folder: string; files: SessionFile[]; hidden: number }
+
+/**
+ * How the files box lays out: the repository's files and how many more; then each folder outside
+ * it, the folder changed last first; then how many folders more.
+ */
+export type FileLayout = { inside: SessionFile[]; insideHidden: number; outside: OutsideGroup[]; foldersHidden: number }
+
+/** How much of each part the files box shows. */
+export type FileLimits = {
+  /** Files in all, inside and outside the repository. */
+  total: number
+  /** The repository's files shown even when folders outside take the rest. */
+  minInside: number
+  folders: number
+  perFolder: number
 }
 
 /** The session's last `shown` answers (all by default), newest first. */
@@ -80,7 +101,7 @@ export function sessionFiles(list: readonly TurnRecord[], git: GitInfo | null = 
 
   list.forEach((turn, i) => {
     for (const total of fileTotals(turn.runs)) {
-      const file = byPath.get(total.path) ?? { path: total.path, name: '', added: 0, removed: 0, turns: [], isCommitted: false }
+      const file = byPath.get(total.path) ?? { path: total.path, name: '', added: 0, removed: 0, turns: [], isCommitted: false, isOutside: false }
       file.added += total.added
       file.removed += total.removed
       file.turns.push(i + 1)
@@ -93,7 +114,10 @@ export function sessionFiles(list: readonly TurnRecord[], git: GitInfo | null = 
   const files = [...byPath.values()].reverse()
   const root = git?.root
   const changed = new Set(git?.changed ?? [])
-  for (const file of files) file.isCommitted = root !== undefined && file.path.startsWith(`${root}/`) && !changed.has(file.path)
+  for (const file of files) {
+    file.isOutside = root !== undefined && !file.path.startsWith(`${root}/`)
+    file.isCommitted = root !== undefined && !file.isOutside && !changed.has(file.path)
+  }
   const names = new Map<string, number>()
   for (const file of files) names.set(basename(file.path), (names.get(basename(file.path)) ?? 0) + 1)
   for (const file of files) {
@@ -102,6 +126,75 @@ export function sessionFiles(list: readonly TurnRecord[], git: GitInfo | null = 
   }
 
   return files
+}
+
+/**
+ * The files laid out within `limits`: the repository's, then those outside it by folder, each
+ * folder in the order its latest change came, each part saying how many it left out.
+ *
+ * The folders outside take their room first, a few files each, so many changes in the repository
+ * never push them out of sight; the repository keeps `minInside` however many folders there are.
+ */
+export function fileLayout(files: readonly SessionFile[], limits: FileLimits): FileLayout {
+  const byFolder: { folder: string; files: SessionFile[] }[] = []
+  for (const file of files) {
+    if (!file.isOutside) continue
+    const folder = file.path.slice(0, Math.max(0, file.path.lastIndexOf('/'))) || '/'
+    const group = byFolder.find(other => other.folder === folder)
+    if (group === undefined) byFolder.push({ folder, files: [file] })
+    else group.files.push(file)
+  }
+
+  const outside = byFolder.slice(0, limits.folders).map(group => ({
+    folder: group.folder,
+    files: group.files.slice(0, limits.perFolder),
+    hidden: Math.max(0, group.files.length - limits.perFolder),
+  }))
+  const outsideShown = outside.reduce((sum, group) => sum + group.files.length, 0)
+  const inside = files.filter(file => !file.isOutside)
+  const insideRoom = Math.max(limits.minInside, limits.total - outsideShown)
+
+  return {
+    inside: inside.slice(0, insideRoom),
+    insideHidden: Math.max(0, inside.length - insideRoom),
+    outside,
+    foldersHidden: Math.max(0, byFolder.length - limits.folders),
+  }
+}
+
+/**
+ * A folder's path in at most `max` cells: the home folder as `~`, macOS's `/private/tmp` as `/tmp`,
+ * and when too long its middle as `…`, keeping the first folder and as many of the last as fit.
+ *
+ * @example shortPath('/Users/me/.claude/projects/x/memory', 20) === '~/.claude/…/memory'
+ */
+export function shortPath(folder: string, max: number): string {
+  const path = folder.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~').replace(/^\/private(?=\/(tmp|var)\/)/, '')
+  if (cellWidth(path) <= max) return path
+
+  const rooted = path.startsWith('/')
+  const parts = path.split('/').filter(part => part !== '')
+  // `~` alone says little: the first folder in it stays with it.
+  const headCount = parts[0] === '~' ? 2 : 1
+  const head = `${rooted ? '/' : ''}${parts.slice(0, headCount).join('/')}`
+  const rest = parts.slice(headCount)
+  for (let kept = rest.length - 1; kept >= 1; kept -= 1) {
+    const short = `${head}/…/${rest.slice(-kept).join('/')}`
+    if (cellWidth(short) <= max) return short
+  }
+
+  return clipCells(`…/${parts.at(-1) ?? ''}`, max)
+}
+
+/**
+ * A `file:` URL for an absolute path, with no host (the engine opens no other): each part
+ * percent-encoded, so a space, a Korean name, `#` or `?` stays part of the path.
+ */
+export function fileUrl(path: string): string {
+  return `file://${path
+    .split('/')
+    .map(part => encodeURIComponent(part))
+    .join('/')}`
 }
 
 /** `text` cut to `max` cells, an ellipsis taking the last. */
