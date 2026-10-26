@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -168,7 +168,7 @@ test('the sidebar shows the status, the files changed and the contents', async (
     expect(await ui.find({ type: 'Text', text: '45%' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: /대기 중/ }))?.text).toBe('· 대기 중')
     // The stand-in's git has notes.md in the repository and nothing of it left to commit.
-    expect((await ui.find({ type: 'Text', text: /^변경 파일/ }))?.text).toBe('변경 파일 1 · 커밋 안 됨 0')
+    expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ 파일 ')
     expect((await ui.find({ type: 'Text', text: 'notes.md' }))?.text).toBe('notes.md')
     expect(await ui.find({ type: 'Text', text: ' ✓' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: ' +2' }))?.text).toBe(' +2')
@@ -178,6 +178,62 @@ test('the sidebar shows the status, the files changed and the contents', async (
     expect(await ui.find({ type: 'Text', text: /테스트 실행/ })).toBeUndefined()
     await ui.unmount()
   }
+})
+
+test('each part of the sidebar is a box, its title drawn over the top border after it', async ($, on) => {
+  standInForEngine(on)
+  await start($)
+  await twoAnswers($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  for (const id of ['status', 'activity', 'files', 'contents']) {
+    expect((await ui.find({ key: `box-${id}` }))?.props).toMatchObject({ borderStyle: 'round', borderDimColor: true })
+  }
+  // The title row comes after its box in the tree, so it is painted over the border, not under it.
+  expect((await ui.find({ key: 'title-status' }))?.props).toMatchObject({ marginBottom: -1 })
+  expect((await ui.find({ key: 'title-status' }))?.text).toBe('╭── ▾ 상태 ')
+  expect((await ui.find({ key: 'fold-activity' }))?.text).toBe(' ▾ 작업 ')
+  expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ 파일 ')
+  expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▾ 목차 2 ')
+  await ui.unmount()
+})
+
+test('a press on a box title folds it to one line and back; the fold is kept for the next session', async ($, on) => {
+  standInForEngine(on)
+  // The plugin's store, kept where the test can see it.
+  const stored: Record<string, unknown> = {}
+  on('store.get', (_, e) => ({ value: stored[e.key] }))
+  on('store.set', (_, e) => {
+    stored[e.key] = e.value
+
+    return { value: undefined }
+  })
+  await start($)
+  await twoAnswers($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  await ui.press({ key: 'fold-files' })
+  expect(await ui.find({ type: 'Text', text: 'notes.md' })).toBeUndefined()
+  expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▸ 파일 ')
+  expect((await ui.find({ key: 'box-files' }))?.props.borderStyle).toBeUndefined()
+  expect(stored.sidebarFolded).toEqual(['files'])
+
+  await ui.press({ key: 'fold-files' })
+  expect((await ui.find({ type: 'Text', text: 'notes.md' }))?.text).toBe('notes.md')
+  expect(stored.sidebarFolded).toEqual([])
+  await ui.unmount()
+})
+
+test('a box folded in an earlier session starts folded', async ($, on) => {
+  standInForEngine(on)
+  mock.store(on, { sidebarFolded: ['contents'] })
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▸ 목차 0 ')
+  expect(await ui.find({ type: 'Text', text: /아직 기록된 답변/ })).toBeUndefined()
+  expect((await ui.find({ key: 'box-status' }))?.props.borderStyle).toBe('round')
+  await ui.unmount()
 })
 
 test('an answer with a row to scroll to is a button in the contents; its question row ties to it either way round', async ($, on) => {

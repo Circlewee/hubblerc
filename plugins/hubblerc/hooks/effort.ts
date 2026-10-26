@@ -3,17 +3,22 @@ import type { EngineInterface, On, TurnStepResult } from 'claude-code'
 
 import type { EffortSample, EffortSource } from '../types'
 import { autoLevelFor, isAutoOn } from './auto-effort'
+import { addTokens } from './forecast'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
 const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
+const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
+const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
 
 const MAX_SAMPLES = 300
 
 /**
  * Sends this session's main-loop requests with the effort the slider chose, else auto's pick for
  * the turn, else the engine's; keeps track of the engine's own effort so the band can show it, and
- * logs each request's effort and tokens (`/effort-log`), to see what a change of effort costs.
+ * logs each request's effort and tokens (`/effort-log`), to see what a change of effort costs. Each
+ * request's tokens also add up on its turn (the answer's closing line), and its return is when the
+ * prompt cache was last warmed.
  *
  * Session only: the engine's setting (and other sessions) are untouched.
  */
@@ -40,6 +45,10 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
 
     const result: TurnStepResult = yield* next(effort === e.effort ? e : { ...e, effort })
     await logRequest($, { turnId: e.turnId, index: e.index, effort: String(effort), source }, result).catch(() => undefined)
+    await $.clock
+      .now()
+      .then(now => update($, lastRequestAt, () => now))
+      .catch(() => undefined)
 
     return result
   })
@@ -57,6 +66,8 @@ async function logRequest($: EngineInterface, sent: Pick<EffortSample, 'turnId' 
     output: usage.output_tokens,
   }
   await update($, effortLog, log => [...log, sample].slice(-MAX_SAMPLES))
+  const request = { input: sample.input, cacheRead: sample.cacheRead, cacheWrite: sample.cacheWrite, output: sample.output }
+  await update($, turns, list => list.map(turn => (turn.id === sent.turnId ? { ...turn, tokens: addTokens(turn.tokens, request) } : turn)))
 }
 
 /** At session.start: before the first request, the engine's effort is what settings say for the model. */

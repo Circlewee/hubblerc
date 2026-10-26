@@ -4,6 +4,7 @@ import type { EngineInterface, SessionUsage, ToolCallResult } from 'claude-code'
 import type { AgentSeen, RunningCall, UsageSnapshot } from '../types'
 import { applyTaskUpdate, parseGitStatus, todosFromTodoWrite } from './band-format'
 import { bashPurpose } from './bash-purpose'
+import { addFiveHourPoint } from './forecast'
 
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
 const todos = atom({ plugin: 'hubblerc', key: 'todos' } as const, [])
@@ -14,6 +15,7 @@ const git = atom({ plugin: 'hubblerc', key: 'git' } as const, null)
 const project = atom({ plugin: 'hubblerc', key: 'project' } as const, '')
 const model = atom({ plugin: 'hubblerc', key: 'model' } as const, '')
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
+const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
 
 /** While something runs, elapsed times redraw every second. */
 const TICK_MS = 1000
@@ -109,12 +111,17 @@ async function afterCall($: EngineInterface, tool: string, e: CallInput, ran: To
   }
 }
 
-/** Reads the model, folder, usage and git again (after each answer, and every 30 seconds). */
+/** Reads the model, folder, usage and git again (after each answer, and every 30 seconds), and logs the 5-hour window. */
 export async function refreshStatus($: EngineInterface): Promise<void> {
   const [modelId, cwd, figures] = await Promise.all([$.session.model(), $.session.cwd(), $.session.usage()])
   await update($, model, () => modelId)
   await update($, project, () => cwd.split('/').filter(Boolean).pop() ?? cwd)
-  await update($, usage, () => snapshot(figures))
+  const figuresNow = snapshot(figures)
+  await update($, usage, () => figuresNow)
+  // The 5-hour window's reading joins the log when it moved: the burn-out forecast paces from it.
+  const now = await $.clock.now()
+  const log = addFiveHourPoint(await read($, fiveHourLog), figuresNow.fiveHour, now)
+  if (log !== null) await update($, fiveHourLog, () => log)
   const info = await readGit($, cwd)
   await update($, git, () => info)
 }

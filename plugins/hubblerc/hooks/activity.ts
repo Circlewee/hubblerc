@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, ToolCallResult, TurnCompleteInput, TurnStartInput } from 'claude-code'
 
 import type { ToolRun, TurnRecord } from '../types'
+import { pointsUsed } from './forecast'
 
 export const MAX_TURNS = 100
 export const MAX_RUNS_PER_TURN = 400
@@ -11,6 +12,7 @@ export const IGNORED_TOOLS = new Set(['SubagentHandback'])
 
 /** The session's main-loop turns, oldest first, each with the tool calls made while it ran. */
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
+const usage = atom({ plugin: 'hubblerc', key: 'usage' } as const, null)
 /** A question's row ties to the turn that starts within this long of it. */
 const PROMPT_ROW_WINDOW_MS = 10_000
 
@@ -36,6 +38,8 @@ export async function startTurn($: EngineInterface, e: TurnStartInput): Promise<
   }
   const key = promptKey(e.text)
   if (key !== '') turn.promptKey = key
+  const fiveHour = (await read($, usage))?.fiveHour
+  if (fiveHour !== undefined) turn.fiveHourAtStart = fiveHour
   if (pendingPromptRow !== undefined && startedAt - pendingPromptRow.at <= PROMPT_ROW_WINDOW_MS) turn.promptRowId = pendingPromptRow.uuid
   pendingPromptRow = undefined
   await update($, turns, list => [...list, turn].slice(-MAX_TURNS))
@@ -83,6 +87,22 @@ export async function completeTurn($: EngineInterface, e: TurnCompleteInput): Pr
   if (e.agentId !== undefined) return
 
   await update($, turns, list => list.map(turn => (turn.id === e.turnId ? { ...turn, durationMs: e.durationMs } : turn)))
+}
+
+/**
+ * After a turn completed and the usage was read again: the points of the 5-hour window it took.
+ * Read from the account's figures, so another session's use in the meantime counts too.
+ */
+export async function noteFiveHourUsed($: EngineInterface, turnId: string): Promise<void> {
+  const after = (await read($, usage))?.fiveHour
+  await update($, turns, list =>
+    list.map(turn => {
+      if (turn.id !== turnId) return turn
+      const used = pointsUsed(turn.fiveHourAtStart, after)
+
+      return used === null ? turn : { ...turn, fiveHourUsed: used }
+    }),
+  )
 }
 
 /**

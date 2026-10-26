@@ -21,6 +21,8 @@ export type StandIn = {
   /** What the small model answers a completion (null: the call fails), and every request made. */
   completion: string | null
   completions: { model: string; system?: unknown; prompt: unknown }[]
+  /** The 5-hour window's percent `$.session.usage()` answers; a test may change it. */
+  fiveHourPercent: number
 }
 
 /**
@@ -28,7 +30,7 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [] }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25 }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } as never }))
@@ -45,7 +47,7 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
       startedAt: NOW,
       context: { window: 1_000_000, percent: 45 },
       rateLimits: [
-        { kind: 'five_hour', percentUsed: 25, resetsAt: new Date(NOW + 90 * 60_000).toISOString() },
+        { kind: 'five_hour', percentUsed: standIn.fiveHourPercent, resetsAt: new Date(NOW + 90 * 60_000).toISOString() },
         { kind: 'seven_day', percentUsed: 12 },
       ],
       cost: { usd: 1.2 },

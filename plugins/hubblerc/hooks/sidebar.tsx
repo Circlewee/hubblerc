@@ -1,10 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { CommandPresentation, EngineInterface, On, RenderViewport } from 'claude-code'
 
-import { activityParts, cellWidth, COLORS, statusParts, textStyle } from './band-format'
+import { activityParts, cacheAgeSegment, cellWidth, COLORS, statusParts, textStyle } from './band-format'
 import type { Segment } from './band-format'
 import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
+import { burnoutMinutes, cacheAge } from './forecast'
 import { clipCells, sessionFiles, tocEntries, tocPage } from './sidebar-format'
 import type { TocEntry } from './sidebar-format'
 
@@ -22,6 +23,16 @@ const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null
 const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
 const tocPageIndex = atom({ plugin: 'hubblerc', key: 'tocPage' } as const, 0)
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
+const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
+const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
+const folded = atom({ plugin: 'hubblerc', key: 'folded' } as const, [])
+
+/** The sidebar's boxes, by the id their fold is kept under. */
+export type SectionId = 'status' | 'activity' | 'files' | 'contents'
+/** Where the folds are kept across sessions. */
+const FOLDED_KEY = 'sidebarFolded'
+/** Cells a box takes from the width: its border and a cell of padding, each side. */
+const BOX_FRAME = 4
 
 export const SIDEBAR_ID = 'hubblerc'
 const SIDEBAR_TITLE = 'hubblerc'
@@ -94,14 +105,31 @@ export async function syncSidebar($: EngineInterface, layout: Layout, viewport: 
   return pane !== undefined && pane.isPlaced && pane.isShown
 }
 
-/** At session.start: a fresh start for the module state; under the band layout a sidebar left from another layout closes. */
+/**
+ * At session.start: a fresh start for the module state, the boxes folded in an earlier session
+ * folded again; under the band layout a sidebar left from another layout closes.
+ */
 export async function startSidebar($: EngineInterface, layout: Layout): Promise<void> {
   isOpening = false
   isClosing = false
   isDismissed = false
   isPeeking = false
+  await loadFolds($).catch(() => undefined)
   if (layout !== 'band') return
   if ((await $.ui.panes()).some(open => open.id === SIDEBAR_ID)) await $.ui.close({ id: SIDEBAR_ID })
+}
+
+async function loadFolds($: EngineInterface): Promise<void> {
+  const saved = await $.store.get(FOLDED_KEY)
+  if (!Array.isArray(saved)) return
+  const ids = saved.filter((id): id is string => typeof id === 'string')
+  await update($, folded, () => ids)
+}
+
+/** A press on a box's title: folds it to one line, or unfolds it; kept for the next session too. */
+async function toggleFold($: EngineInterface, id: SectionId): Promise<void> {
+  const ids = await update($, folded, list => (list.includes(id) ? list.filter(other => other !== id) : [...list, id]))
+  await $.store.set(FOLDED_KEY, ids).catch(() => undefined)
 }
 
 /**
@@ -128,9 +156,11 @@ export async function toggleSidebar($: EngineInterface, layout: Layout, presenta
 }
 
 /**
- * The sidebar: the band's status, one item a line; what runs; the files the session changed, with
- * the answers that changed them; and the contents, the session's answers newest first, each a press
- * away from its place in the conversation. What each answer did is on its own closing line, not here.
+ * The sidebar, in four boxes each titled on its top border: the band's status, one item a line,
+ * and how long since the last request; what runs; the files the session changed, with the answers
+ * that changed them; and the contents, the session's answers newest first, each a press away from
+ * its place in the conversation. A press on a box's title folds it to one line, and back. What each
+ * answer did is on its own closing line, not here.
  */
 export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): void {
   on('ui.render', { component: 'Pane', requestId: SIDEBAR_ID }, async ($, e) => {
@@ -146,7 +176,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -161,6 +191,9 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, effortAuto),
         read($, autoPick),
         read($, tocPageIndex),
+        read($, fiveHourLog),
+        read($, lastRequestAt),
+        read($, folded),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
@@ -168,17 +201,20 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const width = e.props.bodyColumns
+    /** What a box holds: the width less the box's frame. */
+    const inner = Math.max(1, width - BOX_FRAME)
 
     const isAuto = (auto ?? autoByDefault) && override === null
     const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
+    const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const status = statusParts(
-      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now, burnout, isRoomy: true },
       Number.POSITIVE_INFINITY,
     )
     const isWorking = turnList.at(-1)?.durationMs === null
+    const age = isWorking ? null : cacheAge(lastRequest, now)
     const activity = activityParts(runningList, agentList, todoList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
-    const uncommitted = files.filter(file => !file.isCommitted).length
     const all = tocEntries(turnList, now)
     const { entries, page, pages } = tocPage(all, pageIndex, TOC_PAGE_SIZE)
     const goTo = (to: number) => {
@@ -191,7 +227,60 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       </Text>
     )
 
-    return (
+    /**
+     * A box with its title on the top border (`╭── ▾ 상태 ───╮`), the title a press that folds it;
+     * folded, the title alone on a rule as wide as the box (`╶── ▸ 상태 ────`).
+     *
+     * The title is the box's sibling, not its child: a child drawn over the border vanished on
+     * screen (2.1.310), the border painted over it. Laid out `column-reverse`, the box comes first
+     * and is painted first; the title row after it sits above it and, by a margin of -1, on its top
+     * border, painted last.
+     */
+    const box = (id: SectionId, title: string, body: JSX.Element) => {
+      const isFolded = foldedIds.includes(id)
+      const heading = (
+        <Button
+          key={`fold-${id}`}
+          plain
+          onPress={() => {
+            void toggleFold($, id)
+          }}
+        >
+          <Text dimColor>{isFolded ? ' ▸ ' : ' ▾ '}</Text>
+          <Text bold>{title}</Text>
+          <Text> </Text>
+        </Button>
+      )
+
+      if (isFolded) {
+        const rule = Math.max(0, width - 3 - 3 - cellWidth(title) - 1)
+
+        return (
+          <Box key={`box-${id}`}>
+            <Text dimColor>╶──</Text>
+            {heading}
+            <Text dimColor>{'─'.repeat(rule)}</Text>
+          </Box>
+        )
+      }
+
+      return (
+        <Box flexDirection="column-reverse">
+          <Box key={`box-${id}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+            {body}
+          </Box>
+          {/* As wide as it is written, so the rest of the top border stays; it draws its corner itself. */}
+          <Box key={`title-${id}`} marginBottom={-1} alignSelf="flex-start">
+            <Text dimColor>╭──</Text>
+            {heading}
+          </Box>
+        </Box>
+      )
+    }
+
+    const statusBox = box(
+      'status',
+      '상태',
       <Box flexDirection="column">
         {status.map((part, i) => (
           <Box key={`status-${i}`}>
@@ -213,63 +302,66 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             )}
           </Box>
         ))}
+        {age === null ? null : segmentText(cacheAgeSegment(age), 'cache-age')}
+      </Box>,
+    )
 
-        <Box flexDirection="column" marginTop={1}>
-          {activity.map((line, i) => (
-            <Text key={`activity-${i}`} wrap="truncate-end" {...(line.startsWith('·') ? { dimColor: true } : { color: COLORS.running })}>
-              {line}
-            </Text>
-          ))}
-        </Box>
-
-        {files.length === 0 ? null : (
-          <Box flexDirection="column" marginTop={1}>
-            <Text dimColor>{`변경 파일 ${files.length}${uncommitted < files.length ? ` · 커밋 안 됨 ${uncommitted}` : ''}`}</Text>
-            {files.slice(0, MAX_FILES_SHOWN).map(file => {
-              const refs = file.turns.slice(-MAX_TURN_REFS).map(n => `#${n}`)
-              // A committed file goes dim with a tick: what is left to commit stands out.
-              const counts: Segment[] = [
-                ...(file.isCommitted ? [{ text: ' ✓', dim: true }] : []),
-                ...(file.added > 0 ? [{ text: ` +${file.added}`, ...(file.isCommitted ? { dim: true } : { color: COLORS.ok }) }] : []),
-                ...(file.removed > 0 ? [{ text: ` −${file.removed}`, ...(file.isCommitted ? { dim: true } : { color: COLORS.alert }) }] : []),
-                { text: `  ${file.turns.length > MAX_TURN_REFS ? '… ' : ''}${refs.join(' ')}`, dim: true },
-              ]
-              const room = width - 2 - counts.reduce((sum, segment) => sum + cellWidth(segment.text), 0)
-
-              return (
-                <Box key={`file-${file.path}`} paddingLeft={2}>
-                  <Text {...(file.isCommitted ? { dimColor: true } : {})}>{clipCells(file.name, room)}</Text>
-                  {counts.map((segment, i) => segmentText(segment, `count-${i}`))}
-                </Box>
-              )
-            })}
-            {files.length > MAX_FILES_SHOWN ? (
-              <Box paddingLeft={2}>
-                <Text dimColor>{`외 ${files.length - MAX_FILES_SHOWN}개`}</Text>
-              </Box>
-            ) : null}
-          </Box>
-        )}
-
-        <Box marginTop={1}>
-          <Text dimColor>
-            {all.length === 0
-              ? '아직 기록된 답변이 없습니다'
-              : pages === 1
-                ? '목차'
-                : `목차 #${entries.at(-1)?.number ?? ''}~${entries[0]?.number ?? ''} / ${all.length}`}
+    const activityBox = box(
+      'activity',
+      '작업',
+      <Box flexDirection="column">
+        {activity.map((line, i) => (
+          <Text key={`activity-${i}`} wrap="truncate-end" {...(line.startsWith('·') ? { dimColor: true } : { color: COLORS.running })}>
+            {line}
           </Text>
-        </Box>
+        ))}
+      </Box>,
+    )
+
+    const filesBox =
+      files.length === 0
+        ? null
+        : box(
+            'files',
+            '파일',
+            <Box flexDirection="column">
+              {files.slice(0, MAX_FILES_SHOWN).map(file => {
+                const refs = file.turns.slice(-MAX_TURN_REFS).map(n => `#${n}`)
+                // A committed file goes dim with a tick: what is left to commit stands out.
+                const counts: Segment[] = [
+                  ...(file.isCommitted ? [{ text: ' ✓', dim: true }] : []),
+                  ...(file.added > 0 ? [{ text: ` +${file.added}`, ...(file.isCommitted ? { dim: true } : { color: COLORS.ok }) }] : []),
+                  ...(file.removed > 0 ? [{ text: ` −${file.removed}`, ...(file.isCommitted ? { dim: true } : { color: COLORS.alert }) }] : []),
+                  { text: `  ${file.turns.length > MAX_TURN_REFS ? '… ' : ''}${refs.join(' ')}`, dim: true },
+                ]
+                const room = inner - counts.reduce((sum, segment) => sum + cellWidth(segment.text), 0)
+
+                return (
+                  <Box key={`file-${file.path}`}>
+                    <Text {...(file.isCommitted ? { dimColor: true } : {})}>{clipCells(file.name, room)}</Text>
+                    {counts.map((segment, i) => segmentText(segment, `count-${i}`))}
+                  </Box>
+                )
+              })}
+              {files.length > MAX_FILES_SHOWN ? <Text dimColor>{`외 ${files.length - MAX_FILES_SHOWN}개`}</Text> : null}
+            </Box>,
+          )
+
+    const contentsBox = box(
+      'contents',
+      pages === 1 ? `목차 ${all.length}` : `목차 #${entries.at(-1)?.number ?? ''}~${entries[0]?.number ?? ''} / ${all.length}`,
+      <Box flexDirection="column">
+        {all.length === 0 ? <Text dimColor>아직 기록된 답변이 없습니다</Text> : null}
         {entries.map(entry => {
           const failed = entry.failed > 0 ? ` 실패 ${entry.failed}` : ''
           const head = `#${entry.number} `
-          const room = width - 2 - cellWidth(head) - cellWidth(failed) - cellWidth(entry.time) - 1
+          const room = inner - cellWidth(head) - cellWidth(failed) - cellWidth(entry.time) - 1
           const label = head + clipCells(entry.title, room)
           const mark = failed === '' ? null : <Text color={COLORS.alert}>{failed}</Text>
           const canJump = entry.target !== undefined || entry.key !== undefined
 
           return (
-            <Box key={`entry-${entry.id}`} paddingLeft={2} justifyContent="space-between">
+            <Box key={`entry-${entry.id}`} justifyContent="space-between">
               {!canJump ? (
                 // Nothing to find its row by.
                 <Text>
@@ -294,7 +386,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })}
         {pages > 1 ? (
           // Pages run from the newest answers (1) back; the arrows point the way the numbers do.
-          <Box paddingLeft={2} columnGap={2}>
+          <Box columnGap={2}>
             {page > 0 ? (
               <Button key="toc-newer" plain onPress={() => goTo(page - 1)}>
                 ◀ 최근
@@ -322,6 +414,15 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             )}
           </Box>
         ) : null}
+      </Box>,
+    )
+
+    return (
+      <Box flexDirection="column">
+        {statusBox}
+        {activityBox}
+        {filesBox}
+        {contentsBox}
       </Box>
     )
   })

@@ -1,4 +1,5 @@
 import type { ToolRun, TurnRecord } from '../types'
+import { tokenCount } from './forecast'
 
 /** How far a duration line's time may sit from a turn's recorded duration and still be that turn. */
 const MATCH_TOLERANCE_MS = 1500
@@ -30,10 +31,11 @@ export function matchTurn(list: readonly TurnRecord[], durationMs: number): Turn
 }
 
 /**
- * One line for the end of a turn: what changed, then the main loop's tool calls by name,
- * then what subagents ran and what failed. '' when the turn ran no tool.
+ * One line for the end of a turn: what changed, then the main loop's tool calls by name, then what
+ * subagents ran and what failed, then what it cost: the main loop's output tokens and the points of
+ * the 5-hour window it took (one point or more). '' when the turn ran no tool and cost nothing known.
  *
- * @example 'app.ts +2 −1 · Read 3 · Bash 1 · 에이전트 도구 4 · 실패 1'
+ * @example 'app.ts +2 −1 · Read 3 · Bash 1 · 에이전트 도구 4 · 실패 1 · 출력 12k · 5h +3%'
  */
 export function summarize(turn: TurnRecord): string {
   const parts: string[] = []
@@ -57,6 +59,9 @@ export function summarize(turn: TurnRecord): string {
 
   const failed = turn.runs.filter(run => run.isError).length
   if (failed > 0) parts.push(`실패 ${failed}`)
+
+  if (turn.tokens !== undefined && turn.tokens.output > 0) parts.push(`출력 ${tokenCount(turn.tokens.output)}`)
+  if (turn.fiveHourUsed !== undefined && turn.fiveHourUsed > 0) parts.push(`5h +${turn.fiveHourUsed}%`)
 
   return parts.join(' · ')
 }

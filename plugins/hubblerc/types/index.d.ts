@@ -53,7 +53,15 @@ export type TurnRecord = {
    * transcript keeps no times, so `durationMs` is 0 and each run's `ms` is unknown (0).
    */
   restored?: true
+  /** The main loop's tokens over the turn's requests, as the API reported them. */
+  tokens?: TokenTotals
+  /** The 5-hour window as the turn started, read from the last response before it. */
+  fiveHourAtStart?: RateWindow
+  /** Points of the 5-hour window the turn took (other sessions on the account included); absent when unknown. */
+  fiveHourUsed?: number
 }
+
+export type TokenTotals = { input: number; cacheRead: number; cacheWrite: number; output: number }
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -105,6 +113,9 @@ export type AgentSeen = {
 
 export type RateWindow = { percent: number; resetsAt?: string }
 
+/** A reading of the 5-hour window, kept when it moved: what the burn-out forecast paces from. */
+export type FiveHourPoint = { at: number; percent: number; resetsAt?: string }
+
 /** The status line's figures, as `$.session.usage()` last reported them. */
 export type UsageSnapshot = {
   contextPercent?: number
@@ -155,6 +166,12 @@ declare module 'claude-code' {
       tocPage: number
       /** The session's last main-loop requests, oldest first: what `/effort-log` shows. */
       effortLog: EffortSample[]
+      /** The 5-hour window's readings of the last two hours, oldest first, one per change. */
+      fiveHourLog: FiveHourPoint[]
+      /** When the last main-loop request came back: how long the prompt cache has sat. */
+      lastRequestAt: number | null
+      /** The sidebar's boxes folded to one line, by id; kept across sessions in `$.store`. */
+      folded: string[]
     }
   }
 }

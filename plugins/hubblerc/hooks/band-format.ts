@@ -1,5 +1,6 @@
 import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TodoItem, TurnRecord, UsageSnapshot } from '../types'
 
+import type { CacheAge } from './forecast'
 import { formatDuration, summarize } from './summary'
 
 export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -125,6 +126,10 @@ export type StatusInput = {
   project: string
   git: GitInfo | null
   now: number
+  /** Minutes until the 5-hour window runs out at the current pace, when that is soon (`burnoutMinutes`). */
+  burnout?: number | null
+  /** Room to spare (the sidebar): the burn-out chip says what it means. */
+  isRoomy?: boolean
 }
 
 type StatusShape = { bars: boolean; sevenDay: boolean; projectName: boolean }
@@ -174,7 +179,14 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
   )
 
   const fiveHour = input.usage?.fiveHour
-  if (fiveHour !== undefined) parts.push(usagePart('5h', fiveHour.percent, fiveHour.resetsAt, shape.bars, input.now))
+  if (fiveHour !== undefined) {
+    const part = usagePart('5h', fiveHour.percent, fiveHour.resetsAt, shape.bars, input.now)
+    // Kept in every shape: the one thing worth the room when the window is about to run out.
+    if (input.burnout !== undefined && input.burnout !== null) {
+      part.push({ text: input.isRoomy === true ? ` ⚠ ${input.burnout}m 뒤 소진` : ` ⚠${input.burnout}m`, color: COLORS.alert, bold: true })
+    }
+    parts.push(part)
+  }
 
   const sevenDay = input.usage?.sevenDay
   if (shape.sevenDay && sevenDay !== undefined) parts.push(usagePart('7d', sevenDay.percent, undefined, false, input.now))
@@ -253,6 +265,19 @@ export function todoProgress(todos: readonly TodoItem[]): string {
   if (current === undefined) return `▸ 할 일 ${done}/${todos.length}`
 
   return `▸ ${current.activeForm ?? current.subject} ${done}/${todos.length}`
+}
+
+/**
+ * How long the prompt cache has sat since the last request: dim at first, yellow past five minutes
+ * (a five-minute cache has gone cold), red past an hour (an hour's cache too). Which one this
+ * session has, the engine does not say.
+ */
+export function cacheAgeSegment(age: CacheAge): Segment {
+  const text = `마지막 요청 ${age.text}`
+  if (age.level === 'cold') return { text, color: COLORS.alert }
+  if (age.level === 'warm') return { text, color: COLORS.warn }
+
+  return { text, dim: true }
 }
 
 /** Line 3's text: the last completed answer's time and summary. */

@@ -1,7 +1,7 @@
 import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { completeTurn, IGNORED_TOOLS, recordRun, startTurn, trackLines, trackPrompts } from './activity'
+import { completeTurn, IGNORED_TOOLS, noteFiveHourUsed, recordRun, startTurn, trackLines, trackPrompts } from './activity'
 import { rememberAnswer, startAutoEffort } from './auto-effort'
 import { showBand } from './band'
 import { showBashPurpose } from './bash-purpose'
@@ -12,6 +12,7 @@ import { restoreTurns } from './restore'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
 import { markRunning, noteCall, refreshStatus, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
+import { showToolLines } from './tool-lines'
 
 // The validator reads state sources per file, so each file that reads `turns` declares it.
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
@@ -64,7 +65,10 @@ export const register: Register = (on, options) => {
     await completeTurn($, e).catch(() => undefined)
     rememberAnswer(e)
     const done = await next(e)
-    if (e.agentId === undefined) await refreshStatus($).catch(() => undefined)
+    if (e.agentId === undefined) {
+      await refreshStatus($).catch(() => undefined)
+      await noteFiveHourUsed($, e.turnId).catch(() => undefined)
+    }
 
     return done
   }).catch(($, e, next) => next(e))
@@ -74,6 +78,7 @@ export const register: Register = (on, options) => {
   answerCommands(on, layout)
   controlEffort(on, autoByDefault)
   showBashPurpose(on)
+  showToolLines(on)
   showBand(on, layout, autoByDefault)
   showSidebar(on, layout, autoByDefault)
 

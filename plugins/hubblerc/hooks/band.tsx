@@ -2,9 +2,10 @@ import { atom, read } from 'claude-code'
 import type { On } from 'claude-code'
 
 import type { EffortLevel } from '../types'
-import { activityParts, COLORS, EFFORT_LEVELS, lastAnswer, SEPARATOR, statusParts, textStyle } from './band-format'
+import { activityParts, cacheAgeSegment, COLORS, EFFORT_LEVELS, lastAnswer, SEPARATOR, statusParts, textStyle } from './band-format'
 import type { Segment } from './band-format'
 import { choose, EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
+import { burnoutMinutes, cacheAge } from './forecast'
 import { syncSidebar } from './sidebar'
 import type { Layout } from './sidebar'
 
@@ -22,14 +23,16 @@ const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const effortPicker = atom({ plugin: 'hubblerc', key: 'effortPicker' } as const, null)
 const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null)
 const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
+const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
+const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
 
 const LEVEL_LABELS: Record<EffortLevel, string> = { low: 'low', medium: 'med', high: 'high', xhigh: 'xhigh', max: 'max' }
 
 /**
  * The three lines above the prompt, in place of the claude-hud status line:
- * 1. model · effort │ context │ 5h and 7d limits │ project branch
+ * 1. model · effort │ context │ 5h and 7d limits (a burn-out chip when 5h runs out soon) │ project branch
  * 2. what runs now, or the todo in progress, or that it waits
- * 3. the last answer's summary, or the effort slider while it is open
+ * 3. the last answer's summary and, while idle, how long since the last request; or the effort slider while it is open
  *
  * Colors only where something needs attention, by the terminal's own color names.
  */
@@ -38,7 +41,7 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
     const isSidebarUp = await syncSidebar($, layout, e.viewport).catch(() => false)
     if (e.props.hasSurvey) return next(e)
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt, auto, pick] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt, auto, pick, log, lastRequest] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -53,6 +56,8 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
         read($, effortPicker),
         read($, effortAuto),
         read($, autoPick),
+        read($, fiveHourLog),
+        read($, lastRequestAt),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
@@ -60,12 +65,15 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
 
     const isAuto = (auto ?? autoByDefault) && override === null
     const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
+    const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const line1 = statusParts(
-      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now, burnout },
       e.props.bodyColumns,
     )
     const line2 = activityParts(runningList, agentList, todoList, e.props.isWorking, now).join(SEPARATOR)
     const isIdle = runningList.length === 0 && line2.startsWith('·')
+    const isAnswering = e.props.isWorking || turnList.at(-1)?.durationMs === null
+    const age = isAnswering ? null : cacheAge(lastRequest, now)
 
     const { Box, Text, Button } = $.ui.resolve(e)
 
@@ -157,9 +165,18 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
         {pickerOpenedAt !== null ? (
           slider
         ) : (
-          <Text dimColor wrap="truncate-end">
-            {lastAnswer(turnList)}
-          </Text>
+          <Box>
+            <Text dimColor wrap="truncate-end">
+              {lastAnswer(turnList)}
+            </Text>
+            {age === null ? null : (
+              // Kept whole: the summary before it gives way first.
+              <Box flexShrink={0}>
+                <Text dimColor>{SEPARATOR}</Text>
+                {segmentText(cacheAgeSegment(age))}
+              </Box>
+            )}
+          </Box>
         )}
       </Box>
     )
