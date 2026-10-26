@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, TurnStepResult } from 'claude-code'
+import type { EngineInterface, HookStream, On, TurnStepResult } from 'claude-code'
 
 import type { EffortSample, EffortSource } from '../types'
 import { autoLevelFor, isAutoOn } from './auto-effort'
@@ -10,6 +10,7 @@ const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, 
 const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
+const streamPhase = atom({ plugin: 'hubblerc', key: 'streamPhase' } as const, null)
 
 const MAX_SAMPLES = 300
 
@@ -24,7 +25,8 @@ const MAX_SAMPLES = 300
  */
 export function controlEffort(on: On, autoByDefault: boolean): void {
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId !== undefined || e.effort === undefined) return yield* next(e)
+    if (e.agentId !== undefined) return yield* next(e)
+    if (e.effort === undefined) return yield* watchPhase($, next(e))
 
     const engine = String(e.effort)
     if ((await read($, engineEffort)) !== engine) await update($, engineEffort, () => engine)
@@ -43,7 +45,7 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
       }
     }
 
-    const result: TurnStepResult = yield* next(effort === e.effort ? e : { ...e, effort })
+    const result: TurnStepResult = yield* watchPhase($, next(effort === e.effort ? e : { ...e, effort }))
     await logRequest($, { turnId: e.turnId, index: e.index, effort: String(effort), source }, result).catch(() => undefined)
     await $.clock
       .now()
@@ -52,6 +54,29 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
 
     return result
   })
+}
+
+/**
+ * Passes the main loop's response on chunk by chunk, noting when it turns from thinking to the
+ * answer's text or back (the sidebar's cat shows it); a note per change, not per chunk. Between
+ * requests and after, nothing streams: null.
+ */
+async function* watchPhase<C extends { kind: string }, R>($: EngineInterface, stream: HookStream<C, R>): AsyncGenerator<C, R> {
+  let phase: 'thinking' | 'text' | null = null
+  try {
+    for await (const chunk of stream) {
+      const kind = chunk.kind === 'thinking' || chunk.kind === 'text' ? chunk.kind : null
+      if (kind !== null && kind !== phase) {
+        phase = kind
+        await update($, streamPhase, () => kind).catch(() => undefined)
+      }
+      yield chunk
+    }
+
+    return await stream.result
+  } finally {
+    if (phase !== null) await update($, streamPhase, () => null).catch(() => undefined)
+  }
 }
 
 async function logRequest($: EngineInterface, sent: Pick<EffortSample, 'turnId' | 'index' | 'effort' | 'source'>, result: TurnStepResult): Promise<void> {

@@ -124,6 +124,24 @@ export type UsageSnapshot = {
   costUsd?: number
 }
 
+/** The machine the session runs on and the engine's version, read once as the session starts; a field absent when it could not be read. */
+export type DeviceInfo = {
+  /** `Apple M3 Pro`. */
+  chip?: string
+  /** Memory in whole GiB. */
+  memoryGb?: number
+  /** `macOS 27.0.1`. */
+  os?: string
+  /** When the machine booted, in ms since the epoch: uptime is counted from it as the clock moves. */
+  bootedAt?: number
+  /** The engine's version, `2.1.310`. */
+  version?: string
+  /** The newest version installed on the machine (`~/.local/share/claude/versions`): above `version`, a restart applies it. */
+  installed?: string
+  /** The newest version released (the npm registry's `latest`), read hourly. */
+  latest?: string
+}
+
 export type GitInfo = {
   branch: string
   isDirty: boolean
@@ -174,6 +192,10 @@ declare module 'claude-code' {
       folded: string[]
       /** The files box shows every file (a press on "외 N개"), not the first twelve. */
       filesExpanded: boolean
+      /** The machine and the engine's version, for the sidebar's top box. */
+      device: DeviceInfo | null
+      /** What the main loop's response streams now: thinking, or the answer's text; null between and after. */
+      streamPhase: 'thinking' | 'text' | null
     }
   }
 }

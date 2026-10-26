@@ -16,6 +16,7 @@ const project = atom({ plugin: 'hubblerc', key: 'project' } as const, '')
 const model = atom({ plugin: 'hubblerc', key: 'model' } as const, '')
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
+const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 
 /** While something runs, elapsed times redraw every second. */
 const TICK_MS = 1000
@@ -39,7 +40,8 @@ export async function startStatus($: EngineInterface): Promise<void> {
   $.clock.every(TICK_MS, () => {
     void (async () => {
       const now = await $.clock.now()
-      const isBusy = (await refreshAgents($)) || (await read($, running)).length > 0
+      // An answer running counts too: the sidebar's cat moves while it streams.
+      const isBusy = (await refreshAgents($)) || (await read($, running)).length > 0 || (await read($, turns)).at(-1)?.durationMs === null
       if (now - lastSlow >= SLOW_REFRESH_MS) {
         lastSlow = now
         await refreshStatus($)

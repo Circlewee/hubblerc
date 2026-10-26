@@ -5,7 +5,9 @@ import { activityParts, cacheAgeSegment, cellWidth, COLORS, statusParts, textSty
 import type { Segment } from './band-format'
 import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
+import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, cacheAge } from './forecast'
+import { CAT_PALETTE, catFrame, catMood, pixelRows } from './pixel-art'
 import { clipCells, fileLayout, fileUrl, sessionFiles, shortPath, tocEntries, tocPage } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
 
@@ -27,9 +29,11 @@ const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, []
 const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
 const folded = atom({ plugin: 'hubblerc', key: 'folded' } as const, [])
 const filesExpanded = atom({ plugin: 'hubblerc', key: 'filesExpanded' } as const, false)
+const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
+const streamPhase = atom({ plugin: 'hubblerc', key: 'streamPhase' } as const, null)
 
 /** The sidebar's boxes, by the id their fold is kept under. */
-export type SectionId = 'status' | 'activity' | 'files' | 'contents'
+export type SectionId = 'device' | 'status' | 'activity' | 'files' | 'contents'
 /** Where the folds are kept across sessions. */
 const FOLDED_KEY = 'sidebarFolded'
 /** Cells a box takes from the width: its border and a cell of padding, each side. */
@@ -180,7 +184,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded, deviceInfo, phase] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -199,6 +203,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, lastRequestAt),
         read($, folded),
         read($, filesExpanded),
+        read($, device),
+        read($, streamPhase),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
@@ -282,6 +288,67 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         </Box>
       )
     }
+
+    // The machine and the engine, beside a cat drawn in half blocks that shows what the session does.
+    const lines = deviceLines(deviceInfo, now)
+    const note = versionNote(deviceInfo)
+    const lastDone = turnList.findLast(turn => turn.durationMs !== null)
+    const mood = catMood({
+      isWorking,
+      isToolRunning: runningList.length > 0 || agentList.some(agent => agent.status === 'running' || agent.status === 'pending'),
+      phase,
+      lastFailed: lastDone !== undefined && lastDone.runs.some(run => run.isError),
+    })
+    const cat = catFrame(mood, Math.floor(now / 1000))
+    const catRows = pixelRows(cat.art, CAT_PALETTE)
+    const deviceBox = box(
+      'device',
+      '장비',
+      // A row of air above and below: the cat and its lines sit apart from the borders.
+      <Box key="device-body" columnGap={2} paddingY={1}>
+        <Box flexDirection="column" flexShrink={0}>
+          {catRows.map((row, y) => (
+            <Box key={`cat-${y}`}>
+              {row.map((run, x) => (
+                <Text key={`cat-${y}-${x}`} {...(run.color === undefined ? {} : { color: run.color })} {...(run.backgroundColor === undefined ? {} : { backgroundColor: run.backgroundColor })}>
+                  {run.text}
+                </Text>
+              ))}
+            </Box>
+          ))}
+        </Box>
+        {/* Beside the head: z, ?, !; a column of its own, so the lines never move. */}
+        <Box width={1} flexShrink={0} marginLeft={-1}>
+          <Text key="cat-mark" {...(mood === 'startled' ? { color: COLORS.alert, bold: true } : { dimColor: true })}>
+            {cat.mark === '' ? ' ' : cat.mark}
+          </Text>
+        </Box>
+        <Box flexDirection="column">
+          {lines.length === 0 && deviceInfo?.version === undefined ? <Text dimColor>장비 정보를 읽는 중</Text> : null}
+          {lines.map((line, i) => (
+            <Text key={`device-${i}`} wrap="truncate-end" dimColor>
+              {line}
+            </Text>
+          ))}
+          {deviceInfo?.version === undefined ? null : (
+            // A later version beside the running one, a link to what changed: cyan when released, yellow
+            // with "재시작" when installed and a restart away. (↻ is the 5h reset's: not used here.)
+            <Box key="device-version">
+              <Text wrap="truncate-end">
+                {`Claude Code ${deviceInfo.version}`}
+                {note === null ? null : (
+                  <Text {...(note.kind === 'restart' ? { color: COLORS.warn } : { color: COLORS.effort })}>
+                    {' ↑ '}
+                    <Link href={CHANGELOG_URL}>{note.version}</Link>
+                  </Text>
+                )}
+                {note?.kind === 'restart' ? <Text dimColor> 재시작</Text> : null}
+              </Text>
+            </Box>
+          )}
+        </Box>
+      </Box>,
+    )
 
     const statusBox = box(
       'status',
@@ -480,6 +547,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
 
     return (
       <Box flexDirection="column">
+        {deviceBox}
         {statusBox}
         {activityBox}
         {filesBox}

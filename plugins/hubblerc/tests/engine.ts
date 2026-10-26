@@ -23,6 +23,9 @@ export type StandIn = {
   completions: { model: string; system?: unknown; prompt: unknown }[]
   /** The 5-hour window's percent `$.session.usage()` answers; a test may change it. */
   fiveHourPercent: number
+  /** The files of `~/.local/share/claude/versions`, and what the npm registry calls latest. */
+  installedVersions: string[]
+  latestVersion: string
 }
 
 /**
@@ -30,7 +33,7 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25 }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310' }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } as never }))
@@ -54,7 +57,14 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     } as never,
   }))
   on('agent.list', () => ({ value: agents as never }))
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: '@anthropic-ai/claude-code', version: standIn.latestVersion }) } }))
+  on('session.version', () => ({ value: { version: '2.1.310', base: '2.1.310' } }))
   on('process.run', (_, e) => {
+    const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // Booted a day, two hours and five minutes before NOW.
+    if (e.argv[0] === 'sysctl') return ok(`Apple M3 Pro\n19327352832\n{ sec = ${(NOW - (26 * 60 + 5) * 60_000) / 1000}, usec = 0 } Sat Oct 24\n`)
+    if (e.argv[0] === 'sw_vers') return ok('27.0.1\n')
+    if (e.argv[0] === 'sh') return ok(`${standIn.installedVersions.join('\n')}\n`)
     if (e.argv.includes('rev-parse')) {
       return { value: { exitCode: 0, stdout: '/repo/hubblerc\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
@@ -99,6 +109,8 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
   on('turn.complete', () => ({ text: '' }))
   on('tool.call', (_, e) => {
     if (e.tool === 'Agent') return { result: { status: 'async_launched', agentId: 'ag-1' } as never }
+    // A command that removes is refused, as a person might: a failed call.
+    if (e.tool === 'Bash' && String((e as { command?: unknown }).command).startsWith('rm')) return { deny: 'refused' }
     if (e.tool === 'Write') return { result: { type: 'create', filePath: e.file_path, content: e.content, structuredPatch: [] } as never }
 
     return { result: {} as never }

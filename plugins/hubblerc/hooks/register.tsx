@@ -6,6 +6,7 @@ import { rememberAnswer, startAutoEffort } from './auto-effort'
 import { showBand } from './band'
 import { showBashPurpose } from './bash-purpose'
 import { answerCommands, registerCommand } from './commands'
+import { startDevice } from './device'
 import { controlEffort, startEffort } from './effort'
 import { closeEffortPicker } from './effort-picker'
 import { restoreTurns } from './restore'
@@ -30,6 +31,7 @@ export const register: Register = (on, options) => {
     await startStatus($).catch(() => undefined)
     await startEffort($).catch(() => undefined)
     await startSidebar($, layout).catch(() => undefined)
+    await startDevice($).catch(() => undefined)
 
     return started
   })
