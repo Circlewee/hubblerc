@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FiveHourPoint } from '../types'
-import { addFiveHourPoint, burnoutMinutes, cacheAge, pointsUsed, tokenCount } from '../hooks/forecast'
+import { addFiveHourPoint, burnoutMinutes, cacheShare, pointsUsed, requestTime, tokenCount } from '../hooks/forecast'
 
 const MIN = 60_000
 const NOW = Date.parse('2026-10-26T09:00:00Z')
@@ -59,13 +59,13 @@ test('no chip on a slow pace, a short or flat span, a reset that comes first, or
   expect(burnoutMinutes([], undefined, NOW)).toBeNull()
 })
 
-test('the time since the last request reads in minutes and hours, going yellow at five minutes and red at an hour', () => {
-  expect(cacheAge(null, NOW)).toBeNull()
-  expect(cacheAge(NOW - 30_000, NOW)).toBeNull()
-  expect(cacheAge(NOW - 3 * MIN, NOW)).toEqual({ text: '3분 전', level: 'fresh' })
-  expect(cacheAge(NOW - 7 * MIN, NOW)).toEqual({ text: '7분 전', level: 'warm' })
-  expect(cacheAge(NOW - 60 * MIN, NOW)).toEqual({ text: '1시간 전', level: 'cold' })
-  expect(cacheAge(NOW - 65 * MIN, NOW)).toEqual({ text: '1시간 5분 전', level: 'cold' })
+test('the last request reads as a clock time, and the cache\'s share of an answer\'s prompts in percent', () => {
+  const at = new Date(NOW)
+  expect(requestTime(NOW)).toBe(`${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`)
+  expect(requestTime(null)).toBeNull()
+  expect(cacheShare({ input: 10, cacheRead: 960, cacheWrite: 30, output: 100 })).toBe(96)
+  expect(cacheShare({ input: 0, cacheRead: 0, cacheWrite: 0, output: 5 })).toBeNull()
+  expect(cacheShare(undefined)).toBeNull()
 })
 
 test('token counts are short', () => {

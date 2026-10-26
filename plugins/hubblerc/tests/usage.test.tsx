@@ -91,7 +91,7 @@ test('a 5-hour window that did not move is not named on the closing line', async
   await ui.unmount()
 })
 
-test('idle, the band and the sidebar tell how long since the last request; a pace that runs 5h out within the hour shows a chip', async ($, on) => {
+test('idle, the band and the sidebar tell when the last request went out and the last answer\'s cache share; a pace that runs 5h out within the hour shows a chip', async ($, on) => {
   const standIn = standInForEngine(on)
   answerRequests(on, 100)
   drawBeneath(on)
@@ -105,14 +105,19 @@ test('idle, the band and the sidebar tell how long since the last request; a pac
   await standIn.clock.advance(12 * MIN)
 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal', props: BAND_PROPS, viewport: MAIN_SCREEN })
-  const age = await band.find({ type: 'Text', text: /마지막 요청/ })
-  expect(age?.text).toBe('마지막 요청 12분 전')
-  expect(age?.props.color).toBe('yellow')
+  // The request went out at NOW, by the clock; its prompt came from no cache.
+  const at = new Date(standIn.clock.now() - 12 * MIN)
+  const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+  expect((await band.find({ type: 'Text', text: /마지막 요청/ }))?.text).toBe(`마지막 요청 ${time}`)
+  const share = await band.find({ type: 'Text', text: /^캐시/ })
+  expect(share?.text).toBe('캐시 0%')
+  expect(share?.props.color).toBe('red')
   expect((await band.find({ type: 'Text', text: /⚠/ }))?.text).toBe(' ⚠33m')
   await band.unmount()
 
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await pane.find({ type: 'Text', text: /마지막 요청/ }))?.text).toBe('마지막 요청 12분 전')
+  expect((await pane.find({ type: 'Text', text: /마지막 요청/ }))?.text).toBe(`마지막 요청 ${time}`)
+  expect((await pane.find({ type: 'Text', text: /^캐시/ }))?.text).toBe('캐시 0%')
   expect((await pane.find({ type: 'Text', text: /⚠/ }))?.text).toBe(' ⚠ 33m 뒤 소진')
   await pane.unmount()
 })

@@ -2,6 +2,7 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import { effortLogTable } from './effort-log'
+import { runSetup } from './setup'
 import { toggleSidebar } from './sidebar'
 import type { Layout } from './sidebar'
 import { activityTable } from './summary'
@@ -30,6 +31,11 @@ export async function registerCommand($: EngineInterface): Promise<void> {
     description: '상태와 답변별 타임라인을 보여 주는 사이드바 열기/닫기 (hubblerc)',
     immediate: true,
   })
+  await $.command.register({
+    name: 'setup',
+    description: '이 기기의 hubblerc 설정 점검: 빠진 키 설정을 추가하고, 전체 화면·claude-hud·언어 설정을 안내 (hubblerc)',
+    immediate: true,
+  })
 }
 
 export function answerCommands(on: On, layout: Layout): void {
@@ -37,6 +43,7 @@ export function answerCommands(on: On, layout: Layout): void {
   on('command.run', { command: 'effort-log' }, async $ => ({
     text: effortLogTable(await read($, effortLog), await read($, turns), await read($, autoPick)),
   }))
+  on('command.run', { command: 'setup' }, async $ => ({ text: await runSetup($).catch((error: unknown) => `hubblerc 설정 점검 실패: ${String(error)}`) }))
   on('command.run', { command: 'panel' }, async ($, e) => {
     const text = await toggleSidebar($, layout, e.presentation)
 

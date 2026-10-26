@@ -1,12 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { CommandPresentation, EngineInterface, On, RenderViewport } from 'claude-code'
 
-import { activityParts, cacheAgeSegment, cellWidth, COLORS, statusParts, textStyle } from './band-format'
+import { activityParts, cellWidth, COLORS, requestSegments, statusParts, textStyle } from './band-format'
 import type { Segment } from './band-format'
 import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
-import { burnoutMinutes, cacheAge } from './forecast'
+import { burnoutMinutes, cacheShare, requestTime } from './forecast'
 import { CAT_PALETTE, catFrame, catMood, pixelRows } from './pixel-art'
 import { clipCells, fileLayout, fileUrl, sessionFiles, shortPath, tocEntries, tocPage } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
@@ -223,7 +223,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       Number.POSITIVE_INFINITY,
     )
     const isWorking = turnList.at(-1)?.durationMs === null
-    const age = isWorking ? null : cacheAge(lastRequest, now)
+    const request = isWorking ? [] : requestSegments(requestTime(lastRequest), cacheShare(turnList.findLast(turn => turn.durationMs !== null)?.tokens))
     const activity = activityParts(runningList, agentList, todoList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
     const all = tocEntries(turnList, now)
@@ -374,7 +374,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             )}
           </Box>
         ))}
-        {age === null ? null : segmentText(cacheAgeSegment(age), 'cache-age')}
+        {request.length === 0 ? null : <Box key="request">{request.map((segment, i) => segmentText(segment, `request-${i}`))}</Box>}
       </Box>,
     )
 

@@ -65,19 +65,27 @@ function isSameWindow(a: string | undefined, b: string | undefined): boolean {
   return Number.isFinite(gap) ? gap <= SAME_RESET_MS : a === b
 }
 
-/** How the time since the last request reads, and how it is colored: a cache past five minutes, then an hour, may have gone cold. */
-export type CacheAge = { text: string; level: 'fresh' | 'warm' | 'cold' }
-
-/** `7분 전` since the last main-loop request; null before one, or within the first minute. */
-export function cacheAge(lastRequestAt: number | null, now: number): CacheAge | null {
+/**
+ * The clock time of the last main-loop request (`14:32`), on the machine's clock: right however
+ * long it stands undrawn, as "N분 전" was not. Null before one.
+ */
+export function requestTime(lastRequestAt: number | null): string | null {
   if (lastRequestAt === null) return null
-  const minutes = Math.floor((now - lastRequestAt) / 60_000)
-  if (minutes < 1) return null
+  const at = new Date(lastRequestAt)
 
-  const hours = Math.floor(minutes / 60)
-  const text = hours === 0 ? `${minutes}분 전` : minutes % 60 === 0 ? `${hours}시간 전` : `${hours}시간 ${minutes % 60}분 전`
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+}
 
-  return { text, level: minutes >= 60 ? 'cold' : minutes >= 5 ? 'warm' : 'fresh' }
+/**
+ * How much of an answer's prompts the cache served, in whole percent: what it read from the cache
+ * over all it was sent. Low means the cache was cold or missed, and the answer cost the more.
+ * Null with nothing known.
+ */
+export function cacheShare(tokens: TokenTotals | undefined): number | null {
+  if (tokens === undefined) return null
+  const prompt = tokens.input + tokens.cacheRead + tokens.cacheWrite
+
+  return prompt === 0 ? null : Math.round((tokens.cacheRead / prompt) * 100)
 }
 
 /** A token count, short: `850`, `1.2k`, `12k`, `1.3M`. */

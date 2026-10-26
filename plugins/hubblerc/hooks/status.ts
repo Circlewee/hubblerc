@@ -40,15 +40,22 @@ export async function startStatus($: EngineInterface): Promise<void> {
   $.clock.every(TICK_MS, () => {
     void (async () => {
       const now = await $.clock.now()
+      // Each read on its own: one failing must not keep the redraw back, or countdowns and
+      // uptime stand still (a "1분 전" that never moved was seen on screen).
+      const hasAgents = await refreshAgents($).catch(() => false)
+      const isRunning = await read($, running)
+        .then(list => list.length > 0)
+        .catch(() => false)
       // An answer running counts too: the sidebar's cat moves while it streams.
-      const isBusy = (await refreshAgents($)) || (await read($, running)).length > 0 || (await read($, turns)).at(-1)?.durationMs === null
-      if (now - lastSlow >= SLOW_REFRESH_MS) {
+      const isAnswering = await read($, turns)
+        .then(list => list.at(-1)?.durationMs === null)
+        .catch(() => false)
+      const isSlow = now - lastSlow >= SLOW_REFRESH_MS
+      if (isSlow) {
         lastSlow = now
-        await refreshStatus($)
-      } else if (!isBusy) {
-        return
+        await refreshStatus($).catch(() => undefined)
       }
-      await update($, tick, () => now)
+      if (isSlow || hasAgents || isRunning || isAnswering) await update($, tick, () => now)
     })().catch(() => undefined)
   })
   $.clock.every(GIT_REFRESH_MS, () => {

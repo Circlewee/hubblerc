@@ -1,6 +1,5 @@
 import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TodoItem, TurnRecord, UsageSnapshot } from '../types'
 
-import type { CacheAge } from './forecast'
 import { formatDuration, summarize } from './summary'
 
 export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -268,16 +267,20 @@ export function todoProgress(todos: readonly TodoItem[]): string {
 }
 
 /**
- * How long the prompt cache has sat since the last request: dim at first, yellow past five minutes
- * (a five-minute cache has gone cold), red past an hour (an hour's cache too). Which one this
- * session has, the engine does not say.
+ * When the last request went out and how much of the last answer the cache served:
+ * `마지막 요청 14:32 · 캐시 96%`. The share goes yellow under 80% and red under 50%, an answer that
+ * paid for its prompt; the time stays dim. Nothing when neither is known.
  */
-export function cacheAgeSegment(age: CacheAge): Segment {
-  const text = `마지막 요청 ${age.text}`
-  if (age.level === 'cold') return { text, color: COLORS.alert }
-  if (age.level === 'warm') return { text, color: COLORS.warn }
+export function requestSegments(time: string | null, share: number | null): Segment[] {
+  const segments: Segment[] = []
+  if (time !== null) segments.push({ text: `마지막 요청 ${time}`, dim: true })
+  if (share !== null) {
+    if (segments.length > 0) segments.push({ text: ' · ', dim: true })
+    const text = `캐시 ${share}%`
+    segments.push(share < 50 ? { text, color: COLORS.alert } : share < 80 ? { text, color: COLORS.warn } : { text, dim: true })
+  }
 
-  return { text, dim: true }
+  return segments
 }
 
 /** Line 3's text: the last completed answer's time and summary. */

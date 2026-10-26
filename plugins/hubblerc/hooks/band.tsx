@@ -2,10 +2,10 @@ import { atom, read } from 'claude-code'
 import type { On } from 'claude-code'
 
 import type { EffortLevel } from '../types'
-import { activityParts, cacheAgeSegment, COLORS, EFFORT_LEVELS, lastAnswer, SEPARATOR, statusParts, textStyle } from './band-format'
+import { activityParts, COLORS, EFFORT_LEVELS, lastAnswer, requestSegments, SEPARATOR, statusParts, textStyle } from './band-format'
 import type { Segment } from './band-format'
 import { choose, EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
-import { burnoutMinutes, cacheAge } from './forecast'
+import { burnoutMinutes, cacheShare, requestTime } from './forecast'
 import { syncSidebar } from './sidebar'
 import type { Layout } from './sidebar'
 
@@ -73,7 +73,9 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
     const line2 = activityParts(runningList, agentList, todoList, e.props.isWorking, now).join(SEPARATOR)
     const isIdle = runningList.length === 0 && line2.startsWith('·')
     const isAnswering = e.props.isWorking || turnList.at(-1)?.durationMs === null
-    const age = isAnswering ? null : cacheAge(lastRequest, now)
+    // While idle: when the last request went out and how much of the last answer the cache served.
+    const lastDone = turnList.findLast(turn => turn.durationMs !== null)
+    const request = isAnswering ? [] : requestSegments(requestTime(lastRequest), cacheShare(lastDone?.tokens))
 
     const { Box, Text, Button } = $.ui.resolve(e)
 
@@ -169,11 +171,11 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
             <Text dimColor wrap="truncate-end">
               {lastAnswer(turnList)}
             </Text>
-            {age === null ? null : (
+            {request.length === 0 ? null : (
               // Kept whole: the summary before it gives way first.
               <Box flexShrink={0}>
                 <Text dimColor>{SEPARATOR}</Text>
-                {segmentText(cacheAgeSegment(age))}
+                {request.map(segment => segmentText(segment))}
               </Box>
             )}
           </Box>

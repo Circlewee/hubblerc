@@ -10,6 +10,7 @@ import { startDevice } from './device'
 import { controlEffort, startEffort } from './effort'
 import { closeEffortPicker } from './effort-picker'
 import { restoreTurns } from './restore'
+import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
 import { markRunning, noteCall, refreshStatus, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
@@ -32,6 +33,7 @@ export const register: Register = (on, options) => {
     await startEffort($).catch(() => undefined)
     await startSidebar($, layout).catch(() => undefined)
     await startDevice($).catch(() => undefined)
+    await checkSetup($).catch(() => undefined)
 
     return started
   })
