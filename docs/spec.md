@@ -105,6 +105,22 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - MCP 연결 끊김 경고 [추정: API 미확인]
 - 나만의 skill, 훅을 같은 플러그인에 묶기 (가능 [확인: 묶음 플러그인 로드 실험])
 
+## 보류: 색 테마 프리셋 (2026-10-26 조사, 구현 안 함)
+하고 싶어지면 아래만 보고 바로 시작할 수 있게 정리.
+
+- 결정: hubblerc의 밴드·사이드바 글자색은 계속 터미널 색 이름(Kanagawa가 정함). 테마는 엔진이 그리는 나머지를 맞추는 용도.
+- mod API만으로는 패널 바탕을 바꿀 수 없다. 패널 틀·바탕은 엔진이 칠하고(스크린샷상 대화 영역보다 한 단계 밝음), 패널 배경 속성이 없다 [확인: 타입 문서]. mod 색 값은 터미널 색 이름, hex, 엔진 테마 키(`success`, `error`, `subtle` 등) 셋 중 하나.
+- 플러그인은 테마를 배포할 수 있다 [확인: 문서 "Add components to a plugin" > Themes and output styles].
+  - 위치: `plugins/hubblerc/themes/<slug>.json` (manifest 키 `experimental.themes`를 쓰면 폴더 스캔 대신).
+  - `/theme` 목록에 파일의 `name`으로, 플러그인 표시와 함께 나온다. 플러그인 테마는 읽기 전용이고 사용자가 `/theme`에서 고치면 `~/.claude/themes/`에 사본으로 저장된다.
+  - 형식(문서 "Configure your terminal" > Create a custom theme): `{ "name": "...", "base": "dark", "overrides": { "<token>": "<color>" } }`. base는 `dark`, `light`, `dark-daltonized`, `light-daltonized`, `dark-ansi`, `light-ansi`. 색은 `#rrggbb`, `#rgb`, `rgb(r,g,b)`, `ansi256(n)`, `ansi:<16색 이름>`. 모르는 토큰·잘못된 값은 무시된다.
+- 토큰(문서 목록): `claude`, `text`, `inverseText`, `inactive`, `subtle`, `suggestion`, `permission`, `remember` / `success`, `error`, `warning`, `merged` / `promptBorder`, `planMode`, `autoAccept`, `bashBorder`, `ide`, `fastMode`, `effortUltra` / `diffAdded`, `diffRemoved`, `diffAddedDimmed`, `diffRemovedDimmed`, `diffAddedWord`, `diffRemovedWord` / `userMessageBackground`, `userMessageBackgroundHover`, `bashMessageBackgroundColor`, `memoryBackgroundColor`, `selectionBg`, `composerSidebarBackground` / `rate_limit_fill`, `rate_limit_empty`, `briefLabelYou`, `briefLabelClaude` / 반짝임 짝(`claudeShimmer` 등), `<color>_FOR_SUBAGENTS_ONLY`, `rainbow_<color>`.
+  - `composerSidebarBackground`: 대화 옆 패널(diff 패널, mod 패널) 배경. 대화 바탕과 같은 hex를 넣으면 "투명처럼" 보인다. "투명"이나 "터미널 기본 바탕"을 뜻하는 값은 없다.
+- 적용 범위: Claude Code가 칠하는 색만 바뀌고 터미널 자체(바탕, 기본 글자, 칠하지 않은 영역)는 그대로 [확인: 문서]. 고르면 `custom:<slug>`가 사용자 설정으로 저장돼 그 기기의 모든 Claude Code 세션에 적용된다 [추정].
+- 주의: hubblerc는 지금 이 폴더에서만(local scope) 켜진다. hubblerc 테마를 고른 채 다른 폴더에서 실행하면 테마를 못 찾는데, 그때 동작은 문서에 없다(확인 필요). 쓰려면 사용자 범위로 설치.
+- 다크/라이트: `/theme`의 auto는 터미널 바탕 밝기로 내장 다크/라이트를 고른다. 사용자 정의 테마는 고정되는 것으로 보인다 [추정].
+- 시작 순서: (1) Kanagawa 변형(Wave/Dragon/Lotus)과 Orca 바탕 hex 확인 (2) `themes/kanagawa.json`(base dark, `composerSidebarBackground` = 대화 바탕색, 상태색·diff 색을 Kanagawa 팔레트로) (3) `claude plugin validate` → `/reload-plugins` → `/theme`에서 선택 (4) 필요하면 라이트(Lotus)와 다른 프리셋 추가.
+
 ## 확인할 것
 - `turn.step`에서 바꾼 effort가 Spinner나 상태 표시에 반영되는가
 - 엔진 effort 슬라이더를 여는 방법
