@@ -147,8 +147,15 @@ export type GitInfo = {
   isDirty: boolean
   /** The repository's top folder, absolute. */
   root?: string
-  /** The files with changes not committed (staged, unstaged or untracked), absolute. */
+  /**
+   * The files with changes not committed (staged, unstaged or untracked), absolute. An entry
+   * ending in `/` is a folder git reports whole (untracked throughout): every file under it.
+   */
   changed?: string[]
+  /** Of `changed`, those git does not track yet, the same way. */
+  untracked?: string[]
+  /** The files and folders `.gitignore` keeps out (`git status --ignored`), the same way; not in `changed`. */
+  ignored?: string[]
 }
 
 declare module 'claude-code' {

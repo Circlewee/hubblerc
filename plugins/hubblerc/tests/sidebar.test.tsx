@@ -65,6 +65,18 @@ test('the files the session changed add up across answers, the one changed last 
   ])
 })
 
+test('a file in an untracked folder is untracked, one .gitignore keeps out is ignored; neither counts as committed', () => {
+  const edit = (id: string, path: string) => ({ id, tool: 'Write', ms: 1, isError: false, path, added: 1, removed: 0 })
+  const list = [turn('t1', [edit('1', '/repo/docs/drafts/plan.md'), edit('2', '/repo/dist/out.js'), edit('3', '/repo/a.ts')])]
+  const git = { branch: 'main', isDirty: true, root: '/repo', changed: ['/repo/docs/drafts/'], untracked: ['/repo/docs/drafts/'], ignored: ['/repo/dist/'] }
+
+  expect(sessionFiles(list, git).map(file => [file.name, file.isCommitted, file.isUntracked, file.isIgnored])).toEqual([
+    ['a.ts', true, false, false],
+    ['out.js', false, false, true],
+    ['plan.md', false, true, false],
+  ])
+})
+
 test('a file in the repository with nothing left to commit counts as committed; one outside never does', () => {
   const list = [
     turn('t1', [

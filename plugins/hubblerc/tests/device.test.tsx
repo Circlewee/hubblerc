@@ -136,7 +136,8 @@ test('a later version shows beside the running one, a link to the changelog', as
   const link = await released.find({ type: 'Link' })
   expect(link?.props.href).toBe(CHANGELOG_URL)
   expect(link?.children).toEqual(['2.1.312'])
-  expect((await released.find({ type: 'Text', text: /^ ↑/ }))?.props.color).toBe('cyan')
+  // In the sidebar, colours are the theme's keys: they follow a light theme as a dark one.
+  expect((await released.find({ type: 'Text', text: /^ ↑/ }))?.props.color).toBe('suggestion')
   expect(await released.find({ type: 'Text', text: ' 재시작' })).toBeUndefined()
   await released.unmount()
 })
@@ -147,7 +148,7 @@ test('a later version installed shows yellow with 재시작: a restart applies i
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await ui.find({ type: 'Text', text: /^ ↑/ }))?.props.color).toBe('yellow')
+  expect((await ui.find({ type: 'Text', text: /^ ↑/ }))?.props.color).toBe('warning')
   expect(await ui.find({ type: 'Text', text: ' 재시작' })).toBeDefined()
   expect((await ui.find({ type: 'Link' }))?.children).toEqual(['2.1.311'])
   await ui.unmount()

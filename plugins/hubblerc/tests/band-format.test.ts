@@ -13,6 +13,7 @@ import {
   statusParts,
   todoProgress,
   todosFromTodoWrite,
+  isListed,
 } from '../hooks/band-format'
 import { modelEffort } from '../hooks/effort'
 
@@ -104,11 +105,31 @@ test('line 2 names what runs, the subagents and the todo, or says it waits', () 
 })
 
 test('git status reads as a branch and whether the tree has changes', () => {
-  expect(parseGitStatus('## main...origin/main [ahead 1]\n M a.ts\nR  old.ts -> 새 파일.ts\n')).toEqual({ branch: 'main', isDirty: true, changed: ['a.ts', '새 파일.ts'] })
-  expect(parseGitStatus('## main\n')).toEqual({ branch: 'main', isDirty: false, changed: [] })
-  expect(parseGitStatus('## No commits yet on main\n?? a.ts\n')).toEqual({ branch: 'main', isDirty: true, changed: ['a.ts'] })
-  expect(parseGitStatus('## HEAD (no branch)\n')).toEqual({ branch: 'HEAD', isDirty: false, changed: [] })
+  expect(parseGitStatus('## main...origin/main [ahead 1]\n M a.ts\nR  old.ts -> 새 파일.ts\n')).toEqual({
+    branch: 'main',
+    isDirty: true,
+    changed: ['a.ts', '새 파일.ts'],
+    untracked: [],
+    ignored: [],
+  })
+  expect(parseGitStatus('## main\n')).toMatchObject({ branch: 'main', isDirty: false, changed: [] })
+  expect(parseGitStatus('## No commits yet on main\n?? a.ts\n')).toMatchObject({ branch: 'main', isDirty: true, changed: ['a.ts'], untracked: ['a.ts'] })
+  expect(parseGitStatus('## HEAD (no branch)\n')).toMatchObject({ branch: 'HEAD', isDirty: false, changed: [] })
   expect(parseGitStatus('fatal: not a git repository')).toBeNull()
+})
+
+test('untracked and ignored come apart, a folder whole as dir/; ignored alone is not dirty', () => {
+  expect(parseGitStatus('## main\n?? drafts/\n?? top.md\n!! dist/\n')).toEqual({
+    branch: 'main',
+    isDirty: true,
+    changed: ['drafts/', 'top.md'],
+    untracked: ['drafts/', 'top.md'],
+    ignored: ['dist/'],
+  })
+  expect(parseGitStatus('## main\n!! dist/\n')?.isDirty).toBe(false)
+  expect(isListed(['/r/drafts/', '/r/top.md'], '/r/drafts/notes/x.md')).toBe(true)
+  expect(isListed(['/r/drafts/'], '/r/drafts.md')).toBe(false)
+  expect(isListed(undefined, '/r/a.ts')).toBe(false)
 })
 
 test('todos follow TodoWrite whole and TaskUpdate one by one', () => {

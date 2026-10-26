@@ -168,14 +168,16 @@ async function readGit($: EngineInterface, cwd: string) {
     // quotePath off: a Korean file name comes as itself, not octal escapes. No optional locks: run
     // every five seconds, a status that refreshed the index took .git/index.lock and a commit made
     // meanwhile failed on it (seen 2026-10-26).
-    const { exitCode, stdout } = await $.process.run(['git', '--no-optional-locks', '-c', 'core.quotePath=false', 'status', '--porcelain=v1', '--branch'], {
+    const { exitCode, stdout } = await $.process.run(['git', '--no-optional-locks', '-c', 'core.quotePath=false', 'status', '--porcelain=v1', '--branch', '--ignored'], {
       cwd,
       timeoutMs: 3000,
     })
     const info = exitCode === 0 ? parseGitStatus(stdout) : null
     if (info === null || root === '') return info
 
-    return { ...info, root, changed: (info.changed ?? []).map(path => `${root}/${path}`) }
+    const absolute = (paths: string[] | undefined) => (paths ?? []).map(path => `${root}/${path}`)
+
+    return { ...info, root, changed: absolute(info.changed), untracked: absolute(info.untracked), ignored: absolute(info.ignored) }
   } catch {
     return null
   }

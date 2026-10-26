@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { CommandPresentation, EngineInterface, On, RenderViewport } from 'claude-code'
 
-import { activityParts, cellWidth, COLORS, requestSegments, statusParts, textStyle } from './band-format'
+import { activityParts, cellWidth, requestSegments, statusParts, textStyle, THEME_COLORS } from './band-format'
 import type { Segment } from './band-format'
 import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
@@ -219,11 +219,11 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
     const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const status = statusParts(
-      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now, burnout, isRoomy: true },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now, burnout, isRoomy: true, palette: THEME_COLORS },
       Number.POSITIVE_INFINITY,
     )
     const isWorking = turnList.at(-1)?.durationMs === null
-    const request = isWorking ? [] : requestSegments(requestTime(lastRequest), cacheShare(turnList.findLast(turn => turn.durationMs !== null)?.tokens))
+    const request = isWorking ? [] : requestSegments(requestTime(lastRequest), cacheShare(turnList.findLast(turn => turn.durationMs !== null)?.tokens), THEME_COLORS)
     const activity = activityParts(runningList, agentList, todoList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
     const all = tocEntries(turnList, now)
@@ -319,7 +319,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         </Box>
         {/* Beside the head: z, ?, !; a column of its own, so the lines never move. */}
         <Box width={1} flexShrink={0} marginLeft={-1}>
-          <Text key="cat-mark" {...(mood === 'startled' ? { color: COLORS.alert, bold: true } : { dimColor: true })}>
+          <Text key="cat-mark" {...(mood === 'startled' ? { color: THEME_COLORS.alert, bold: true } : { dimColor: true })}>
             {cat.mark === '' ? ' ' : cat.mark}
           </Text>
         </Box>
@@ -337,7 +337,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
               <Text wrap="truncate-end">
                 {`Claude Code ${deviceInfo.version}`}
                 {note === null ? null : (
-                  <Text {...(note.kind === 'restart' ? { color: COLORS.warn } : { color: COLORS.effort })}>
+                  <Text {...(note.kind === 'restart' ? { color: THEME_COLORS.warn } : { color: THEME_COLORS.effort })}>
                     {' ↑ '}
                     <Link href={CHANGELOG_URL}>{note.version}</Link>
                   </Text>
@@ -383,7 +383,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       '작업',
       <Box flexDirection="column">
         {activity.map((line, i) => (
-          <Text key={`activity-${i}`} wrap="truncate-end" {...(line.startsWith('·') ? { dimColor: true } : { color: COLORS.running })}>
+          <Text key={`activity-${i}`} wrap="truncate-end" {...(line.startsWith('·') ? { dimColor: true } : { color: THEME_COLORS.running })}>
             {line}
           </Text>
         ))}
@@ -394,13 +394,17 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // and a file outside the repository (git never commits it) goes dim under its folder's rule.
     // Its name is a link to the file, as a path in the conversation is: under the fullscreen layout
     // the engine opens a clicked `file:` link itself, elsewhere the terminal does.
+    // git's own signs mark the two that are neither: `?` a file git does not track yet (bright, as
+    // it is left to commit), `!` one `.gitignore` keeps out (dim, as git never commits it).
     const fileRow = (file: SessionFile) => {
-      const isDim = file.isCommitted || file.isOutside
+      const isDim = file.isCommitted || file.isOutside || file.isIgnored
       const refs = file.turns.slice(-MAX_TURN_REFS).map(n => `#${n}`)
       const counts: Segment[] = [
         ...(file.isCommitted ? [{ text: ' ✓', dim: true }] : []),
-        ...(file.added > 0 ? [{ text: ` +${file.added}`, ...(isDim ? { dim: true } : { color: COLORS.ok }) }] : []),
-        ...(file.removed > 0 ? [{ text: ` −${file.removed}`, ...(isDim ? { dim: true } : { color: COLORS.alert }) }] : []),
+        ...(file.isUntracked ? [{ text: ' ?', color: THEME_COLORS.warn }] : []),
+        ...(file.isIgnored ? [{ text: ' !', dim: true }] : []),
+        ...(file.added > 0 ? [{ text: ` +${file.added}`, ...(isDim ? { dim: true } : { color: THEME_COLORS.ok }) }] : []),
+        ...(file.removed > 0 ? [{ text: ` −${file.removed}`, ...(isDim ? { dim: true } : { color: THEME_COLORS.alert }) }] : []),
         { text: `  ${file.turns.length > MAX_TURN_REFS ? '… ' : ''}${refs.join(' ')}`, dim: true },
       ]
       const room = inner - counts.reduce((sum, segment) => sum + cellWidth(segment.text), 0)
@@ -485,7 +489,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
           const head = `#${entry.number} `
           const room = inner - cellWidth(head) - cellWidth(failed) - cellWidth(entry.time) - 1
           const label = head + clipCells(entry.title, room)
-          const mark = failed === '' ? null : <Text color={COLORS.alert}>{failed}</Text>
+          const mark = failed === '' ? null : <Text color={THEME_COLORS.alert}>{failed}</Text>
           const canJump = entry.target !== undefined || entry.key !== undefined
 
           return (
@@ -508,7 +512,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
                   {mark}
                 </Button>
               )}
-              <Text {...(entry.isRunning ? { color: COLORS.running } : { dimColor: true })}>{entry.time}</Text>
+              <Text {...(entry.isRunning ? { color: THEME_COLORS.running } : { dimColor: true })}>{entry.time}</Text>
             </Box>
           )
         })}
@@ -524,7 +528,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             )}
             {pageNumbers(page, pages).map(n =>
               n === page ? (
-                <Text key={`toc-page-${n}`} color={COLORS.effort} bold>
+                <Text key={`toc-page-${n}`} color={THEME_COLORS.effort} bold>
                   {String(n + 1)}
                 </Text>
               ) : (

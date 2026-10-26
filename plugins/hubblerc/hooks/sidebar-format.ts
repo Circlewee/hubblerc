@@ -1,5 +1,5 @@
 import type { GitInfo, TurnRecord } from '../types'
-import { cellWidth, elapsed } from './band-format'
+import { cellWidth, elapsed, isListed } from './band-format'
 import { basename, fileTotals } from './summary'
 
 /** One answer of the session as the sidebar's table of contents lists it. */
@@ -39,6 +39,10 @@ export type SessionFile = {
   isCommitted: boolean
   /** Outside the repository (memory, a temporary folder): git never commits it. False when no repository is known. */
   isOutside: boolean
+  /** In the repository, and git does not track it yet (new, never added). */
+  isUntracked: boolean
+  /** In the repository, and `.gitignore` keeps it out: git never commits it. */
+  isIgnored: boolean
 }
 
 /** The files outside the repository that sit in one folder: those shown, and how many more there are. */
@@ -101,7 +105,7 @@ export function sessionFiles(list: readonly TurnRecord[], git: GitInfo | null = 
 
   list.forEach((turn, i) => {
     for (const total of fileTotals(turn.runs)) {
-      const file = byPath.get(total.path) ?? { path: total.path, name: '', added: 0, removed: 0, turns: [], isCommitted: false, isOutside: false }
+      const file = byPath.get(total.path) ?? { path: total.path, name: '', added: 0, removed: 0, turns: [], isCommitted: false, isOutside: false, isUntracked: false, isIgnored: false }
       file.added += total.added
       file.removed += total.removed
       file.turns.push(i + 1)
@@ -113,10 +117,12 @@ export function sessionFiles(list: readonly TurnRecord[], git: GitInfo | null = 
 
   const files = [...byPath.values()].reverse()
   const root = git?.root
-  const changed = new Set(git?.changed ?? [])
   for (const file of files) {
     file.isOutside = root !== undefined && !file.path.startsWith(`${root}/`)
-    file.isCommitted = root !== undefined && !file.isOutside && !changed.has(file.path)
+    const isInside = root !== undefined && !file.isOutside
+    file.isIgnored = isInside && isListed(git?.ignored, file.path)
+    file.isUntracked = isInside && !file.isIgnored && isListed(git?.untracked, file.path)
+    file.isCommitted = isInside && !file.isIgnored && !isListed(git?.changed, file.path)
   }
   const names = new Map<string, number>()
   for (const file of files) names.set(basename(file.path), (names.get(basename(file.path)) ?? 0) + 1)
