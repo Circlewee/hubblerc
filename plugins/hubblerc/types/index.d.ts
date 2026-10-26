@@ -22,6 +22,11 @@ export type ToolRun = {
   /** Edit and Write: lines added and removed. */
   added?: number
   removed?: number
+  /**
+   * Not a call: a file the answer changed with no Edit or Write (through Bash, found by git as the
+   * answer completed), its lines as git counts them. Counts in the files, not among the tools.
+   */
+  isShellChange?: true
 }
 
 /** One main-loop turn of the session and the tool calls made while it ran. */

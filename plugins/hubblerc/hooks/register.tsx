@@ -1,7 +1,7 @@
 import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { completeTurn, IGNORED_TOOLS, noteFiveHourUsed, recordRun, startTurn, trackLines, trackPrompts } from './activity'
+import { completeTurn, IGNORED_TOOLS, noteFiveHourUsed, noteShellChanges, recordRun, startShellWatch, startTurn, trackLines, trackPrompts } from './activity'
 import { rememberAnswer, startAutoEffort } from './auto-effort'
 import { showBand } from './band'
 import { showBashPurpose } from './bash-purpose'
@@ -41,6 +41,8 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     await startTurn($, e).catch(() => undefined)
     if (e.agentId === undefined) await closeEffortPicker($).catch(() => undefined)
+    // Not awaited: the repository is read while the model starts its answer, before any tool runs.
+    if (e.agentId === undefined) void startShellWatch($, e.turnId).catch(() => undefined)
     await startAutoEffort($, e, autoByDefault).catch(() => undefined)
 
     return next(e)
@@ -72,6 +74,7 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined) {
       await refreshStatus($).catch(() => undefined)
       await noteFiveHourUsed($, e.turnId).catch(() => undefined)
+      await noteShellChanges($, e.turnId).catch(() => undefined)
     }
 
     return done

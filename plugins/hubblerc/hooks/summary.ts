@@ -50,7 +50,8 @@ export function summarize(turn: TurnRecord): string {
     parts.push(`${files.length}파일 ${signed(added, removed)}`)
   }
 
-  const counts = countByTool(turn.runs.filter(run => run.agentId === undefined))
+  // A file changed through the shell counts in the files above, not as a call.
+  const counts = countByTool(turn.runs.filter(run => run.agentId === undefined && run.isShellChange !== true))
   for (const [tool, count] of counts.slice(0, MAX_TOOLS_SHOWN)) parts.push(`${tool} ${count}`)
   if (counts.length > MAX_TOOLS_SHOWN) parts.push(`외 ${counts.length - MAX_TOOLS_SHOWN}종`)
 

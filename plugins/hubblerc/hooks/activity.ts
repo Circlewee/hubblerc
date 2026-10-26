@@ -3,6 +3,8 @@ import type { EngineInterface, On, ToolCallResult, TurnCompleteInput, TurnStartI
 
 import type { ToolRun, TurnRecord } from '../types'
 import { pointsUsed } from './forecast'
+import { countShellChanges, snapshotGit } from './shell-changes'
+import type { GitSnapshot } from './shell-changes'
 
 export const MAX_TURNS = 100
 export const MAX_RUNS_PER_TURN = 400
@@ -87,6 +89,48 @@ export async function completeTurn($: EngineInterface, e: TurnCompleteInput): Pr
   if (e.agentId !== undefined) return
 
   await update($, turns, list => list.map(turn => (turn.id === e.turnId ? { ...turn, durationMs: e.durationMs } : turn)))
+}
+
+/**
+ * The repository as each running answer started, by its id: what `noteShellChanges` compares
+ * against. Module state: a reload in between loses it, and that answer's shell changes go uncounted.
+ */
+const snapshots = new Map<string, GitSnapshot>()
+
+/** At a main-loop turn's start: the repository's state, taken before any tool runs. */
+export async function startShellWatch($: EngineInterface, turnId: string): Promise<void> {
+  const snapshot = await snapshotGit($, await $.session.cwd())
+  if (snapshot === null) return
+  snapshots.set(turnId, snapshot)
+  // Turns that never completed (an abort the engine did not report) are not kept forever.
+  if (snapshots.size > 5) snapshots.delete(snapshots.keys().next().value ?? '')
+}
+
+/**
+ * After a turn completed: the files it changed with no Edit or Write, found by git, join its runs
+ * (`isShellChange`), so the closing line and the sidebar's files count them too. A file an Edit or
+ * Write of the turn already recorded is left to that record.
+ */
+export async function noteShellChanges($: EngineInterface, turnId: string): Promise<void> {
+  const before = snapshots.get(turnId)
+  snapshots.delete(turnId)
+  if (before === undefined) return
+  const after = await snapshotGit($, before.root, before.base)
+  if (after === null || after.root !== before.root) return
+  const changes = await countShellChanges($, before, after)
+  if (changes.length === 0) return
+
+  await update($, turns, list =>
+    list.map(turn => {
+      if (turn.id !== turnId) return turn
+      const recorded = new Set(turn.runs.filter(run => run.added !== undefined || run.removed !== undefined).map(run => run.path))
+      const runs: ToolRun[] = changes
+        .filter(change => !recorded.has(change.path))
+        .map(change => ({ id: '', tool: 'Bash', ms: 0, isError: false, path: change.path, added: change.added, removed: change.removed, isShellChange: true }))
+
+      return runs.length === 0 ? turn : { ...turn, runs: [...turn.runs, ...runs].slice(0, MAX_RUNS_PER_TURN) }
+    }),
+  )
 }
 
 /**

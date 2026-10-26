@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { keyStates, missingCount, setupState, withKeys } from '../hooks/setup'
+import { isAutoUpdating, keyStates, missingCount, setupState, withAutoUpdate, withKeys } from '../hooks/setup'
 import { standInForEngine, start } from './engine'
 
 const OURS = { 'ctrl+x ctrl+e': 'app:cycleDiffBase', 'ctrl+x ctrl+p': 'command:panel' }
@@ -37,12 +37,16 @@ test('the missing keys are added to the Chat context, everything else kept; a ke
 })
 
 test('needed: our keys and the fullscreen layout; claude-hud and the language are advice', () => {
-  const done = setupState(JSON.stringify({ bindings: [{ context: 'Chat', bindings: OURS }] }), { tui: 'fullscreen', language: 'korean', statusLine: undefined })
+  const done = setupState(
+    JSON.stringify({ bindings: [{ context: 'Chat', bindings: OURS }] }),
+    { tui: 'fullscreen', language: 'korean', statusLine: undefined },
+    JSON.stringify({ extraKnownMarketplaces: { hubblerc: { source: { source: 'github', repo: 'Circlewee/hubblerc' }, autoUpdate: true } } }),
+  )
   expect(missingCount(done)).toBe(0)
   expect(done.hasClaudeHud).toBe(false)
 
   const bare = setupState(undefined, { tui: undefined, language: undefined, statusLine: HUD })
-  expect(missingCount(bare)).toBe(3)
+  expect(missingCount(bare)).toBe(4)
   expect(bare.hasClaudeHud).toBe(true)
   expect(bare.hasLanguage).toBe(false)
 
@@ -74,8 +78,9 @@ test('a first run on a new machine says what is missing, once, in the conversati
   })
   await start($)
 
-  // The stand-in's settings have no tui: the keys and the fullscreen layout are missing.
-  expect(logged).toEqual(['hubblerc 설정 3개가 덜 됐습니다. `/setup`으로 확인하세요'])
+  // The stand-in's settings have no tui, and no settings file turns auto-update on: the two keys,
+  // the fullscreen layout and auto-update are missing.
+  expect(logged).toEqual(['hubblerc 설정 4개가 덜 됐습니다. `/setup`으로 확인하세요'])
 })
 
 test('/setup adds the missing keys, keeps the old file as .bak, and tells the rest', async ($, on) => {
@@ -97,4 +102,32 @@ test('/setup adds the missing keys, keeps the old file as .bak, and tells the re
   const again = await $.command.run({ ...COMMAND, command: 'setup' })
   expect(files[`${KEY_FILE}.bak`]).toBe('untouched')
   expect((again as { text?: string }).text).toContain('✓ 키 ctrl+x ctrl+p: 사이드바 열기/닫기')
+})
+
+test("auto-update is turned on in the marketplace's entry of the user's settings, nothing else changed", () => {
+  const settings = { model: 'opus', extraKnownMarketplaces: { 'claude-hud': { source: { source: 'github', repo: 'x/claude-hud' } }, hubblerc: { source: { source: 'github', repo: 'Circlewee/hubblerc' } } }, theme: 'dark' }
+  const next = JSON.parse(withAutoUpdate(JSON.stringify(settings)) ?? '{}')
+  expect(next.extraKnownMarketplaces.hubblerc).toEqual({ source: { source: 'github', repo: 'Circlewee/hubblerc' }, autoUpdate: true })
+  expect(next.extraKnownMarketplaces['claude-hud']).toEqual(settings.extraKnownMarketplaces['claude-hud'])
+  expect(Object.keys(next)).toEqual(['model', 'extraKnownMarketplaces', 'theme'])
+  expect(isAutoUpdating(JSON.stringify(next))).toBe(true)
+
+  // No entry yet: made with the GitHub source. On already, or not JSON: nothing to write.
+  expect(JSON.parse(withAutoUpdate('{}') ?? '{}').extraKnownMarketplaces.hubblerc).toEqual({ source: { source: 'github', repo: 'Circlewee/hubblerc' }, autoUpdate: true })
+  expect(withAutoUpdate(JSON.stringify(next))).toBeNull()
+  expect(withAutoUpdate('{ not json')).toBeNull()
+})
+
+test('/setup turns auto-update on, the old settings kept as .bak', async ($, on) => {
+  standInForEngine(on)
+  const before = JSON.stringify({ theme: 'dark', extraKnownMarketplaces: { hubblerc: { source: { source: 'github', repo: 'Circlewee/hubblerc' } } } })
+  const files = machine(on, { [KEY_FILE]: JSON.stringify({ bindings: [{ context: 'Chat', bindings: OURS }] }), '/home/me/.claude/settings.json': before })
+  await start($)
+
+  const ran = await $.command.run({ ...COMMAND, command: 'setup' })
+  expect(files['/home/me/.claude/settings.json.bak']).toBe(before)
+  expect(JSON.parse(files['/home/me/.claude/settings.json'] ?? '{}').extraKnownMarketplaces.hubblerc.autoUpdate).toBe(true)
+  expect((ran as { text?: string }).text).toContain('✓ 자동 업데이트: 방금 켬')
+  // The keys were there: their file is not touched.
+  expect(files[`${KEY_FILE}.bak`]).toBeUndefined()
 })

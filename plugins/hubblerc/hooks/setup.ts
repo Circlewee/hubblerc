@@ -81,6 +81,36 @@ function chatBindings(file: Keybindings | null): Record<string, unknown> {
   return chat
 }
 
+/** The marketplace hubblerc is installed from, as `/plugin marketplace add Circlewee/hubblerc` declares it. */
+export const MARKETPLACE = { name: 'hubblerc', source: { source: 'github', repo: 'Circlewee/hubblerc' } } as const
+
+/**
+ * Whether the user's settings turn auto-update on for hubblerc's marketplace: then Claude Code
+ * fetches it and updates the plugin as it starts. Off by default for a marketplace added from
+ * GitHub (the engine's rule, 2.1.310: an `autoUpdate` set wins, else only Anthropic's own are on).
+ */
+export function isAutoUpdating(settingsText: string | undefined): boolean {
+  const settings = parse(settingsText)
+  const markets = settings?.extraKnownMarketplaces
+
+  return typeof markets === 'object' && markets !== null && (markets as Record<string, { autoUpdate?: unknown }>)[MARKETPLACE.name]?.autoUpdate === true
+}
+
+/**
+ * The user's settings with auto-update on for hubblerc's marketplace (its entry made when there is
+ * none), nothing else changed; null when it is on already, or the file is there but not JSON.
+ */
+export function withAutoUpdate(settingsText: string | undefined): string | null {
+  if (isAutoUpdating(settingsText)) return null
+  const settings = settingsText === undefined || settingsText.trim() === '' ? {} : parse(settingsText)
+  if (settings === null) return null
+
+  const markets = typeof settings.extraKnownMarketplaces === 'object' && settings.extraKnownMarketplaces !== null ? (settings.extraKnownMarketplaces as Record<string, object>) : {}
+  const entry = markets[MARKETPLACE.name] ?? { source: MARKETPLACE.source }
+
+  return `${JSON.stringify({ ...settings, extraKnownMarketplaces: { ...markets, [MARKETPLACE.name]: { ...entry, autoUpdate: true } } }, null, 2)}\n`
+}
+
 /**
  * What the settings say that the setup looks at, merged: what applies in this folder. A project's
  * own `statusLine` (this repository's settings.local.json sets a no-op one) hides claude-hud here
@@ -97,9 +127,11 @@ export type SetupState = {
   hasClaudeHud: boolean
   /** The keybindings file is there and is not JSON: its keys cannot be read or added. */
   isKeyFileBroken: boolean
+  /** Claude Code updates hubblerc as it starts (the user's settings say so). */
+  isAutoUpdating: boolean
 }
 
-export function setupState(keyFile: string | undefined, settings: SettingsFacts): SetupState {
+export function setupState(keyFile: string | undefined, settings: SettingsFacts, settingsFile?: string): SetupState {
   const runsHud = (line: unknown) => {
     const command = typeof line === 'object' && line !== null ? (line as { command?: unknown }).command : undefined
 
@@ -112,16 +144,20 @@ export function setupState(keyFile: string | undefined, settings: SettingsFacts)
     hasLanguage: typeof settings.language === 'string' && settings.language.trim() !== '',
     hasClaudeHud: runsHud(settings.statusLine),
     isKeyFileBroken: keyFile !== undefined && keyFile.trim() !== '' && parse(keyFile) === null,
+    isAutoUpdating: isAutoUpdating(settingsFile),
   }
 }
 
-/** How many of the needed things are missing: our keys, and the fullscreen layout. The rest are advice. */
+/** How many of the needed things are missing: our keys, the fullscreen layout, auto-update. The rest are advice. */
 export function missingCount(state: SetupState): number {
-  return state.keys.filter(key => key.state !== 'ok').length + (state.isFullscreen ? 0 : 1)
+  return state.keys.filter(key => key.state !== 'ok').length + (state.isFullscreen ? 0 : 1) + (state.isAutoUpdating ? 0 : 1)
 }
 
+/** What `/setup` did to the user's settings for auto-update: turned it on (and where the old file went), or could not. */
+export type AutoUpdateChange = { done: 'on'; backup: string | null } | { done: 'broken'; path: string } | null
+
 /** `/setup`'s report: each item ticked or not, what was done, and what is the person's to do. */
-export function setupReport(state: SetupState, keyFile: string, added: readonly string[], backup: string | null): string {
+export function setupReport(state: SetupState, keyFile: string, added: readonly string[], backup: string | null, autoUpdate: AutoUpdateChange = null): string {
   const lines = ['hubblerc 설정 점검', '']
   for (const key of state.keys) {
     if (key.state === 'ok') lines.push(`✓ 키 ${key.key}: ${key.label}`)
@@ -131,6 +167,13 @@ export function setupReport(state: SetupState, keyFile: string, added: readonly 
   }
   if (state.isKeyFileBroken) lines.push(`✗ \`${keyFile}\`가 JSON이 아니라 키를 읽거나 더할 수 없습니다. 파일을 고친 뒤 다시 \`/setup\``)
   if (backup !== null) lines.push(`  원래 파일은 \`${backup}\`에 두었습니다`)
+
+  if (state.isAutoUpdating) lines.push('✓ 자동 업데이트: Claude Code를 시작할 때 hubblerc 새 버전을 받음')
+  else if (autoUpdate?.done === 'on') {
+    lines.push('✓ 자동 업데이트: 방금 켬. 다음에 Claude Code를 시작할 때부터 hubblerc 새 버전을 받음')
+    if (autoUpdate.backup !== null) lines.push(`  원래 설정은 \`${autoUpdate.backup}\`에 두었습니다`)
+  } else if (autoUpdate?.done === 'broken') lines.push(`✗ 자동 업데이트: \`${autoUpdate.path}\`가 JSON이 아니라 켜지 못했습니다`)
+  else lines.push('✗ 자동 업데이트가 꺼져 있습니다')
 
   lines.push(state.isFullscreen ? '✓ 전체 화면 (tui: fullscreen)' : '✗ 전체 화면이 아닙니다: `/tui fullscreen`을 실행하거나 `~/.claude/settings.json`에 `"tui": "fullscreen"`. 사이드바와 버튼 클릭은 전체 화면에서만 됩니다')
 
@@ -145,25 +188,30 @@ export function setupReport(state: SetupState, keyFile: string, added: readonly 
   return lines.join('\n')
 }
 
-/** Where the keybindings file is: under `CLAUDE_CONFIG_DIR` when set, else `~/.claude`. */
-async function keyFilePath($: EngineInterface): Promise<string | undefined> {
-  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
-  if (configDir !== undefined && configDir !== '') return `${configDir.replace(/\/$/, '')}/keybindings.json`
+/** Claude Code's folder: `CLAUDE_CONFIG_DIR` when set, else `~/.claude`. */
+async function configDir($: EngineInterface): Promise<string | undefined> {
+  const dir = await $.env.get('CLAUDE_CONFIG_DIR')
+  if (dir !== undefined && dir !== '') return dir.replace(/\/$/, '')
   const home = await $.env.get('HOME')
 
-  return home === undefined || home === '' ? undefined : `${home}/.claude/keybindings.json`
+  return home === undefined || home === '' ? undefined : `${home}/.claude`
 }
 
-async function readState($: EngineInterface): Promise<{ path: string | undefined; text: string | undefined; state: SetupState }> {
-  const path = await keyFilePath($)
+type ReadState = { path: string | undefined; text: string | undefined; settingsPath: string | undefined; settingsText: string | undefined; state: SetupState }
+
+async function readState($: EngineInterface): Promise<ReadState> {
+  const dir = await configDir($)
+  const path = dir === undefined ? undefined : `${dir}/keybindings.json`
+  const settingsPath = dir === undefined ? undefined : `${dir}/settings.json`
   const text = path === undefined ? undefined : await $.fs.read(path).catch(() => undefined)
+  const settingsText = settingsPath === undefined ? undefined : await $.fs.read(settingsPath).catch(() => undefined)
   const [tui, language, statusLine] = await Promise.all([
     $.settings.read({ key: 'tui' }),
     $.settings.read({ key: 'language' }),
     $.settings.read({ key: 'statusLine' }),
   ])
 
-  return { path, text, state: setupState(text, { tui, language, statusLine }) }
+  return { path, text, settingsPath, settingsText, state: setupState(text, { tui, language, statusLine }, settingsText) }
 }
 
 /** At session.start: when a needed thing is missing, one line in the conversation says so. */
@@ -173,9 +221,12 @@ export async function checkSetup($: EngineInterface): Promise<void> {
   if (missing > 0) $.ui.log(`hubblerc 설정 ${missing}개가 덜 됐습니다. \`/setup\`으로 확인하세요`)
 }
 
-/** `/setup`: adds the missing keys (the file kept beside as `.bak` first) and reports every item. */
+/**
+ * `/setup`: adds the missing keys and turns auto-update on in the user's settings (each file kept
+ * beside as `.bak` first, a file that is not JSON left alone), and reports every item.
+ */
 export async function runSetup($: EngineInterface): Promise<string> {
-  const { path, text, state } = await readState($)
+  const { path, text, settingsPath, settingsText, state } = await readState($)
   if (path === undefined) return 'hubblerc 설정 점검: 홈 폴더를 알 수 없어 키 설정 파일을 찾지 못했습니다.'
 
   const next = withKeys(text)
@@ -190,5 +241,17 @@ export async function runSetup($: EngineInterface): Promise<string> {
     added = state.keys.filter(key => key.state === 'missing').map(key => key.key)
   }
 
-  return setupReport(state, path, added, backup)
+  let autoUpdate: AutoUpdateChange = null
+  if (!state.isAutoUpdating && settingsPath !== undefined) {
+    const nextSettings = withAutoUpdate(settingsText)
+    if (nextSettings === null) autoUpdate = { done: 'broken', path: settingsPath }
+    else {
+      const settingsBackup = settingsText === undefined ? null : `${settingsPath}.bak`
+      if (settingsBackup !== null && settingsText !== undefined) await $.fs.write(settingsBackup, settingsText)
+      await $.fs.write(settingsPath, nextSettings)
+      autoUpdate = { done: 'on', backup: settingsBackup }
+    }
+  }
+
+  return setupReport(state, path, added, backup, autoUpdate)
 }

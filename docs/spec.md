@@ -85,7 +85,7 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
   2m13s · 3파일 +24 −3 · Read 5 · Grep 2 · Bash 2
 ```
 - +/- 줄 수: Edit/Write 결과의 `structuredPatch` [확인: 타입]. git 없이 세고 새 파일도 센다.
-- Bash로 바꾼 파일은 잡히지 않음 → git 저장소면 `git diff --numstat`로 보완 [추정]
+- Bash로 바꾼 파일(2026-10-26 보완): 메인 답변이 시작될 때 git 상태를 찍고(시작 커밋 대비 파일별 `git diff --numstat`, 추적 안 된 파일 목록), 끝날 때 같은 커밋 대비로 다시 찍어 비교한다. 숫자가 달라진 파일과 새로 생긴 추적 안 된 파일(줄 수를 셈)을 그 답변의 변경(`isShellChange`)으로 붙인다. Edit·Write로 이미 기록된 파일은 건너뛰고, 도구 횟수에는 넣지 않는다. 한계: 저장소 안만, 답변 중 사람이 편집기로 바꾼 것도 섞임, 줄 수가 같게 바뀐 파일·이미 추적 안 되던 파일의 수정·무시되는 파일은 못 잡음, 답변이 끝난 뒤 백그라운드 에이전트의 변경도 못 잡음, 리로드하면 그 답변의 시작 상태를 잃음.
 - 엔진 내장 diff 패널은 git 기준·세션 단위라 "어느 답변에서 바꿨나", 읽은 파일, Bash 기록은 없다(스크린샷 확인). F5는 이 빈자리를 채운다.
 - 상세를 볼 커맨드도 둔다(`/activity <번호>` 등, 이름 미정).
 - 다시 연 세션(2026-10-26 요청): `$.state`는 프로세스가 새로 뜨면 비어서 resume한 세션의 기록이 사라졌다. 세션 시작 때 `$.session.id()`가 기록해 둔 id와 다르거나 기록이 비어 있으면, `$.session.messages()`(대화 기록, 최근 4096개)에서 답변을 다시 만든다 [확인: 타입 문서].
@@ -135,14 +135,14 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - 나중에: 실제 이미지 파일(png 등)을 쓰고 싶다는 요청(2026-10-26). 이 방식으로 그리려면 그림을 픽셀로 풀어 반쪽 블록으로 바꿔야 한다.
 
 ## 배포 (2026-10-26 결정)
-- 버전 규칙: 기능을 묶어 커밋할 때마다 `plugins/hubblerc/.claude-plugin/plugin.json`의 `version`을 올리고 같은 커밋에 git 태그 `v<버전>`을 건다. 기능 추가는 0.x, 고치기만 했으면 0.x.y. 설치된 사본은 버전을 올려야 갱신된다는 보고가 있다 [커뮤니티]. 0.1.0 → 0.2.0(F6·F7과 파일 패널 작업). 0.2.1: `/setup`의 claude-hud 점검을 합쳐진 설정으로 되돌림(이 저장소는 settings.local.json의 no-op `statusLine`이 claude-hud를 가린다. 처음에 이를 Orca 탓으로 잘못 짚고 사용자 파일까지 보게 했었다). 0.2.2: 5초마다 도는 `git status`에 `--no-optional-locks`(그 사이 커밋이 `index.lock`에 막혔다).
+- 버전 규칙: 기능을 묶어 커밋할 때마다 `plugins/hubblerc/.claude-plugin/plugin.json`의 `version`을 올리고 같은 커밋에 git 태그 `v<버전>`을 건다. 기능 추가는 0.x, 고치기만 했으면 0.x.y. 설치된 사본은 버전을 올려야 갱신된다는 보고가 있다 [커뮤니티]. 0.1.0 → 0.2.0(F6·F7과 파일 패널 작업). 0.2.1: `/setup`의 claude-hud 점검을 합쳐진 설정으로 되돌림(이 저장소는 settings.local.json의 no-op `statusLine`이 claude-hud를 가린다. 처음에 이를 Orca 탓으로 잘못 짚고 사용자 파일까지 보게 했었다). 0.2.2: 5초마다 도는 `git status`에 `--no-optional-locks`(그 사이 커밋이 `index.lock`에 막혔다). 0.3.0: 파일 상태 네 갈래, 사이드바 테마 색, `/setup`의 자동 업데이트 켜기, 셸로 바뀐 파일 추적.
 - 저장소: GitHub. 공개/비공개는 미정. 비공개는 기기마다 GitHub 로그인이 필요하다(회사 스튜디오에 개인 계정). 공개는 커밋 작성자 이메일과 `docs/`의 사용 환경이 드러나므로, 올리기 전에 키·내부 주소·개인 정보를 훑는다.
 - 최소 Claude Code 버전: 미확인. 2.1.308~2.1.310에서 썼다. 세 기기를 같은 버전으로 맞춘다(옛 버전이 새 이벤트를 쓰는 mod를 통째로 거부한 사례 [커뮤니티]).
 - 새 기기 설치:
   1. mod가 원격으로 꺼져 있지 않은지: mod 없는 폴더에서 `claude plugin test` [리서치]
   2. 마켓플레이스 추가 후 `hubblerc`를 사용자 범위로 설치
   3. 첫 실행: 세션 시작 때 hubblerc가 필요한 설정(키 `ctrl+x ctrl+e`·`ctrl+x ctrl+p`, 전체 화면)을 점검하고, 빠진 게 있으면 대화에 "hubblerc 설정 N개가 덜 됐습니다. `/setup`" 한 줄을 남긴다
-  4. `/setup`: 빠진 키만 `~/.claude/keybindings.json`(또는 `CLAUDE_CONFIG_DIR`)의 Chat 문맥에 추가한다. 먼저 `.bak`으로 백업하고, 같은 키가 다른 동작에 묶여 있으면 덮어쓰지 않고 알린다. 설정 파일은 직접 고치지 않고 안내만: 전체 화면(`/tui fullscreen` 또는 `"tui": "fullscreen"`), 권장으로 claude-hud `statusLine` 지우기·`/plugin uninstall claude-hud`, 응답 언어(`"language": "korean"`)
+  4. `/setup`: 자동 업데이트를 켠다(사용자 설정 `extraKnownMarketplaces.hubblerc.autoUpdate: true`, 먼저 `settings.json.bak`). GitHub에서 추가한 마켓플레이스는 기본이 꺼짐이다(엔진 규칙 2.1.310: `autoUpdate`를 정하면 그 값, 아니면 Anthropic 공식 마켓플레이스만 켜짐 [확인: 실행 파일 코드]). 설정 값이 판정에 쓰인다는 것은 함수 이름이 축약돼 있어 [추정]. 켜면 시작할 때 마켓플레이스와 플러그인을 갱신한다(엔진 설명). 빠진 키만 `~/.claude/keybindings.json`(또는 `CLAUDE_CONFIG_DIR`)의 Chat 문맥에 추가한다. 먼저 `.bak`으로 백업하고, 같은 키가 다른 동작에 묶여 있으면 덮어쓰지 않고 알린다. 설정 파일은 직접 고치지 않고 안내만: 전체 화면(`/tui fullscreen` 또는 `"tui": "fullscreen"`), 권장으로 claude-hud `statusLine` 지우기·`/plugin uninstall claude-hud`, 응답 언어(`"language": "korean"`)
   5. 사이드바·밴드·고양이·대화 줄이 보이는지 확인
 
 ## 알려진 한계
