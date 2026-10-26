@@ -26,6 +26,8 @@ export type StandIn = {
   /** The files of `~/.local/share/claude/versions`, and what the npm registry calls latest. */
   installedVersions: string[]
   latestVersion: string
+  /** Every `git status` the plugin ran, its argv. */
+  gitStatusArgs: string[][]
 }
 
 /**
@@ -33,7 +35,7 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310' }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', gitStatusArgs: [] }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } as never }))
@@ -60,6 +62,8 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
   on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: '@anthropic-ai/claude-code', version: standIn.latestVersion }) } }))
   on('session.version', () => ({ value: { version: '2.1.310', base: '2.1.310' } }))
   on('process.run', (_, e) => {
+    // The status hubblerc polls must never take the index lock a person's commit needs.
+    if (e.argv.includes('status')) standIn.gitStatusArgs.push([...e.argv])
     const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Booted a day, two hours and five minutes before NOW.
     if (e.argv[0] === 'sysctl') return ok(`Apple M3 Pro\n19327352832\n{ sec = ${(NOW - (26 * 60 + 5) * 60_000) / 1000}, usec = 0 } Sat Oct 24\n`)

@@ -165,8 +165,10 @@ async function readGit($: EngineInterface, cwd: string) {
       roots.set(cwd, top.exitCode === 0 ? top.stdout.trim() : '')
     }
     const root = roots.get(cwd) ?? ''
-    // quotePath off: a Korean file name comes as itself, not octal escapes.
-    const { exitCode, stdout } = await $.process.run(['git', '-c', 'core.quotePath=false', 'status', '--porcelain=v1', '--branch'], {
+    // quotePath off: a Korean file name comes as itself, not octal escapes. No optional locks: run
+    // every five seconds, a status that refreshed the index took .git/index.lock and a commit made
+    // meanwhile failed on it (seen 2026-10-26).
+    const { exitCode, stdout } = await $.process.run(['git', '--no-optional-locks', '-c', 'core.quotePath=false', 'status', '--porcelain=v1', '--branch'], {
       cwd,
       timeoutMs: 3000,
     })
