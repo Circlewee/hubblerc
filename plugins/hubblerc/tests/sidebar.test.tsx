@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { TurnRecord } from '../types'
-import { clipCells, fileLayout, fileUrl, sessionFiles, shortPath, tocEntries, tocPage } from '../hooks/sidebar-format'
+import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from '../hooks/sidebar-format'
 import { NOW, standInForEngine, start } from './engine'
 
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
@@ -197,6 +197,84 @@ test('the sidebar pages through the contents', async ($, on) => {
   await ui.press({ key: 'toc-page-0' })
   expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
   await ui.unmount()
+})
+
+test('the files and the contents share the rows left: all when both fit, else the smaller its want, else half each', () => {
+  expect(shareRows(30, 13, 11)).toEqual({ files: 13, toc: 11 })
+  expect(shareRows(20, 5, 11)).toEqual({ files: 5, toc: 11 })
+  expect(shareRows(18, 13, 6)).toEqual({ files: 12, toc: 6 })
+  expect(shareRows(20, 13, 11)).toEqual({ files: 10, toc: 10 })
+  // No files box: the contents take it all. Too few rows: each keeps three.
+  expect(shareRows(20, 0, 11)).toEqual({ files: 0, toc: 11 })
+  expect(shareRows(2, 13, 11)).toEqual({ files: 3, toc: 3 })
+})
+
+test('the contents put fewer answers on a page as rows run short, a row kept for the pager', () => {
+  expect(tocRows(0, 10)).toBe(1)
+  expect(tocRows(7, 10)).toBe(7)
+  expect(tocRows(23, 10)).toBe(11)
+  expect(tocPageSize(7, 7, 10)).toBe(10)
+  expect(tocPageSize(23, 11, 10)).toBe(10)
+  expect(tocPageSize(23, 6, 10)).toBe(5)
+  expect(tocPageSize(7, 5, 10)).toBe(4)
+  expect(tocPageSize(23, 1, 10)).toBe(1)
+})
+
+test('the files fit the rows they have, the folders outside and their files fewer with them', () => {
+  const edit = (id: string, path: string) => ({ id, tool: 'Edit', ms: 1, isError: false, path, added: 1, removed: 0 })
+  const git = { branch: 'main', isDirty: true, root: '/repo', changed: [] }
+  const limits = { total: 12, minInside: 6, folders: 3, perFolder: 2 }
+  const files = sessionFiles(
+    [
+      turn('t1', [edit('a', '/tmp/a/1.ts'), edit('b', '/tmp/a/2.ts'), edit('c', '/tmp/a/3.ts'), edit('d', '/tmp/b/1.ts'), edit('e', '/tmp/c/1.ts'), edit('f', '/tmp/d/1.ts')]),
+      turn('t2', Array.from({ length: 14 }, (_, i) => edit(`r${i}`, `/repo/f${i}.ts`))),
+    ],
+    git,
+  )
+
+  // Room enough: as twelve lay out.
+  expect(fitFileLayout(files, limits, 40)).toEqual(fileLayout(files, limits))
+  for (const rows of [16, 10, 6]) {
+    const fitted = fitFileLayout(files, limits, rows)
+    expect(fileRows(fitted)).toBeLessThanOrEqual(rows)
+    expect(fitted.inside.length).toBeGreaterThan(0)
+    expect(fitted.outside.length).toBeGreaterThan(0)
+  }
+  expect(fitFileLayout(files, limits, 6).outside).toHaveLength(1)
+  // Under its fewest (a file, "외 N개", a folder's rule and file, "다른 폴더 N개"), the fewest.
+  expect(fileRows(fitFileLayout(files, limits, 4))).toBe(5)
+})
+
+test('a short pane shows fewer files and answers, so the contents are not cut off below', async ($, on) => {
+  standInForEngine(on)
+  await start($)
+  for (let i = 1; i <= 12; i += 1) {
+    await $.turn.start({ text: `질문 ${i}`, turnId: `t${i}` })
+    await $.tool.call({ tool: 'Write', file_path: `/repo/hubblerc/f${i}.ts`, content: 'x\n' })
+    await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: `t${i}`, durationMs: 1000 })
+  }
+
+  const tall = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, scroll: { offset: 0, bodyRows: 60 } } })
+  expect((await tall.findAll({ type: 'Link' })).length).toBe(12)
+  expect((await tall.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
+  await tall.unmount()
+
+  const short = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, scroll: { offset: 0, bodyRows: 36 } } })
+  const links = (await short.findAll({ type: 'Link' })).length
+  const title = (await short.find({ type: 'Text', text: /^목차/ }))?.text ?? ''
+  const [, from, to] = /#(\d+)~(\d+)/.exec(title) ?? []
+  const answers = Number(to) - Number(from) + 1
+  expect(links).toBeLessThan(12)
+  expect(answers).toBeLessThan(10)
+  expect(await short.find({ key: 'inside-more' })).toBeDefined()
+  expect(await short.find({ key: 'toc-older' })).toBeDefined()
+  await short.unmount()
+
+  // Folding the files gives their rows to the contents.
+  const roomy = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, scroll: { offset: 0, bodyRows: 36 } } })
+  await roomy.press({ key: 'fold-files' })
+  expect((await roomy.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
+  await roomy.unmount()
 })
 
 test('a title is cut to the cells it has, Korean taking two', () => {

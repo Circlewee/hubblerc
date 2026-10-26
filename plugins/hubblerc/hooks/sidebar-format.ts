@@ -227,3 +227,64 @@ export function tocPage(entries: readonly TocEntry[], page: number, size: number
 
   return { entries: entries.slice(shown * size, (shown + 1) * size), page: shown, pages }
 }
+
+/**
+ * The rows the files box's body takes as laid out: each file a row, each "외 N개" a row, each
+ * folder outside a rule over its files, and "줄이기" when `hasCollapse`.
+ */
+export function fileRows(layout: FileLayout, hasCollapse = false): number {
+  const outside = layout.outside.reduce((sum, group) => sum + 1 + group.files.length + (group.hidden > 0 ? 1 : 0), 0)
+
+  return layout.inside.length + (layout.insideHidden > 0 ? 1 : 0) + (hasCollapse ? 1 : 0) + outside + (layout.foldersHidden > 0 ? 1 : 0)
+}
+
+/**
+ * The files laid out within `max` and in at most `rows` rows: fewer files as the rows run short,
+ * the folders outside and their files fewer with them. Under one file's worth, the fewest it lays out.
+ */
+export function fitFileLayout(files: readonly SessionFile[], max: FileLimits, rows: number): FileLayout {
+  const full = fileLayout(files, max)
+  if (fileRows(full) <= rows) return full
+
+  let layout = full
+  for (let total = Math.min(max.total, files.length); total >= 1; total -= 1) {
+    layout = fileLayout(files, {
+      total,
+      // Twelve keep three folders of two and six of the repository's; fewer, the same shares.
+      minInside: Math.min(max.minInside, Math.ceil(total / 2)),
+      folders: Math.min(max.folders, Math.max(1, Math.floor(total / 4))),
+      perFolder: Math.min(max.perFolder, total >= 6 ? 2 : 1),
+    })
+    if (fileRows(layout) <= rows) return layout
+  }
+
+  return layout
+}
+
+/** The rows the contents' body would take for `count` answers, `size` to a page: the pager's row with more than a page. */
+export function tocRows(count: number, size: number): number {
+  if (count === 0) return 1
+
+  return count <= size ? count : size + 1
+}
+
+/** Answers on a page of the contents in `rows` rows, at most `size`: a row less for the pager when they take more than a page. */
+export function tocPageSize(count: number, rows: number, size: number): number {
+  if (count <= Math.min(size, rows)) return size
+
+  return Math.max(1, Math.min(size, rows - 1))
+}
+
+/**
+ * The rows left to the files and the contents shared out: each all it wants when both fit; else
+ * the one wanting under half takes what it wants and the other the rest, or half each. Each keeps
+ * `least` (or what it wants, if less) however few rows are left: then the sidebar runs past its height.
+ */
+export function shareRows(room: number, filesWant: number, tocWant: number, least = 3): { files: number; toc: number } {
+  if (filesWant + tocWant <= room) return { files: filesWant, toc: tocWant }
+
+  const half = Math.floor(room / 2)
+  const files = Math.max(Math.min(least, filesWant), filesWant <= half ? filesWant : tocWant <= room - half ? room - tocWant : half)
+
+  return { files, toc: Math.max(Math.min(least, tocWant), room - files) }
+}

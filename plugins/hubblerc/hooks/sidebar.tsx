@@ -8,7 +8,7 @@ import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, cacheShare, requestTime } from './forecast'
 import { CAT_PALETTE, catFrame, catMood, pixelRows } from './pixel-art'
-import { clipCells, fileLayout, fileUrl, sessionFiles, shortPath, tocEntries, tocPage } from './sidebar-format'
+import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
@@ -43,12 +43,15 @@ export const SIDEBAR_ID = 'hubblerc'
 const SIDEBAR_TITLE = 'hubblerc'
 /** The width the dock is asked for; the engine holds it to 24..45% of the terminal. */
 const SIDEBAR_COLUMNS = 56
-/** Twelve files in all; each folder outside the repository shows two, three folders at most; the repository six at least. */
+/**
+ * Twelve files in all at most; each folder outside the repository shows two, three folders at most;
+ * the repository six at least. A pane too short for them shows fewer (`fitFileLayout`).
+ */
 const FILE_LIMITS: FileLimits = { total: 12, minInside: 6, folders: 3, perFolder: 2 }
 /** Every file, once the person asked for the rest. */
 const NO_FILE_LIMITS: FileLimits = { total: Infinity, minInside: Infinity, folders: Infinity, perFolder: Infinity }
 const MAX_TURN_REFS = 4
-/** Answers on one page of the contents. */
+/** Answers on one page of the contents at most; fewer in a pane too short for them. */
 const TOC_PAGE_SIZE = 10
 /** The engine docks a pane beside the fullscreen transcript from this many columns; below, it sits above the prompt. */
 const DOCK_COLUMNS = 110
@@ -227,10 +230,6 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const activity = activityParts(runningList, agentList, todoList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
     const all = tocEntries(turnList, now)
-    const { entries, page, pages } = tocPage(all, pageIndex, TOC_PAGE_SIZE)
-    const goTo = (to: number) => {
-      void update($, tocPageIndex, () => Math.min(Math.max(0, to), pages - 1))
-    }
 
     const segmentText = (segment: Segment, key: string) => (
       <Text key={key} {...textStyle(segment)}>
@@ -440,9 +439,37 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
           <Text dimColor>{`외 ${count}개 더 보기`}</Text>
         </Button>
       ) : null
-    const limited = fileLayout(files, FILE_LIMITS)
+
+    // The sidebar fits the pane's height: the boxes above take what they hold, the files and the
+    // contents share the rest, each showing fewer (and "외 N개", more pages) as rows run short.
+    // A box takes its two borders; folded, one row.
+    const boxRows = (id: SectionId, body: number) => (foldedIds.includes(id) ? 1 : 2 + body)
+    const deviceText = (lines.length === 0 && deviceInfo?.version === undefined ? 1 : lines.length) + (deviceInfo?.version === undefined ? 0 : 1)
+    const isFilesOpen = files.length > 0 && !foldedIds.includes('files')
+    const isContentsOpen = !foldedIds.includes('contents')
+    const above =
+      boxRows('device', 2 + Math.max(catRows.length, deviceText)) +
+      boxRows('status', status.length + (request.length === 0 ? 0 : 1)) +
+      boxRows('activity', activity.length) +
+      (files.length === 0 ? 0 : boxRows('files', 0)) +
+      boxRows('contents', 0)
+    // No rows given (a surface that does not say): nothing is cut.
+    const bodyRows = e.props.scroll.bodyRows > 0 ? e.props.scroll.bodyRows : Number.POSITIVE_INFINITY
+    const room = bodyRows - above
+    const share = shareRows(
+      room,
+      isFilesOpen ? fileRows(fileLayout(files, FILE_LIMITS)) : 0,
+      isContentsOpen ? tocRows(all.length, TOC_PAGE_SIZE) : 0,
+    )
+    const limited = fitFileLayout(files, FILE_LIMITS, share.files)
     const isCut = limited.insideHidden > 0 || limited.foldersHidden > 0 || limited.outside.some(group => group.hidden > 0)
     const shownFiles = isFilesExpanded ? fileLayout(files, NO_FILE_LIMITS) : limited
+    // Every file shown, the contents keep what the files leave, or their least.
+    const contentsRoom = isFilesExpanded && isFilesOpen ? Math.max(Math.min(3, share.toc), room - fileRows(shownFiles, isCut)) : share.toc
+    const { entries, page, pages } = tocPage(all, pageIndex, tocPageSize(all.length, contentsRoom, TOC_PAGE_SIZE))
+    const goTo = (to: number) => {
+      void update($, tocPageIndex, () => Math.min(Math.max(0, to), pages - 1))
+    }
 
     const filesBox =
       files.length === 0
