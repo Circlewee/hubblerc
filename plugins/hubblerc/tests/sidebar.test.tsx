@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { TurnRecord } from '../types'
-import { clipCells, sessionFiles, tocEntries } from '../hooks/sidebar-format'
+import { clipCells, sessionFiles, tocEntries, tocPage } from '../hooks/sidebar-format'
 import { NOW, standInForEngine, start } from './engine'
 
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
@@ -65,6 +65,24 @@ test('the files the session changed add up across answers, the one changed last 
   ])
 })
 
+test('a file in the repository with nothing left to commit counts as committed; one outside never does', () => {
+  const list = [
+    turn('t1', [
+      { id: '1', tool: 'Edit', ms: 1, isError: false, path: '/repo/a.ts', added: 1, removed: 0 },
+      { id: '2', tool: 'Edit', ms: 1, isError: false, path: '/repo/b.ts', added: 1, removed: 0 },
+      { id: '3', tool: 'Write', ms: 1, isError: false, path: '/tmp/c.ts', added: 1, removed: 0 },
+    ]),
+  ]
+  const git = { branch: 'main', isDirty: true, root: '/repo', changed: ['/repo/b.ts'] }
+
+  expect(sessionFiles(list, git).map(file => [file.name, file.isCommitted])).toEqual([
+    ['c.ts', false],
+    ['b.ts', false],
+    ['a.ts', true],
+  ])
+  expect(sessionFiles(list).every(file => !file.isCommitted)).toBe(true)
+})
+
 test('the contents list answers newest first, each with the row a press scrolls to', () => {
   const list = [
     turn('t1', [], { prompt: '첫 질문', promptRowId: 'row-q1', lineId: 'row-end1' }),
@@ -80,6 +98,35 @@ test('the contents list answers newest first, each with the row a press scrolls 
     [1, '첫 질문', '5s', 0, { requestId: 'row-q1', block: 'start' }],
   ])
   expect(tocEntries(list, NOW, 2).map(entry => entry.number)).toEqual([4, 3])
+})
+
+test('the contents go ten answers to a page, the newest first', () => {
+  const list = Array.from({ length: 23 }, (_, i) => turn(`t${i + 1}`, []))
+  const all = tocEntries(list, NOW)
+
+  expect(tocPage(all, 0, 10).entries.map(entry => entry.number)).toEqual([23, 22, 21, 20, 19, 18, 17, 16, 15, 14])
+  expect(tocPage(all, 2, 10)).toMatchObject({ page: 2, pages: 3 })
+  expect(tocPage(all, 2, 10).entries.map(entry => entry.number)).toEqual([3, 2, 1])
+  expect(tocPage(all, 9, 10).page).toBe(2)
+})
+
+test('the sidebar pages through the contents', async ($, on) => {
+  standInForEngine(on)
+  await start($)
+  for (let i = 1; i <= 12; i += 1) {
+    await $.turn.start({ text: `질문 ${i}`, turnId: `t${i}` })
+    await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: `t${i}`, durationMs: 1000 })
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
+  expect(await ui.find({ key: 'turn-t1' })).toBeUndefined()
+  await ui.press({ key: 'toc-older' })
+  expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #1~2 / 12')
+  expect((await ui.find({ key: 'turn-t1' }))?.text).toBe('#1 질문 1')
+  await ui.press({ key: 'toc-page-0' })
+  expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
+  await ui.unmount()
 })
 
 test('a title is cut to the cells it has, Korean taking two', () => {
@@ -120,8 +167,10 @@ test('the sidebar shows the status, the files changed and the contents', async (
     expect((await ui.find({ key: 'effort' }))?.text).toBe('xhigh')
     expect(await ui.find({ type: 'Text', text: '45%' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: /대기 중/ }))?.text).toBe('· 대기 중')
-    expect((await ui.find({ type: 'Text', text: /^변경 파일/ }))?.text).toBe('변경 파일 1')
+    // The stand-in's git has notes.md in the repository and nothing of it left to commit.
+    expect((await ui.find({ type: 'Text', text: /^변경 파일/ }))?.text).toBe('변경 파일 1 · 커밋 안 됨 0')
     expect((await ui.find({ type: 'Text', text: 'notes.md' }))?.text).toBe('notes.md')
+    expect(await ui.find({ type: 'Text', text: ' ✓' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: ' +2' }))?.text).toBe(' +2')
     expect((await ui.find({ key: 'turn-t2' }))?.text).toBe('#2 두 번째 질문')
     expect((await ui.find({ key: 'turn-t1' }))?.text).toBe('#1 첫 질문')

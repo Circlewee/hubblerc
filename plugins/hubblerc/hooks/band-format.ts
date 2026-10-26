@@ -279,7 +279,17 @@ export function parseGitStatus(stdout: string): GitInfo | null {
   if (unborn?.[1] !== undefined) branch = unborn[1]
   branch = (branch.split('...')[0] ?? branch).split(' ')[0] ?? branch
 
-  return { branch, isDirty: rest.some(line => line.trim() !== '') }
+  const lines = rest.filter(line => line.trim() !== '')
+
+  return { branch, isDirty: lines.length > 0, changed: lines.map(changedPath) }
+}
+
+/** A porcelain line's path, relative to the repository's top: the new one of a rename. */
+function changedPath(line: string): string {
+  const path = line.slice(3)
+  const renamed = path.split(' -> ')
+
+  return (renamed[renamed.length - 1] ?? path).replace(/^"(.*)"$/, '$1')
 }
 
 /** TodoWrite's whole list, as the band keeps it. */

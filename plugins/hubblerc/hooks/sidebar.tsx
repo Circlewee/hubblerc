@@ -5,7 +5,7 @@ import { activityParts, cellWidth, COLORS, statusParts, textStyle } from './band
 import type { Segment } from './band-format'
 import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
-import { clipCells, sessionFiles, tocEntries } from './sidebar-format'
+import { clipCells, sessionFiles, tocEntries, tocPage } from './sidebar-format'
 import type { TocEntry } from './sidebar-format'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
@@ -20,6 +20,7 @@ const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as con
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
 const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null)
 const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
+const tocPageIndex = atom({ plugin: 'hubblerc', key: 'tocPage' } as const, 0)
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 
 export const SIDEBAR_ID = 'hubblerc'
@@ -28,6 +29,8 @@ const SIDEBAR_TITLE = 'hubblerc'
 const SIDEBAR_COLUMNS = 56
 const MAX_FILES_SHOWN = 12
 const MAX_TURN_REFS = 4
+/** Answers on one page of the contents. */
+const TOC_PAGE_SIZE = 10
 /** The engine docks a pane beside the fullscreen transcript from this many columns; below, it sits above the prompt. */
 const DOCK_COLUMNS = 110
 
@@ -143,7 +146,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -157,6 +160,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, engineEffort),
         read($, effortAuto),
         read($, autoPick),
+        read($, tocPageIndex),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
@@ -173,8 +177,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     )
     const isWorking = turnList.at(-1)?.durationMs === null
     const activity = activityParts(runningList, agentList, todoList, isWorking, now)
-    const files = sessionFiles(turnList)
-    const entries = tocEntries(turnList, now)
+    const files = sessionFiles(turnList, gitInfo)
+    const uncommitted = files.filter(file => !file.isCommitted).length
+    const all = tocEntries(turnList, now)
+    const { entries, page, pages } = tocPage(all, pageIndex, TOC_PAGE_SIZE)
+    const goTo = (to: number) => {
+      void update($, tocPageIndex, () => Math.min(Math.max(0, to), pages - 1))
+    }
 
     const segmentText = (segment: Segment, key: string) => (
       <Text key={key} {...textStyle(segment)}>
@@ -215,19 +224,21 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
 
         {files.length === 0 ? null : (
           <Box flexDirection="column" marginTop={1}>
-            <Text dimColor>{`변경 파일 ${files.length}`}</Text>
+            <Text dimColor>{`변경 파일 ${files.length}${uncommitted < files.length ? ` · 커밋 안 됨 ${uncommitted}` : ''}`}</Text>
             {files.slice(0, MAX_FILES_SHOWN).map(file => {
               const refs = file.turns.slice(-MAX_TURN_REFS).map(n => `#${n}`)
+              // A committed file goes dim with a tick: what is left to commit stands out.
               const counts: Segment[] = [
-                ...(file.added > 0 ? [{ text: ` +${file.added}`, color: COLORS.ok }] : []),
-                ...(file.removed > 0 ? [{ text: ` −${file.removed}`, color: COLORS.alert }] : []),
+                ...(file.isCommitted ? [{ text: ' ✓', dim: true }] : []),
+                ...(file.added > 0 ? [{ text: ` +${file.added}`, ...(file.isCommitted ? { dim: true } : { color: COLORS.ok }) }] : []),
+                ...(file.removed > 0 ? [{ text: ` −${file.removed}`, ...(file.isCommitted ? { dim: true } : { color: COLORS.alert }) }] : []),
                 { text: `  ${file.turns.length > MAX_TURN_REFS ? '… ' : ''}${refs.join(' ')}`, dim: true },
               ]
               const room = width - 2 - counts.reduce((sum, segment) => sum + cellWidth(segment.text), 0)
 
               return (
                 <Box key={`file-${file.path}`} paddingLeft={2}>
-                  <Text>{clipCells(file.name, room)}</Text>
+                  <Text {...(file.isCommitted ? { dimColor: true } : {})}>{clipCells(file.name, room)}</Text>
                   {counts.map((segment, i) => segmentText(segment, `count-${i}`))}
                 </Box>
               )
@@ -241,7 +252,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         )}
 
         <Box marginTop={1}>
-          <Text dimColor>{entries.length === 0 ? '아직 기록된 답변이 없습니다' : '목차'}</Text>
+          <Text dimColor>
+            {all.length === 0
+              ? '아직 기록된 답변이 없습니다'
+              : pages === 1
+                ? '목차'
+                : `목차 #${entries.at(-1)?.number ?? ''}~${entries[0]?.number ?? ''} / ${all.length}`}
+          </Text>
         </Box>
         {entries.map(entry => {
           const failed = entry.failed > 0 ? ` 실패 ${entry.failed}` : ''
@@ -275,6 +292,36 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             </Box>
           )
         })}
+        {pages > 1 ? (
+          // Pages run from the newest answers (1) back; the arrows point the way the numbers do.
+          <Box paddingLeft={2} columnGap={2}>
+            {page > 0 ? (
+              <Button key="toc-newer" plain onPress={() => goTo(page - 1)}>
+                ◀ 최근
+              </Button>
+            ) : (
+              <Text dimColor>◀ 최근</Text>
+            )}
+            {pageNumbers(page, pages).map(n =>
+              n === page ? (
+                <Text key={`toc-page-${n}`} color={COLORS.effort} bold>
+                  {String(n + 1)}
+                </Text>
+              ) : (
+                <Button key={`toc-page-${n}`} plain onPress={() => goTo(n)}>
+                  {String(n + 1)}
+                </Button>
+              ),
+            )}
+            {page < pages - 1 ? (
+              <Button key="toc-older" plain onPress={() => goTo(page + 1)}>
+                이전 ▶
+              </Button>
+            ) : (
+              <Text dimColor>이전 ▶</Text>
+            )}
+          </Box>
+        ) : null}
       </Box>
     )
   })
@@ -324,4 +371,12 @@ async function jumpTo($: EngineInterface, entry: TocEntry): Promise<void> {
     deny: String(error),
   }))
   if (moved.deny !== undefined) $.ui.toast(`#${entry.number}(으)로 이동하지 못했습니다: ${moved.deny}`)
+}
+
+/** The page numbers the pager offers: up to seven around the page shown, the first and last kept. */
+function pageNumbers(page: number, pages: number): number[] {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i)
+  const start = Math.min(Math.max(0, page - 3), pages - 7)
+
+  return Array.from({ length: 7 }, (_, i) => start + i)
 }

@@ -113,7 +113,14 @@ export type UsageSnapshot = {
   costUsd?: number
 }
 
-export type GitInfo = { branch: string; isDirty: boolean }
+export type GitInfo = {
+  branch: string
+  isDirty: boolean
+  /** The repository's top folder, absolute. */
+  root?: string
+  /** The files with changes not committed (staged, unstaged or untracked), absolute. */
+  changed?: string[]
+}
 
 declare module 'claude-code' {
   interface PluginState {
@@ -144,6 +151,8 @@ declare module 'claude-code' {
       effortAuto: boolean | null
       /** Auto effort's latest pick. */
       autoPick: AutoPick | null
+      /** The sidebar contents' page, 0 the newest answers. */
+      tocPage: number
       /** The session's last main-loop requests, oldest first: what `/effort-log` shows. */
       effortLog: EffortSample[]
     }

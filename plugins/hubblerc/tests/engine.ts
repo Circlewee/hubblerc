@@ -52,9 +52,15 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     } as never,
   }))
   on('agent.list', () => ({ value: agents as never }))
-  on('process.run', () => ({
-    value: { exitCode: 0, stdout: '## main...origin/main\n M hooks/band.tsx\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-  }))
+  on('process.run', (_, e) => {
+    if (e.argv.includes('rev-parse')) {
+      return { value: { exitCode: 0, stdout: '/repo/hubblerc\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+
+    return {
+      value: { exitCode: 0, stdout: '## main...origin/main\n M hooks/band.tsx\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+    }
+  })
   // The read answers the merged settings; a read of one key is that object, projected.
   on('settings.read', () => ({
     value: { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'xhigh' } } } as never,

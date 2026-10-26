@@ -104,10 +104,10 @@ test('line 2 names what runs, the subagents and the todo, or says it waits', () 
 })
 
 test('git status reads as a branch and whether the tree has changes', () => {
-  expect(parseGitStatus('## main...origin/main [ahead 1]\n M a.ts\n')).toEqual({ branch: 'main', isDirty: true })
-  expect(parseGitStatus('## main\n')).toEqual({ branch: 'main', isDirty: false })
-  expect(parseGitStatus('## No commits yet on main\n?? a.ts\n')).toEqual({ branch: 'main', isDirty: true })
-  expect(parseGitStatus('## HEAD (no branch)\n')).toEqual({ branch: 'HEAD', isDirty: false })
+  expect(parseGitStatus('## main...origin/main [ahead 1]\n M a.ts\nR  old.ts -> 새 파일.ts\n')).toEqual({ branch: 'main', isDirty: true, changed: ['a.ts', '새 파일.ts'] })
+  expect(parseGitStatus('## main\n')).toEqual({ branch: 'main', isDirty: false, changed: [] })
+  expect(parseGitStatus('## No commits yet on main\n?? a.ts\n')).toEqual({ branch: 'main', isDirty: true, changed: ['a.ts'] })
+  expect(parseGitStatus('## HEAD (no branch)\n')).toEqual({ branch: 'HEAD', isDirty: false, changed: [] })
   expect(parseGitStatus('fatal: not a git repository')).toBeNull()
 })
 

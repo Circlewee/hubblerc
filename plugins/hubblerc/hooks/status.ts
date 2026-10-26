@@ -19,6 +19,8 @@ const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const TICK_MS = 1000
 /** Usage, git and the model are read again this often even when idle (reset countdowns move). */
 const SLOW_REFRESH_MS = 30_000
+/** Git is read this often, so a commit made outside shows soon. */
+const GIT_REFRESH_MS = 5000
 const MAX_RUNNING = 50
 
 type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
@@ -44,6 +46,9 @@ export async function startStatus($: EngineInterface): Promise<void> {
       }
       await update($, tick, () => now)
     })().catch(() => undefined)
+  })
+  $.clock.every(GIT_REFRESH_MS, () => {
+    void refreshGit($).catch(() => undefined)
   })
 }
 
@@ -72,6 +77,9 @@ export async function unmarkRunning($: EngineInterface, id: string): Promise<voi
 export async function noteCall($: EngineInterface, e: CallInput, ran: ToolCallResult, startedAt: number): Promise<void> {
   if (ran.deny !== undefined || ran.isError === true) return
   await afterCall($, String(e.tool), e, ran, startedAt)
+  // A commit (or any git command) shows on the sidebar's files at once.
+  const command = (e as unknown as { command?: unknown }).command
+  if (e.tool === 'Bash' && e.agentId === undefined && typeof command === 'string' && /\bgit\b/.test(command)) await refreshGit($)
 }
 
 async function afterCall($: EngineInterface, tool: string, e: CallInput, ran: ToolCallResult, startedAt: number): Promise<void> {
@@ -131,14 +139,35 @@ async function refreshAgents($: EngineInterface): Promise<boolean> {
   return seen.some(agent => agent.status === 'running' || agent.status === 'pending')
 }
 
+/** Each folder's repository top, once found (`''`: not in a repository). */
+const roots = new Map<string, string>()
+
 async function readGit($: EngineInterface, cwd: string) {
   try {
-    const { exitCode, stdout } = await $.process.run(['git', 'status', '--porcelain=v1', '--branch'], { cwd, timeoutMs: 3000 })
+    if (!roots.has(cwd)) {
+      const top = await $.process.run(['git', 'rev-parse', '--show-toplevel'], { cwd, timeoutMs: 3000 })
+      roots.set(cwd, top.exitCode === 0 ? top.stdout.trim() : '')
+    }
+    const root = roots.get(cwd) ?? ''
+    // quotePath off: a Korean file name comes as itself, not octal escapes.
+    const { exitCode, stdout } = await $.process.run(['git', '-c', 'core.quotePath=false', 'status', '--porcelain=v1', '--branch'], {
+      cwd,
+      timeoutMs: 3000,
+    })
+    const info = exitCode === 0 ? parseGitStatus(stdout) : null
+    if (info === null || root === '') return info
 
-    return exitCode === 0 ? parseGitStatus(stdout) : null
+    return { ...info, root, changed: (info.changed ?? []).map(path => `${root}/${path}`) }
   } catch {
     return null
   }
+}
+
+/** Reads git again: often, so a commit made anywhere shows within seconds; at once after Claude runs git. */
+export async function refreshGit($: EngineInterface): Promise<void> {
+  const info = await readGit($, await $.session.cwd())
+  // Written only when it changed, so the five-second read redraws nothing on its own.
+  if (JSON.stringify(info) !== JSON.stringify(await read($, git))) await update($, git, () => info)
 }
 
 function snapshot(figures: SessionUsage): UsageSnapshot {

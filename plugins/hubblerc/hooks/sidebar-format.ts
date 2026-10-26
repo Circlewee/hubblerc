@@ -1,4 +1,4 @@
-import type { TurnRecord } from '../types'
+import type { GitInfo, TurnRecord } from '../types'
 import { cellWidth, elapsed } from './band-format'
 import { basename, fileTotals } from './summary'
 
@@ -35,10 +35,12 @@ export type SessionFile = {
   removed: number
   /** The answers that changed it, by number, oldest first. */
   turns: number[]
+  /** In the repository with no change left uncommitted. */
+  isCommitted: boolean
 }
 
-/** The session's last `shown` answers, newest first. */
-export function tocEntries(list: readonly TurnRecord[], now: number, shown = 50): TocEntry[] {
+/** The session's last `shown` answers (all by default), newest first. */
+export function tocEntries(list: readonly TurnRecord[], now: number, shown = list.length): TocEntry[] {
   const start = Math.max(0, list.length - shown)
   const seen = new Map<string, number>()
   const occurrences = list.map(turn => {
@@ -73,12 +75,12 @@ function toEntry(turn: TurnRecord, number: number, now: number, occurrence: numb
 }
 
 /** Every file the session's answers changed (subagents' too), the one changed last first. */
-export function sessionFiles(list: readonly TurnRecord[]): SessionFile[] {
+export function sessionFiles(list: readonly TurnRecord[], git: GitInfo | null = null): SessionFile[] {
   const byPath = new Map<string, SessionFile>()
 
   list.forEach((turn, i) => {
     for (const total of fileTotals(turn.runs)) {
-      const file = byPath.get(total.path) ?? { path: total.path, name: '', added: 0, removed: 0, turns: [] }
+      const file = byPath.get(total.path) ?? { path: total.path, name: '', added: 0, removed: 0, turns: [], isCommitted: false }
       file.added += total.added
       file.removed += total.removed
       file.turns.push(i + 1)
@@ -89,6 +91,9 @@ export function sessionFiles(list: readonly TurnRecord[]): SessionFile[] {
   })
 
   const files = [...byPath.values()].reverse()
+  const root = git?.root
+  const changed = new Set(git?.changed ?? [])
+  for (const file of files) file.isCommitted = root !== undefined && file.path.startsWith(`${root}/`) && !changed.has(file.path)
   const names = new Map<string, number>()
   for (const file of files) names.set(basename(file.path), (names.get(basename(file.path)) ?? 0) + 1)
   for (const file of files) {
@@ -111,4 +116,15 @@ export function clipCells(text: string, max: number): string {
   }
 
   return `${clipped}…`
+}
+
+/** One page of the contents: its entries, which page it is (0 the newest) and how many there are. */
+export type TocPage = { entries: TocEntry[]; page: number; pages: number }
+
+/** The page `page` of entries listed newest first, `size` to a page; a page past the end shows the last. */
+export function tocPage(entries: readonly TocEntry[], page: number, size: number): TocPage {
+  const pages = Math.max(1, Math.ceil(entries.length / size))
+  const shown = Math.min(Math.max(0, page), pages - 1)
+
+  return { entries: entries.slice(shown * size, (shown + 1) * size), page: shown, pages }
 }
