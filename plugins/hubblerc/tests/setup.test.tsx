@@ -46,9 +46,8 @@ test('needed: our keys and the fullscreen layout; claude-hud and the language ar
   expect(bare.hasClaudeHud).toBe(true)
   expect(bare.hasLanguage).toBe(false)
 
-  // Merged, the status line may be the terminal's own; the person's file still runs claude-hud.
-  const wrapped = setupState(undefined, { tui: 'fullscreen', language: 'korean', statusLine: { type: 'command', command: 'orca-status' }, userStatusLine: HUD })
-  expect(wrapped.hasClaudeHud).toBe(true)
+  // A project's own status line in place of claude-hud: none here.
+  expect(setupState(undefined, { tui: 'fullscreen', language: 'korean', statusLine: { type: 'command', command: 'true' } }).hasClaudeHud).toBe(false)
 })
 
 /** The machine's home and its keybindings file, as the test sets them. */

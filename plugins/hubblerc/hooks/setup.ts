@@ -82,11 +82,11 @@ function chatBindings(file: Keybindings | null): Record<string, unknown> {
 }
 
 /**
- * What the settings say that the setup looks at. The status line is read twice: merged, and as the
- * person's own file has it, as a terminal that launches Claude Code may set its own over it (Orca's
- * status-line hook, seen as the merged value not naming claude-hud while the file did).
+ * What the settings say that the setup looks at, merged: what applies in this folder. A project's
+ * own `statusLine` (this repository's settings.local.json sets a no-op one) hides claude-hud here
+ * while the user's file still runs it elsewhere, and here it is rightly not reported.
  */
-export type SettingsFacts = { tui: unknown; language: unknown; statusLine: unknown; userStatusLine?: unknown }
+export type SettingsFacts = { tui: unknown; language: unknown; statusLine: unknown }
 
 /** The machine's state: our keys, and the settings' fullscreen, language and status line. */
 export type SetupState = {
@@ -110,7 +110,7 @@ export function setupState(keyFile: string | undefined, settings: SettingsFacts)
     keys: keyStates(keyFile),
     isFullscreen: settings.tui === 'fullscreen',
     hasLanguage: typeof settings.language === 'string' && settings.language.trim() !== '',
-    hasClaudeHud: runsHud(settings.statusLine) || runsHud(settings.userStatusLine),
+    hasClaudeHud: runsHud(settings.statusLine),
     isKeyFileBroken: keyFile !== undefined && keyFile.trim() !== '' && parse(keyFile) === null,
   }
 }
@@ -157,15 +157,13 @@ async function keyFilePath($: EngineInterface): Promise<string | undefined> {
 async function readState($: EngineInterface): Promise<{ path: string | undefined; text: string | undefined; state: SetupState }> {
   const path = await keyFilePath($)
   const text = path === undefined ? undefined : await $.fs.read(path).catch(() => undefined)
-  const [tui, language, statusLine, user] = await Promise.all([
+  const [tui, language, statusLine] = await Promise.all([
     $.settings.read({ key: 'tui' }),
     $.settings.read({ key: 'language' }),
     $.settings.read({ key: 'statusLine' }),
-    $.settings.read({ source: 'user' }).catch(() => ({}) as Record<string, unknown>),
   ])
-  const userStatusLine = (user as Record<string, unknown>).statusLine
 
-  return { path, text, state: setupState(text, { tui, language, statusLine, userStatusLine }) }
+  return { path, text, state: setupState(text, { tui, language, statusLine }) }
 }
 
 /** At session.start: when a needed thing is missing, one line in the conversation says so. */
