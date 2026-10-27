@@ -65,8 +65,10 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     // The status hubblerc polls must never take the index lock a person's commit needs.
     if (e.argv.includes('status')) standIn.gitStatusArgs.push([...e.argv])
     const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    // Booted a day, two hours and five minutes before NOW.
-    if (e.argv[0] === 'sysctl') return ok(`Apple M3 Pro\n19327352832\n{ sec = ${(NOW - (26 * 60 + 5) * 60_000) / 1000}, usec = 0 } Sat Oct 24\n`)
+    if (e.argv[0] === 'sysctl') return ok('Apple M3 Pro\n19327352832\n')
+    // 13.7 GiB in use (app, wired, compressed); 256 GB left on the disk.
+    if (e.argv[0] === 'vm_stat') return ok('Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     6279.\nPages wired down:                             198111.\nPages purgeable:                               15550.\nAnonymous pages:                              392549.\nPages stored in compressor:                   625561.\nPages occupied by compressor:                 323642.\n')
+    if (e.argv[0] === 'df') return ok('Filesystem     1024-blocks     Used Available Capacity iused      ifree %iused  Mounted on\n/dev/disk3s1s1   482797652 13339736 250280580     6%  484019 2502817280    0%   /\n')
     if (e.argv[0] === 'sw_vers') return ok('27.0.1\n')
     if (e.argv[0] === 'sh') return ok(`${standIn.installedVersions.join('\n')}\n`)
     if (e.argv.includes('rev-parse')) {

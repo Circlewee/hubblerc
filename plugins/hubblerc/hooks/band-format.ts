@@ -20,6 +20,8 @@ export type Segment = {
 export type Palette = {
   ok: string
   warn: string
+  /** Between warn and alert: the sidebar's fourth step of a usage reading. */
+  caution: string
   alert: string
   effort: string
   sessionEffort: string
@@ -37,6 +39,7 @@ export type Palette = {
 export const COLORS: Palette = {
   ok: 'green',
   warn: 'yellow',
+  caution: 'yellow',
   alert: 'red',
   effort: 'cyan',
   sessionEffort: 'yellow',
@@ -54,6 +57,8 @@ export const COLORS: Palette = {
 export const THEME_COLORS: Palette = {
   ok: 'success',
   warn: 'warning',
+  // Claude's orange: between the theme's yellow and red.
+  caution: 'claude',
   alert: 'error',
   effort: 'suggestion',
   sessionEffort: 'warning',
@@ -101,8 +106,60 @@ export function levelColor(percent: number, palette: Palette = COLORS): string {
   return palette.ok
 }
 
-/** Time until `iso`, short: `1h30m`, `45m`, `2d3h`, `<1m`; '' when unknown or past. */
-export function countdown(iso: string | undefined, now: number): string {
+/**
+ * The sidebar's step of a usage reading, 0 to 4: 여유 (under 50%), 보통 (50), 주의 (70), 위험 (85),
+ * 한계 (95), drawn green, yellow, orange, red, red with a `!`.
+ */
+export function levelStep(percent: number): number {
+  if (percent >= 95) return 4
+  if (percent >= 85) return 3
+  if (percent >= 70) return 2
+  if (percent >= 50) return 1
+
+  return 0
+}
+
+const WEEK_MS = 7 * 24 * 3_600_000
+const DAY_MS = 24 * 3_600_000
+
+/**
+ * The 7-day window's step by its pace as well as its level: what it will reach at the reset, at
+ * the rate so far, raises the step to 주의 from 85%, 위험 from 100% (it runs out first), 한계 from
+ * 130%. Not in its first day, when a little use already looks fast; by level alone with no reset.
+ */
+export function weekStep(percent: number, resetsAt: string | undefined, now: number): number {
+  const level = levelStep(percent)
+  const left = resetsAt === undefined ? Number.NaN : Date.parse(resetsAt) - now
+  const gone = WEEK_MS - left
+  if (!Number.isFinite(gone) || gone < DAY_MS || gone > WEEK_MS) return level
+
+  const projected = (percent * WEEK_MS) / gone
+  const pace = projected >= 130 ? 4 : projected >= 100 ? 3 : projected >= 85 ? 2 : 0
+
+  return Math.max(level, pace)
+}
+
+/** A step's colour: green, yellow, orange, red, red. */
+export function stepColor(step: number, palette: Palette): string {
+  return [palette.ok, palette.warn, palette.caution, palette.alert][Math.min(step, 3)] ?? palette.alert
+}
+
+/**
+ * The effort value's style in the sidebar, by its level: low faint, medium plain, high blue,
+ * xhigh purple, max purple and bold. None of the usage readings' yellow to red, which warn.
+ */
+export function effortStyle(level: string | null, palette: Palette): Pick<Segment, 'color' | 'dim' | 'bold'> {
+  if (level === 'low') return { dim: true }
+  if (level === 'high') return { color: palette.effort }
+  if (level === 'xhigh') return { color: palette.branch }
+  if (level === 'max') return { color: palette.branch, bold: true }
+
+  return {}
+}
+
+/** Time until `iso`, short: `1h30m`, `45m`, `2d3h`, `<1m` (`isSpaced`, `1h 30m`, `2d 3h`); '' when unknown or past. */
+export function countdown(iso: string | undefined, now: number, isSpaced = false): string {
+  const gap = isSpaced ? ' ' : ''
   if (iso === undefined) return ''
   const ms = Date.parse(iso) - now
   if (!Number.isFinite(ms) || ms <= 0) return ''
@@ -110,9 +167,9 @@ export function countdown(iso: string | undefined, now: number): string {
   if (minutes < 1) return '<1m'
   if (minutes < 60) return `${minutes}m`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h${String(minutes % 60).padStart(2, '0')}m`
+  if (hours < 24) return `${hours}h${gap}${String(minutes % 60).padStart(2, '0')}m`
 
-  return `${Math.floor(hours / 24)}d${hours % 24}h`
+  return `${Math.floor(hours / 24)}d${gap}${hours % 24}h`
 }
 
 /** How long something has run, short: `12s`, `2m15s`, `1h3m`. */
@@ -162,7 +219,23 @@ export type StatusInput = {
   isRoomy?: boolean
   /** The colours to draw with: the terminal's (the band, the default) or the theme's (the sidebar). */
   palette?: Palette
+  /**
+   * The cells a usage line may take, one to a line (the sidebar): then the labels pad to one width
+   * so every bar starts in one column, 7d gets a bar too, the bars stretch to what the longest line
+   * leaves (8 to 20 cells) and their empty cells are dashed. Absent (the band), short bars on one line.
+   */
+  barColumns?: number
 }
+
+/** The sidebar's bars: at least the band's eight cells, at most twenty. */
+const WIDE_BAR_MIN = 8
+const WIDE_BAR_MAX = 20
+/** A label padded (`5h  `) and a percent padded (` 45%`): what a wide usage line takes besides its bar and tail. */
+const WIDE_LABEL_CELLS = 4
+const WIDE_PERCENT_CELLS = 5
+
+/** How a usage part is drawn: how many cells its bar takes (0, none) and in what style. */
+type BarStyle = { cells: number; isWide: boolean }
 
 type StatusShape = { bars: boolean; sevenDay: boolean; projectName: boolean }
 
@@ -195,33 +268,40 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
   const model = input.model === '' ? '모델 ?' : modelLabel(input.model)
   const head: Segment[] = [{ text: model, bold: true }, { text: ' · ', dim: true }]
   const effort = input.isAuto === true && !input.isOverridden ? `auto${input.effort === null ? '' : ` ${input.effort}`}` : (input.effort ?? 'effort')
-  head.push({
-    text: effort,
-    role: 'effort',
-    color: input.isOverridden ? (input.palette ?? COLORS).sessionEffort : (input.palette ?? COLORS).effort,
-  })
+  // Wide (the sidebar), coloured by its level; "(세션)" still says it is the session's.
+  head.push(
+    input.barColumns !== undefined
+      ? { text: effort, role: 'effort', ...effortStyle(input.effort, input.palette ?? COLORS) }
+      : { text: effort, role: 'effort', color: input.isOverridden ? (input.palette ?? COLORS).sessionEffort : (input.palette ?? COLORS).effort },
+  )
   if (input.isOverridden) head.push({ text: ' (세션)', dim: true })
   parts.push(head)
 
-  const context = input.usage?.contextPercent
-  parts.push(
-    context === undefined
-      ? [{ text: 'ctx –', dim: true }]
-      : usagePart('ctx', context, undefined, shape.bars, input.now, input.palette),
-  )
-
   const fiveHour = input.usage?.fiveHour
-  if (fiveHour !== undefined) {
-    const part = usagePart('5h', fiveHour.percent, fiveHour.resetsAt, shape.bars, input.now, input.palette)
-    // Kept in every shape: the one thing worth the room when the window is about to run out.
-    if (input.burnout !== undefined && input.burnout !== null) {
-      part.push({ text: input.isRoomy === true ? ` ⚠ ${input.burnout}m 뒤 소진` : ` ⚠${input.burnout}m`, color: (input.palette ?? COLORS).alert, bold: true })
-    }
-    parts.push(part)
-  }
-
+  // Kept in every shape: the one thing worth the room when the window is about to run out.
+  const burnout: Segment[] =
+    fiveHour === undefined || input.burnout === undefined || input.burnout === null
+      ? []
+      : [{ text: input.isRoomy === true ? ` ⚠ ${input.burnout}m 뒤 소진` : ` ⚠${input.burnout}m`, color: (input.palette ?? COLORS).alert, bold: true }]
+  const isWide = input.barColumns !== undefined
+  const fiveHourTail = [...resetSegments(fiveHour?.resetsAt, input.now, isWide), ...burnout]
   const sevenDay = input.usage?.sevenDay
-  if (shape.sevenDay && sevenDay !== undefined) parts.push(usagePart('7d', sevenDay.percent, undefined, false, input.now, input.palette))
+  // Wide, 7d says when it resets too (`↻ 3d4h`).
+  const sevenDayTail = isWide ? resetSegments(sevenDay?.resetsAt, input.now, true) : []
+  // One width for every bar, from what the longest line leaves it.
+  const tail = Math.max(segmentsWidth(fiveHourTail), segmentsWidth(sevenDayTail))
+  const wide = Math.min(WIDE_BAR_MAX, Math.max(WIDE_BAR_MIN, (input.barColumns ?? 0) - WIDE_LABEL_CELLS - WIDE_PERCENT_CELLS - tail))
+  const bar: BarStyle = { cells: !shape.bars ? 0 : isWide ? wide : BAR_CELLS, isWide }
+
+  const context = input.usage?.contextPercent
+  parts.push(context === undefined ? [{ text: 'ctx –', dim: true }] : usagePart('ctx', context, [], bar, input.palette))
+
+  if (fiveHour !== undefined) parts.push(usagePart('5h', fiveHour.percent, fiveHourTail, bar, input.palette))
+
+  if (shape.sevenDay && sevenDay !== undefined) {
+    const step = weekStep(sevenDay.percent, sevenDay.resetsAt, input.now)
+    parts.push(usagePart('7d', sevenDay.percent, sevenDayTail, isWide ? bar : { cells: 0, isWide }, input.palette, step))
+  }
 
   const where: Segment[] = []
   if (shape.projectName || input.git === null) where.push({ text: input.project })
@@ -235,23 +315,38 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
   return parts
 }
 
-function usagePart(name: string, percent: number, resetsAt: string | undefined, bars: boolean, now: number, palette: Palette = COLORS): Segment[] {
-  const color = levelColor(percent, palette)
-  const isHigh = percent >= 60
-  const part: Segment[] = [{ text: `${name} `, dim: true }]
-  if (bars) {
-    // A thin bar: its fill shows the level's color, the rest the terminal's faint gray.
-    const filled = barFill(percent)
+function usagePart(name: string, percent: number, tail: readonly Segment[], bar: BarStyle, palette: Palette = COLORS, step = levelStep(percent)): Segment[] {
+  // Wide, five steps and the number always coloured, bold from 주의; else three, the number coloured from 60%.
+  const color = bar.isWide ? stepColor(step, palette) : levelColor(percent, palette)
+  const isHigh = bar.isWide || percent >= 60
+  const isBold = bar.isWide ? step >= 2 : percent >= 60
+  // Wide, the labels pad to one width so the bars start in one column.
+  const part: Segment[] = [{ text: bar.isWide ? `${name} `.padEnd(WIDE_LABEL_CELLS) : `${name} `, dim: true }]
+  if (bar.cells > 0) {
+    // A thick fill in the level's color over a faint thin line; wide, the empty cells dashed.
+    const filled = barFill(percent, bar.cells)
     if (filled > 0) part.push({ text: '━'.repeat(filled), role: 'barFilled', color })
-    if (filled < BAR_CELLS) part.push({ text: '─'.repeat(BAR_CELLS - filled), role: 'barEmpty', color: palette.faint })
+    if (filled < bar.cells) part.push({ text: (bar.isWide ? '╌' : '─').repeat(bar.cells - filled), role: 'barEmpty', color: palette.faint })
     part.push({ text: ' ' })
   }
-  // The number takes a color only when it runs high.
-  part.push({ text: `${Math.round(percent)}%`, ...(isHigh ? { color, bold: true } : {}) })
-  const reset = countdown(resetsAt, now)
-  if (reset !== '') part.push({ text: ` ↻${reset}`, dim: true })
+  // The number takes a color only when it runs high; wide, right-aligned so what follows lines up.
+  const number = `${Math.round(percent)}%`
+  part.push({ text: bar.isWide ? number.padStart(WIDE_PERCENT_CELLS - 1) : number, ...(isHigh ? { color } : {}), ...(isBold ? { bold: true } : {}) })
+  if (bar.isWide && step >= 4) part.push({ text: '!', color, bold: true })
+  part.push(...tail)
 
   return part
+}
+
+/** ` ↻1h30m` (wide, ` ↻ 1h 30m`), dim; none when the reset is unknown or past. */
+function resetSegments(resetsAt: string | undefined, now: number, isWide = false): Segment[] {
+  const reset = countdown(resetsAt, now, isWide)
+
+  return reset === '' ? [] : [{ text: isWide ? ` ↻ ${reset}` : ` ↻${reset}`, dim: true }]
+}
+
+function segmentsWidth(segments: readonly Segment[]): number {
+  return segments.reduce((sum, segment) => sum + cellWidth(segment.text), 0)
 }
 
 const MAX_AGENTS_SHOWN = 2

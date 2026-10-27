@@ -6,9 +6,9 @@ import type { DeviceInfo } from '../types'
 const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
 
 /**
- * At session.start: the machine's chip, memory, OS and boot time (macOS's `sysctl` and `sw_vers`)
- * and the engine's version, for the sidebar's top box. Each read on its own: one failing leaves
- * its field out, the rest stand.
+ * At session.start: the machine's chip, memory and OS (macOS's `sysctl` and `sw_vers`) and the
+ * engine's version, for the sidebar's top box; then every 30 seconds the memory in use and the
+ * disk's room left. Each read on its own: one failing leaves its field out, the rest stand.
  */
 export async function startDevice($: EngineInterface): Promise<void> {
   const run = async (argv: string[]) => {
@@ -17,7 +17,7 @@ export async function startDevice($: EngineInterface): Promise<void> {
     return ran !== undefined && ran.exitCode === 0 ? ran.stdout : ''
   }
   const [sysctl, os, version] = await Promise.all([
-    run(['sysctl', '-n', 'machdep.cpu.brand_string', 'hw.memsize', 'kern.boottime']),
+    run(['sysctl', '-n', 'machdep.cpu.brand_string', 'hw.memsize']),
     run(['sw_vers', '-productVersion']),
     $.session.version().catch(() => undefined),
   ])
@@ -27,13 +27,53 @@ export async function startDevice($: EngineInterface): Promise<void> {
   if (version !== undefined) info.version = version.base ?? version.version
   await update($, device, () => info)
 
+  await readResources($).catch(() => undefined)
+  $.clock.every(RESOURCE_MS, () => {
+    void readResources($).catch(() => undefined)
+  })
   await checkVersions($).catch(() => undefined)
   $.clock.every(VERSION_CHECK_MS, () => {
     void checkVersions($).catch(() => undefined)
   })
 }
 
+const RESOURCE_MS = 30_000
 const VERSION_CHECK_MS = 60 * 60_000
+
+/** The memory in use (`vm_stat`) and the startup disk's room left (`df`): each a few milliseconds. */
+async function readResources($: EngineInterface): Promise<void> {
+  const [vm, df] = await Promise.all([
+    $.process.run(['vm_stat'], { timeoutMs: 3000 }).catch(() => undefined),
+    $.process.run(['df', '-k', '/'], { timeoutMs: 3000 }).catch(() => undefined),
+  ])
+  const memoryUsedGb = vm?.exitCode === 0 ? parseVmStat(vm.stdout) : undefined
+  const diskFreeGb = df?.exitCode === 0 ? parseDf(df.stdout) : undefined
+  await update($, device, info => ({
+    ...(info ?? {}),
+    ...(memoryUsedGb === undefined ? {} : { memoryUsedGb }),
+    ...(diskFreeGb === undefined ? {} : { diskFreeGb }),
+  }))
+}
+
+/**
+ * Memory in use from `vm_stat`, in GiB to a tenth: app memory (anonymous less purgeable), wired and
+ * compressed pages, as Activity Monitor's "Memory Used" adds them up.
+ */
+export function parseVmStat(stdout: string): number | undefined {
+  const pageSize = Number(/page size of (\d+) bytes/.exec(stdout)?.[1])
+  const pages = (name: string) => Number(new RegExp(`^${name}:\\s+(\\d+)`, 'm').exec(stdout)?.[1])
+  const used = pages('Anonymous pages') - pages('Pages purgeable') + pages('Pages wired down') + pages('Pages occupied by compressor')
+  if (!Number.isFinite(pageSize) || !Number.isFinite(used) || used < 0) return undefined
+
+  return Math.round((used * pageSize) / 2 ** 30 * 10) / 10
+}
+
+/** The room left on the disk `df -k` names, in whole GB of 10^9 bytes (Finder's count). */
+export function parseDf(stdout: string): number | undefined {
+  const kilobytes = Number(stdout.trim().split('\n').at(-1)?.trim().split(/\s+/)[3])
+
+  return Number.isFinite(kilobytes) && kilobytes >= 0 ? Math.round((kilobytes * 1024) / 1e9) : undefined
+}
 const LATEST_URL = 'https://registry.npmjs.org/@anthropic-ai/claude-code/latest'
 export const CHANGELOG_URL = 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md'
 
@@ -107,35 +147,30 @@ export function versionNote(info: DeviceInfo | null): { kind: 'restart' | 'relea
   return null
 }
 
-/** `sysctl -n machdep.cpu.brand_string hw.memsize kern.boottime`, one value a line. */
-export function parseSysctl(stdout: string): Pick<DeviceInfo, 'chip' | 'memoryGb' | 'bootedAt'> {
-  const [chip = '', memory = '', boot = ''] = stdout.split('\n').map(line => line.trim())
-  const info: Pick<DeviceInfo, 'chip' | 'memoryGb' | 'bootedAt'> = {}
+/** `sysctl -n machdep.cpu.brand_string hw.memsize`, one value a line. */
+export function parseSysctl(stdout: string): Pick<DeviceInfo, 'chip' | 'memoryGb'> {
+  const [chip = '', memory = ''] = stdout.split('\n').map(line => line.trim())
+  const info: Pick<DeviceInfo, 'chip' | 'memoryGb'> = {}
   if (chip !== '') info.chip = chip
   const bytes = Number(memory)
   if (Number.isFinite(bytes) && bytes > 0) info.memoryGb = Math.round(bytes / 2 ** 30)
-  // `{ sec = 1760000000, usec = 123456 } Tue Oct 14 ...`
-  const seconds = /sec = (\d+)/.exec(boot)?.[1]
-  if (seconds !== undefined) info.bootedAt = Number(seconds) * 1000
 
   return info
 }
 
-/** `켜진 지 11일 23시간`, or within the first day `켜진 지 5시간 12분`. */
-export function uptime(bootedAt: number, now: number): string {
-  const minutes = Math.max(0, Math.floor((now - bootedAt) / 60_000))
-  const days = Math.floor(minutes / 1440)
-  const hours = Math.floor((minutes % 1440) / 60)
-  if (days > 0) return `켜진 지 ${days}일 ${hours}시간`
-  if (hours > 0) return `켜진 지 ${hours}시간 ${minutes % 60}분`
+/** `메모리 14.7/18GB · 디스크 256GB 남음`, the halves known; '' with neither. */
+export function resourceLine(info: DeviceInfo): string {
+  const memory =
+    info.memoryUsedGb === undefined ? '' : `메모리 ${info.memoryUsedGb.toFixed(1)}${info.memoryGb === undefined ? 'GB' : `/${info.memoryGb}GB`}`
+  const disk = info.diskFreeGb === undefined ? '' : `디스크 ${info.diskFreeGb}GB 남음`
 
-  return `켜진 지 ${minutes}분`
+  return [memory, disk].filter(part => part !== '').join(' · ')
 }
 
-/** The box's lines about the machine: chip and memory, OS, uptime; those known. The engine's line is drawn apart. */
-export function deviceLines(info: DeviceInfo | null, now: number): string[] {
+/** The box's lines about the machine: chip and memory, OS, memory in use and disk left; those known. The engine's line is drawn apart. */
+export function deviceLines(info: DeviceInfo | null): string[] {
   if (info === null) return []
   const hardware = [info.chip, info.memoryGb === undefined ? undefined : `${info.memoryGb}GB`].filter(part => part !== undefined)
 
-  return [hardware.join(' · '), info.os ?? '', info.bootedAt === undefined ? '' : uptime(info.bootedAt, now)].filter(line => line !== '')
+  return [hardware.join(' · '), info.os ?? '', resourceLine(info)].filter(line => line !== '')
 }

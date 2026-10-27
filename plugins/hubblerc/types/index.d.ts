@@ -137,8 +137,10 @@ export type DeviceInfo = {
   memoryGb?: number
   /** `macOS 27.0.1`. */
   os?: string
-  /** When the machine booted, in ms since the epoch: uptime is counted from it as the clock moves. */
-  bootedAt?: number
+  /** Memory in use, in GiB as `memoryGb` counts: app memory, wired and compressed, as Activity Monitor adds it up. Read every 30 seconds. */
+  memoryUsedGb?: number
+  /** Room left on the startup disk, in GB of 10^9 bytes as Finder counts. Read every 30 seconds. */
+  diskFreeGb?: number
   /** The engine's version, `2.1.310`. */
   version?: string
   /** The newest version installed on the machine (`~/.local/share/claude/versions`): above `version`, a restart applies it. */

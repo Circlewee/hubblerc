@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, newest, parseSysctl, uptime, versionNote } from '../hooks/device'
+import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, newest, parseDf, parseSysctl, parseVmStat, versionNote } from '../hooks/device'
 import { CAT, CAT_PALETTE, catFrame, catMood, pixelRows } from '../hooks/pixel-art'
-import { NOW, standInForEngine, start } from './engine'
+import { standInForEngine, start } from './engine'
 
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const
 const PANE_PROPS = {
@@ -13,26 +13,25 @@ const PANE_PROPS = {
   scroll: { offset: 0, bodyRows: 40 },
   view: {},
 }
-const MIN = 60_000
 
-test("sysctl's chip, memory and boot time are read; what is missing is left out", () => {
-  expect(parseSysctl('Apple M3 Pro\n19327352832\n{ sec = 1760000000, usec = 5 } Tue Oct 14\n')).toEqual({
-    chip: 'Apple M3 Pro',
-    memoryGb: 18,
-    bootedAt: 1_760_000_000_000,
-  })
+test("sysctl's chip and memory are read; what is missing is left out", () => {
+  expect(parseSysctl('Apple M3 Pro\n19327352832\n')).toEqual({ chip: 'Apple M3 Pro', memoryGb: 18 })
   expect(parseSysctl('')).toEqual({})
 })
 
-test('uptime reads in days and hours, or hours and minutes within the first day', () => {
-  expect(uptime(NOW - (11 * 1440 + 23 * 60 + 2) * MIN, NOW)).toBe('켜진 지 11일 23시간')
-  expect(uptime(NOW - (5 * 60 + 12) * MIN, NOW)).toBe('켜진 지 5시간 12분')
-  expect(uptime(NOW - 7 * MIN, NOW)).toBe('켜진 지 7분')
+test('the memory in use adds app memory, wired and compressed pages; the disk left is in GB as Finder counts', () => {
+  // (392549 − 15550 + 198111 + 323642) pages of 16 KiB.
+  expect(parseVmStat('Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     6279.\nPages wired down:                             198111.\nPages purgeable:                               15550.\nAnonymous pages:                              392549.\nPages stored in compressor:                   625561.\nPages occupied by compressor:                 323642.\n')).toBe(13.7)
+  expect(parseVmStat('nothing')).toBeUndefined()
+  expect(parseDf('Filesystem     1024-blocks     Used Available Capacity iused      ifree %iused  Mounted on\n/dev/disk3s1s1   482797652 13339736 250280580     6%  484019 2502817280    0%   /\n')).toBe(256)
+  expect(parseDf('')).toBeUndefined()
 })
 
 test('the lines name only what is known', () => {
-  expect(deviceLines(null, NOW)).toEqual([])
-  expect(deviceLines({ os: 'macOS 27.0.1', version: '2.1.310' }, NOW)).toEqual(['macOS 27.0.1'])
+  expect(deviceLines(null)).toEqual([])
+  expect(deviceLines({ os: 'macOS 27.0.1', version: '2.1.310' })).toEqual(['macOS 27.0.1'])
+  expect(deviceLines({ memoryUsedGb: 13.7, memoryGb: 18 })).toEqual(['18GB', '메모리 13.7/18GB'])
+  expect(deviceLines({ diskFreeGb: 256 })).toEqual(['디스크 256GB 남음'])
 })
 
 test('the cat is twelve cells by four, two pixels to a cell', () => {
@@ -62,7 +61,8 @@ test('the sidebar opens with a box of the machine and the engine, beside the cat
   expect((await ui.find({ key: 'box-status' }))?.props.paddingY).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /M3/ }))?.text).toBe('Apple M3 Pro · 18GB')
   expect((await ui.find({ type: 'Text', text: /^macOS/ }))?.text).toBe('macOS 27.0.1')
-  expect((await ui.find({ type: 'Text', text: /켜진 지/ }))?.text).toBe('켜진 지 1일 2시간')
+  expect((await ui.find({ type: 'Text', text: /^메모리/ }))?.text).toBe('메모리 13.7/18GB · 디스크 256GB 남음')
+  expect(await ui.find({ type: 'Text', text: /켜진 지/ })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /Claude Code/ }))?.text).toBe('Claude Code 2.1.310')
   expect((await ui.findAll({ type: 'Text', text: /[▀▄█]/ })).length).toBeGreaterThan(0)
   await ui.unmount()

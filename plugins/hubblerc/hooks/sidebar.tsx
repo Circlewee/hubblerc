@@ -222,7 +222,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
     const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const status = statusParts(
-      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now, burnout, isRoomy: true, palette: THEME_COLORS },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now, burnout, isRoomy: true, palette: THEME_COLORS, barColumns: inner },
       Number.POSITIVE_INFINITY,
     )
     const isWorking = turnList.at(-1)?.durationMs === null
@@ -289,7 +289,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     }
 
     // The machine and the engine, beside a cat drawn in half blocks that shows what the session does.
-    const lines = deviceLines(deviceInfo, now)
+    const lines = deviceLines(deviceInfo)
     const note = versionNote(deviceInfo)
     const lastDone = turnList.findLast(turn => turn.durationMs !== null)
     const mood = catMood({
