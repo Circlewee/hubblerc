@@ -1,4 +1,4 @@
-import { atom, update } from 'claude-code'
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { DeviceInfo } from '../types'
@@ -8,23 +8,20 @@ const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
 /**
  * At session.start: the machine's chip, memory and OS (macOS's `sysctl` and `sw_vers`) and the
  * engine's version, for the sidebar's top box; then every 30 seconds the memory in use and the
- * disk's room left. Each read on its own: one failing leaves its field out, the rest stand.
+ * disk's room left, and the machine's again while one is missing. Each read on its own: one failing
+ * leaves its field out, the rest stand.
+ *
+ * The commands are named by their full paths: `sysctl` lives in `/usr/sbin`, which a PATH Claude
+ * Code was started with may lack.
  */
 export async function startDevice($: EngineInterface): Promise<void> {
-  const run = async (argv: string[]) => {
-    const ran = await $.process.run(argv, { timeoutMs: 3000 }).catch(() => undefined)
-
-    return ran !== undefined && ran.exitCode === 0 ? ran.stdout : ''
-  }
-  const [sysctl, os, version, manifest] = await Promise.all([
-    run(['sysctl', '-n', 'machdep.cpu.brand_string', 'hw.memsize']),
-    run(['sw_vers', '-productVersion']),
+  const [machine, version, manifest] = await Promise.all([
+    readMachine($),
     $.session.version().catch(() => undefined),
     $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).catch(() => undefined),
   ])
 
-  const info: DeviceInfo = { ...parseSysctl(sysctl) }
-  if (os.trim() !== '') info.os = `macOS ${os.trim()}`
+  const info: DeviceInfo = { ...machine }
   if (version !== undefined) info.version = version.base ?? version.version
   const pluginVersion = manifestVersion(manifest)
   if (pluginVersion !== undefined) info.pluginVersion = pluginVersion
@@ -45,16 +42,36 @@ export async function startDevice($: EngineInterface): Promise<void> {
 const RESOURCE_MS = 30_000
 const VERSION_CHECK_MS = 60 * 60_000
 
-/** The memory in use (`vm_stat`) and the startup disk's room left (`df`): each a few milliseconds. */
-async function readResources($: EngineInterface): Promise<void> {
-  const [vm, df] = await Promise.all([
-    $.process.run(['vm_stat'], { timeoutMs: 3000 }).catch(() => undefined),
-    $.process.run(['df', '-k', '/'], { timeoutMs: 3000 }).catch(() => undefined),
+/** A command's output, or '' when it failed or did not end in time. */
+async function output($: EngineInterface, argv: string[]): Promise<string> {
+  const ran = await $.process.run(argv, { timeoutMs: 3000 }).catch(() => undefined)
+
+  return ran !== undefined && ran.exitCode === 0 ? ran.stdout : ''
+}
+
+/** The chip, memory and OS: those read. */
+async function readMachine($: EngineInterface): Promise<Pick<DeviceInfo, 'chip' | 'memoryGb' | 'os'>> {
+  const [sysctl, os] = await Promise.all([
+    output($, ['/usr/sbin/sysctl', '-n', 'machdep.cpu.brand_string', 'hw.memsize']),
+    output($, ['/usr/bin/sw_vers', '-productVersion']),
   ])
-  const memoryUsedGb = vm?.exitCode === 0 ? parseVmStat(vm.stdout) : undefined
-  const diskFreeGb = df?.exitCode === 0 ? parseDf(df.stdout) : undefined
+
+  return { ...parseSysctl(sysctl), ...(os.trim() === '' ? {} : { os: `macOS ${os.trim()}` }) }
+}
+
+/**
+ * The memory in use (`vm_stat`) and the startup disk's room left (`df`), each a few milliseconds;
+ * and the chip, memory and OS again while one of them is missing (a read that failed at the start).
+ */
+async function readResources($: EngineInterface): Promise<void> {
+  const [vm, df, known] = await Promise.all([output($, ['/usr/bin/vm_stat']), output($, ['/bin/df', '-k', '/']), read($, device)])
+  const isMachineMissing = known?.chip === undefined || known.memoryGb === undefined || known.os === undefined
+  const machine = isMachineMissing ? await readMachine($) : {}
+  const memoryUsedGb = vm === '' ? undefined : parseVmStat(vm)
+  const diskFreeGb = df === '' ? undefined : parseDf(df)
   await update($, device, info => ({
     ...(info ?? {}),
+    ...machine,
     ...(memoryUsedGb === undefined ? {} : { memoryUsedGb }),
     ...(diskFreeGb === undefined ? {} : { diskFreeGb }),
   }))

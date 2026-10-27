@@ -28,6 +28,8 @@ export type StandIn = {
   latestVersion: string
   /** Every `git status` the plugin ran, its argv. */
   gitStatusArgs: string[][]
+  /** How many reads of the machine (`sysctl`, `sw_vers`) fail before they answer. */
+  failMachineReads: number
 }
 
 /**
@@ -35,7 +37,7 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', gitStatusArgs: [] }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', gitStatusArgs: [], failMachineReads: 0 }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } as never }))
@@ -65,11 +67,17 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     // The status hubblerc polls must never take the index lock a person's commit needs.
     if (e.argv.includes('status')) standIn.gitStatusArgs.push([...e.argv])
     const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    if (e.argv[0] === 'sysctl') return ok('Apple M3 Pro\n19327352832\n')
+    const isMachine = e.argv[0] === '/usr/sbin/sysctl' || e.argv[0] === '/usr/bin/sw_vers'
+    if (isMachine && standIn.failMachineReads > 0) {
+      if (e.argv[0] === '/usr/bin/sw_vers') standIn.failMachineReads -= 1
+
+      return { value: { exitCode: 1, stdout: '', stderr: 'not found', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (e.argv[0] === '/usr/sbin/sysctl') return ok('Apple M3 Pro\n19327352832\n')
     // 13.7 GiB in use (app, wired, compressed); 256 GB left on the disk.
-    if (e.argv[0] === 'vm_stat') return ok('Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     6279.\nPages wired down:                             198111.\nPages purgeable:                               15550.\nAnonymous pages:                              392549.\nPages stored in compressor:                   625561.\nPages occupied by compressor:                 323642.\n')
-    if (e.argv[0] === 'df') return ok('Filesystem     1024-blocks     Used Available Capacity iused      ifree %iused  Mounted on\n/dev/disk3s1s1   482797652 13339736 250280580     6%  484019 2502817280    0%   /\n')
-    if (e.argv[0] === 'sw_vers') return ok('27.0.1\n')
+    if (e.argv[0] === '/usr/bin/vm_stat') return ok('Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     6279.\nPages wired down:                             198111.\nPages purgeable:                               15550.\nAnonymous pages:                              392549.\nPages stored in compressor:                   625561.\nPages occupied by compressor:                 323642.\n')
+    if (e.argv[0] === '/bin/df') return ok('Filesystem     1024-blocks     Used Available Capacity iused      ifree %iused  Mounted on\n/dev/disk3s1s1   482797652 13339736 250280580     6%  484019 2502817280    0%   /\n')
+    if (e.argv[0] === '/usr/bin/sw_vers') return ok('27.0.1\n')
     if (e.argv[0] === 'sh') return ok(`${standIn.installedVersions.join('\n')}\n`)
     if (e.argv.includes('rev-parse')) {
       return { value: { exitCode: 0, stdout: '/repo/hubblerc\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }

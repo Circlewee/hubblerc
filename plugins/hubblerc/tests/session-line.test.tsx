@@ -34,3 +34,20 @@ test('/effort-log shows the line in a session', async ($, on) => {
   // The stand-in hands both windows.
   expect(ran.endsWith('엔진이 준 한도: five_hour 25%, seven_day 12%')).toBe(true)
 })
+
+test('a read of the machine that failed at the start is made again, and the chip, memory and OS come back', async ($, on) => {
+  const standIn = standInForEngine(on)
+  // The read at the start and the one right after it both fail.
+  standIn.failMachineReads = 2
+  await start($)
+
+  const before = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await before.find({ type: 'Text', text: /M3/ })).toBeUndefined()
+  await before.unmount()
+
+  await standIn.clock.advance(30_000)
+  const after = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await after.find({ type: 'Text', text: /M3/ }))?.text).toBe('Apple M3 Pro · 18GB')
+  expect((await after.find({ type: 'Text', text: /^macOS/ }))?.text).toBe('macOS 27.0.1')
+  await after.unmount()
+})
