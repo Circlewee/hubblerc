@@ -138,6 +138,14 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
   - 세션 시작 때와 한 시간마다 읽는다.
 - 나중에: 실제 이미지 파일(png 등)을 쓰고 싶다는 요청(2026-10-26). 이 방식으로 그리려면 그림을 픽셀로 풀어 반쪽 블록으로 바꿔야 한다.
 
+### F8. 새 버전으로 재시작 (2026-10-27, 테스트 통과, 실제 세션에서 `/relaunch` 동작 확인 [확인: 사용자])
+장비 상자의 `재시작`(설치됐는데 재시작만 남았을 때)이나 `/relaunch`로, 같은 세션을 새 버전으로 다시 연다. 진행 중인 작업은 끊지 않는다.
+- 동작: 누르면 답변·도구·서브에이전트가 모두 없을 때 0.2초 뒤 재시작, 있으면 `재시작 대기`로 바뀌고 2초마다 보다가 끝나는 순간 재시작. 기다리는 동안 다시 누르면(또는 `/relaunch`) 취소. 재시작은 사이드바 기록·세션 effort 선택·auto 여부를 `$.store`의 `restartSnapshot`에 저장 → 세션 id를 `$HUBBLERC_RELAUNCH_FILE`에 적음 → `$.command.run({ command: 'exit' })`. 다시 열리면 `restoreTurns`가 같은 세션 id의 10분 안 스냅샷을 한 번 읽고 지운다(시간까지 살아남음).
+- 셸 함수(`plugins/hubblerc/shell/relaunch.zsh`): `claude`를 감싸 `HUBBLERC_RELAUNCH_FILE`(임시 파일 경로)을 넘기고, 끝난 뒤 그 파일에 세션 id(uuid 형식)가 있으면 `claude --resume <id>`로 다시 띄운다. 처음 실행의 `--plugin-dir`·`--plugin-dir-no-mcp`·`--add-dir`·`--settings`·`--setting-sources`·`--mcp-config`·`--strict-mcp-config`·`--model`만 넘기고, 세션을 정하는 옵션과 권한 옵션은 넘기지 않는다. `hcc` 별칭도 이 함수를 거친다. 가짜 `claude`로 확인: 첫 실행 옵션 그대로, 다시 띄울 때 `--plugin-dir`·`--model`만 남고 `--resume <id>`, 임시 파일 지워짐 [확인].
+- 셸 함수 없이 띄운 세션(환경 변수 없음)에서는 아무것도 하지 않고 `/setup`을 안내한다.
+- 한계: 백그라운드로 돌린 명령(`run_in_background`)은 hubblerc가 보지 못해 기다리지 않고 프로세스와 함께 끝난다. 세션 안에서만 사는 예약 작업도 사라진다 [추정]. `/relaunch` 처리 중에 `/exit`를 바로 부르면 테스트 키트가 거부해서 0.2초 뒤로 미뤘다. mod가 `/exit`를 실행해 끝내고 셸 함수가 다시 여는 흐름은 실제 세션에서 동작했다 [확인: 사용자, 2026-10-27].
+- 고른 이유(2026-10-27): 진행 중인 답변은 프로세스 메모리에 있어서 새 버전으로 옮길 수 없다. Orca가 업데이트해도 작업이 안 끊기는 건 셸이 앱이 아니라 따로 도는 `orca-terminal-host`의 자식이고, 업데이트 때 그 호스트는 그대로 두기 때문이다 [확인: 프로세스 트리, 호스트 6일째·앱 13시간째]. 엔진의 `/restart`(별칭 `/update`, "Restart on X and keep this session")는 기능 플래그 `tengu_fancy_wand`가 꺼져 있어 쓸 수 없다 [확인: `~/.claude.json`, 2.1.311]. 백그라운드 세션(`claude --bg`/`/bg` + `claude attach`, 문서 이름 agent view)은 자동 업데이트 때 쉬는 세션을 엔진이 알아서 새 버전으로 옮기지만 [문서], `claude respawn`은 진행 중인 명령과 답변을 끊고 이어가지 않으며 [확인: 실험 3회, 백그라운드 명령은 살아남음], 붙인 세션은 Orca가 세션으로 알아보지 못해서 [확인: 사용자] 버렸다.
+
 ## 배포 (2026-10-26 결정)
 - 버전 규칙: 기능을 묶어 커밋할 때마다 `plugins/hubblerc/.claude-plugin/plugin.json`의 `version`을 올리고 같은 커밋에 git 태그 `v<버전>`을 건다. 기능 추가는 0.x, 고치기만 했으면 0.x.y. 설치된 사본은 버전을 올려야 갱신된다는 보고가 있다 [커뮤니티]. 0.1.0 → 0.2.0(F6·F7과 파일 패널 작업). 0.2.1: `/setup`의 claude-hud 점검을 합쳐진 설정으로 되돌림(이 저장소는 settings.local.json의 no-op `statusLine`이 claude-hud를 가린다. 처음에 이를 Orca 탓으로 잘못 짚고 사용자 파일까지 보게 했었다). 0.2.2: 5초마다 도는 `git status`에 `--no-optional-locks`(그 사이 커밋이 `index.lock`에 막혔다). 0.3.0: 파일 상태 네 갈래, 사이드바 테마 색, `/setup`의 자동 업데이트 켜기, 셸로 바뀐 파일 추적. 0.4.0: 사이드바 높이 자동 조절, 상태 상자 막대(열 맞춤·7d 막대와 리셋·폭)와 다섯 단계 색·7d 속도 판단·effort 색, 장비 상자의 켜진 시간을 메모리·디스크로.
 - 저장소: GitHub. 공개/비공개는 미정. 비공개는 기기마다 GitHub 로그인이 필요하다(회사 스튜디오에 개인 계정). 공개는 커밋 작성자 이메일과 `docs/`의 사용 환경이 드러나므로, 올리기 전에 키·내부 주소·개인 정보를 훑는다.
@@ -146,7 +154,7 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
   1. mod가 원격으로 꺼져 있지 않은지: mod 없는 폴더에서 `claude plugin test` [리서치]
   2. 마켓플레이스 추가 후 `hubblerc`를 사용자 범위로 설치
   3. 첫 실행: 세션 시작 때 hubblerc가 필요한 설정(키 `ctrl+x ctrl+e`·`ctrl+x ctrl+p`, 전체 화면)을 점검하고, 빠진 게 있으면 대화에 "hubblerc 설정 N개가 덜 됐습니다. `/setup`" 한 줄을 남긴다
-  4. `/setup`: 자동 업데이트를 켠다(사용자 설정 `extraKnownMarketplaces.hubblerc.autoUpdate: true`, 먼저 `settings.json.bak`). GitHub에서 추가한 마켓플레이스는 기본이 꺼짐이다(엔진 규칙 2.1.310: `autoUpdate`를 정하면 그 값, 아니면 Anthropic 공식 마켓플레이스만 켜짐 [확인: 실행 파일 코드]). 설정 값이 판정에 쓰인다는 것은 함수 이름이 축약돼 있어 [추정]. 켜면 시작할 때 마켓플레이스와 플러그인을 갱신한다(엔진 설명). 빠진 키만 `~/.claude/keybindings.json`(또는 `CLAUDE_CONFIG_DIR`)의 Chat 문맥에 추가한다(보고서에는 키 전체를 한 줄로). 먼저 `.bak`으로 백업하고, 같은 키가 다른 동작에 묶여 있으면 덮어쓰지 않고 알린다. 설정 파일은 직접 고치지 않고 안내만: 전체 화면(`/tui fullscreen` 또는 `"tui": "fullscreen"`), 권장으로 claude-hud `statusLine` 지우기·`/plugin uninstall claude-hud`, 응답 언어(`"language": "korean"`)
+  4. `/setup`: 자동 업데이트를 켠다(사용자 설정 `extraKnownMarketplaces.hubblerc.autoUpdate: true`, 먼저 `settings.json.bak`). GitHub에서 추가한 마켓플레이스는 기본이 꺼짐이다(엔진 규칙 2.1.310: `autoUpdate`를 정하면 그 값, 아니면 Anthropic 공식 마켓플레이스만 켜짐 [확인: 실행 파일 코드]). 설정 값이 판정에 쓰인다는 것은 함수 이름이 축약돼 있어 [추정]. 켜면 시작할 때 마켓플레이스와 플러그인을 갱신한다(엔진 설명). 빠진 키만 `~/.claude/keybindings.json`(또는 `CLAUDE_CONFIG_DIR`)의 Chat 문맥에 추가한다(보고서에는 키 전체를 한 줄로). 먼저 `.bak`으로 백업하고, 같은 키가 다른 동작에 묶여 있으면 덮어쓰지 않고 알린다. 재시작 셸 함수(F8)를 `~/.claude/hubblerc/relaunch.zsh`로 복사하고(내용이 바뀌었으면 덮어씀), `~/.zshrc`(`$ZDOTDIR`가 있으면 그쪽)에 `[ -f "$HOME/.claude/hubblerc/relaunch.zsh" ] && source …` 한 줄이 없으면 끝에 덧붙인다(먼저 `.zshrc.bak`). 셸이 zsh가 아니거나 `alias claude=`가 있으면 넣지 않고 알린다. 설정 파일은 직접 고치지 않고 안내만: 전체 화면(`/tui fullscreen` 또는 `"tui": "fullscreen"`), 권장으로 claude-hud `statusLine` 지우기·`/plugin uninstall claude-hud`, 응답 언어(`"language": "korean"`)
   5. 사이드바·밴드·고양이·대화 줄이 보이는지 확인
 
 ## 다음 작업 (2026-10-27 UI 점검)

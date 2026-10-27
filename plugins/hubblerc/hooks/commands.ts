@@ -2,6 +2,7 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import { effortLogTable } from './effort-log'
+import { requestRestart } from './relaunch'
 import { runSetup } from './setup'
 import { toggleSidebar } from './sidebar'
 import type { Layout } from './sidebar'
@@ -33,7 +34,12 @@ export async function registerCommand($: EngineInterface): Promise<void> {
   })
   await $.command.register({
     name: 'setup',
-    description: '이 기기의 hubblerc 설정 점검: 빠진 키 설정을 추가하고, 전체 화면·claude-hud·언어 설정을 안내 (hubblerc)',
+    description: '이 기기의 hubblerc 설정 점검: 빠진 키 설정과 재시작 셸 함수를 추가하고, 전체 화면·claude-hud·언어 설정을 안내 (hubblerc)',
+    immediate: true,
+  })
+  await $.command.register({
+    name: 'relaunch',
+    description: '진행 중인 작업이 끝나면 Claude Code를 다시 띄워 같은 세션을 이어서 연다. 새 버전이 설치돼 있으면 그 버전으로. 다시 실행하면 취소 (hubblerc)',
     immediate: true,
   })
 }
@@ -44,6 +50,7 @@ export function answerCommands(on: On, layout: Layout): void {
     text: effortLogTable(await read($, effortLog), await read($, turns), await read($, autoPick)),
   }))
   on('command.run', { command: 'setup' }, async $ => ({ text: await runSetup($).catch((error: unknown) => `hubblerc 설정 점검 실패: ${String(error)}`) }))
+  on('command.run', { command: 'relaunch' }, async $ => ({ text: await requestRestart($) }))
   on('command.run', { command: 'panel' }, async ($, e) => {
     const text = await toggleSidebar($, layout, e.presentation)
 

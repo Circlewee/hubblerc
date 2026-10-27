@@ -214,6 +214,8 @@ declare module 'claude-code' {
       device: DeviceInfo | null
       /** What the main loop's response streams now: thinking, or the answer's text; null between and after. */
       streamPhase: 'thinking' | 'text' | null
+      /** A restart onto the installed version was asked for and waits for what runs to end (`/relaunch`, the sidebar's "재시작"). */
+      restartPending: boolean
     }
   }
 }

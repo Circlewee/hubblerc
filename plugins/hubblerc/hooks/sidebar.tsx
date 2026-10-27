@@ -8,6 +8,7 @@ import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
 import { CAT_PALETTE, catFrame, catMood, pixelRows } from './pixel-art'
+import { requestRestart } from './relaunch'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
 
@@ -31,6 +32,7 @@ const folded = atom({ plugin: 'hubblerc', key: 'folded' } as const, [])
 const filesExpanded = atom({ plugin: 'hubblerc', key: 'filesExpanded' } as const, false)
 const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
 const streamPhase = atom({ plugin: 'hubblerc', key: 'streamPhase' } as const, null)
+const restartPending = atom({ plugin: 'hubblerc', key: 'restartPending' } as const, false)
 const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
 
 /** The sidebar's boxes, by the id their fold is kept under. */
@@ -188,7 +190,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded, deviceInfo, phase, requestLog] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded, deviceInfo, phase, isRestartPending, requestLog] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -209,6 +211,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, filesExpanded),
         read($, device),
         read($, streamPhase),
+        read($, restartPending),
         read($, effortLog),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
@@ -344,8 +347,19 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
                     <Link href={CHANGELOG_URL}>{note.version}</Link>
                   </Text>
                 )}
-                {note?.kind === 'restart' ? <Text dimColor> 재시작</Text> : null}
               </Text>
+              {/* A press restarts onto it, keeping the session: once what runs ends; again, it is taken back. */}
+              {note?.kind === 'restart' ? (
+                <Button
+                  key="restart"
+                  plain
+                  onPress={() => {
+                    void requestRestart($).then(text => $.ui.toast(text))
+                  }}
+                >
+                  {isRestartPending ? <Text color={THEME_COLORS.warn}> 재시작 대기</Text> : <Text dimColor> 재시작</Text>}
+                </Button>
+              ) : null}
             </Box>
           )}
           {deviceInfo?.pluginVersion === undefined ? null : (

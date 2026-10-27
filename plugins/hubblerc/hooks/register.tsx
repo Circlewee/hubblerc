@@ -9,6 +9,7 @@ import { answerCommands, registerCommand } from './commands'
 import { startDevice } from './device'
 import { controlEffort, startEffort } from './effort'
 import { closeEffortPicker } from './effort-picker'
+import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
@@ -33,6 +34,7 @@ export const register: Register = (on, options) => {
     await startEffort($).catch(() => undefined)
     await startSidebar($, layout).catch(() => undefined)
     await startDevice($).catch(() => undefined)
+    await startRelaunch($).catch(() => undefined)
     await checkSetup($).catch(() => undefined)
 
     return started

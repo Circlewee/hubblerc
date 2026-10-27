@@ -3,6 +3,7 @@ import type { EngineInterface, SessionMessage, ToolCallResult, ToolUseSummary } 
 
 import type { ToolRun, TurnRecord } from '../types'
 import { describeRun, IGNORED_TOOLS, MAX_RUNS_PER_TURN, MAX_TURNS, promptKey, promptLabel } from './activity'
+import { restoreSnapshot } from './relaunch'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const sessionId = atom({ plugin: 'hubblerc', key: 'sessionId' } as const, '')
@@ -39,6 +40,8 @@ export async function restoreTurns($: EngineInterface): Promise<void> {
   await update($, sessionId, () => id)
   // The same session reloaded, or the first load of a copy that kept no id: what was recorded live stays.
   if (list.length > 0 && (known === id || known === '')) return
+  // Opened again by hubblerc's restart: what it saved, times and all.
+  if (await restoreSnapshot($, id).catch(() => false)) return
 
   const rebuilt = await rebuildTurns($)
   await update($, turns, () => rebuilt)
