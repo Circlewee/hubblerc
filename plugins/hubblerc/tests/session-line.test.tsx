@@ -47,6 +47,8 @@ test("the status box ends with the session's name and short id; with no name, th
   const standIn = standInForEngine(on)
   mock.env(on, { HOME: '/home/me' })
   standIn.sessionId = '444027a3-234d-4c3c-8232-a7e561773f2d'
+  // The name is read again every 30 seconds while the sidebar shows.
+  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
   const copied: string[] = []
   on('ui.copy', (_, e) => {
     copied.push(e.text)
@@ -71,6 +73,7 @@ test("the status box ends with the session's name and short id; with no name, th
 
 test('a read of the machine that failed at the start is made again, and the chip, memory and OS come back', async ($, on) => {
   const standIn = standInForEngine(on)
+  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
   // The read at the start and the one right after it both fail.
   standIn.failMachineReads = 2
   await start($)

@@ -13,7 +13,7 @@ import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
-import { markRunning, noteCall, noteTranscript, refreshStatus, startStatus, unmarkRunning } from './status'
+import { gitWatchPaths, markRunning, noteCall, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
 import { showToolLines } from './tool-lines'
 
@@ -43,8 +43,10 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     await startTurn($, e).catch(() => undefined)
     if (e.agentId === undefined) await closeEffortPicker($).catch(() => undefined)
-    // Not awaited: the repository is read while the model starts its answer, before any tool runs.
+    // Not awaited: the repository is read while the model starts its answer, before any tool runs;
+    // the status too, so what changed while idle (an edit in an editor) shows as the question goes.
     if (e.agentId === undefined) void startShellWatch($, e.turnId).catch(() => undefined)
+    if (e.agentId === undefined) void requestGitRefresh($).catch(() => undefined)
     await startAutoEffort($, e, autoByDefault).catch(() => undefined)
 
     return next(e)
@@ -82,9 +84,19 @@ export const register: Register = (on, options) => {
     return done
   }).catch(($, e, next) => next(e))
 
-  // A classic hook hands the transcript's path: the session's name is read from it.
+  // The classic SessionStart hands the transcript's path (the session's name is read from it) and
+  // takes the files the engine is to watch: git's own, so a commit made anywhere asks for git.
   on('classic.SessionStart', async ($, e, next) => {
     noteTranscript(e.transcript_path)
+    const result = await next(e)
+    const paths = await gitWatchPaths($, e.cwd).catch(() => [])
+    if (paths.length === 0) return result
+
+    return { ...result, watchPaths: [...(result.watchPaths ?? []), ...paths] }
+  }).catch(($, e, next) => next(e))
+
+  on('classic.FileChanged', async ($, e, next) => {
+    if (e.file_path.includes('.git/')) void requestGitRefresh($).catch(() => undefined)
 
     return next(e)
   }).catch(($, e, next) => next(e))

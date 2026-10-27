@@ -7,6 +7,7 @@ import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
+import { SIDEBAR_ID } from './pane'
 import { CAT_PALETTE, catFrame, catMood, pixelRows } from './pixel-art'
 import { requestRestart } from './relaunch'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
@@ -44,7 +45,7 @@ const FOLDED_KEY = 'sidebarFolded'
 /** Cells a box takes from the width: its border and a cell of padding, each side. */
 const BOX_FRAME = 4
 
-export const SIDEBAR_ID = 'hubblerc'
+export { SIDEBAR_ID }
 const SIDEBAR_TITLE = 'hubblerc'
 /** The width the dock is asked for; the engine holds it to 24..45% of the terminal. */
 const SIDEBAR_COLUMNS = 56

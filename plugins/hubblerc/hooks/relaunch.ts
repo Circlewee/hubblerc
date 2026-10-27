@@ -45,14 +45,26 @@ export type RestartSnapshot = {
 
 /** Set once `/exit` is on its way, so a second look does not ask again. */
 let isRestarting = false
+/** The timer a waiting restart looks again by: running only while one waits. */
+let waitTimer: { cancel: () => void } | undefined
 
-/** At session.start: a fresh start, and the timer a waiting restart looks again by. */
+/** At session.start: a fresh start. */
 export async function startRelaunch($: EngineInterface): Promise<void> {
   isRestarting = false
+  stopWaiting()
   await update($, restartPending, () => false)
-  $.clock.every(WAIT_CHECK_MS, () => {
+}
+
+function startWaiting($: EngineInterface): void {
+  stopWaiting()
+  waitTimer = $.clock.every(WAIT_CHECK_MS, () => {
     void maybeRestart($).catch(() => undefined)
   })
+}
+
+function stopWaiting(): void {
+  waitTimer?.cancel()
+  waitTimer = undefined
 }
 
 /** Whether the shell function launched this session: without it, nothing would open it again. */
@@ -70,7 +82,11 @@ export async function requestRestart($: EngineInterface): Promise<string> {
   if (!(await canRelaunch($))) return '셸 함수 없이 띄운 세션이라 다시 띄울 수 없습니다. `/setup`을 실행한 뒤 새 터미널에서 Claude Code를 여세요.'
 
   const isPending = await update($, restartPending, pending => !pending)
-  if (!isPending) return '재시작 예약을 취소했습니다.'
+  if (!isPending) {
+    stopWaiting()
+
+    return '재시작 예약을 취소했습니다.'
+  }
   if (!(await isBusy($))) {
     // A moment later, not from inside `/relaunch`: the test kit refused `/exit` run from there.
     $.clock.after(RESTART_DELAY_MS, () => {
@@ -79,6 +95,7 @@ export async function requestRestart($: EngineInterface): Promise<string> {
 
     return '재시작합니다.'
   }
+  startWaiting($)
 
   return '진행 중인 작업이 끝나면 재시작합니다. 다시 실행하면 취소됩니다.'
 }
@@ -97,6 +114,7 @@ export async function maybeRestart($: EngineInterface): Promise<void> {
   const file = await $.env.get('HUBBLERC_RELAUNCH_FILE')
   if (file === undefined || file === '') return
   isRestarting = true
+  stopWaiting()
   // Nothing to resume: the file emptied, so the shell function does not open it again.
   const fail = async (error: unknown) => {
     isRestarting = false

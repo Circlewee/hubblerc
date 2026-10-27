@@ -2,14 +2,15 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { DeviceInfo } from '../types'
+import { isSidebarShown } from './pane'
 
 const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
 
 /**
  * At session.start: the machine's chip, memory and OS (macOS's `sysctl` and `sw_vers`) and the
- * engine's version, for the sidebar's top box; then every 30 seconds the memory in use and the
- * disk's room left, and the machine's again while one is missing. Each read on its own: one failing
- * leaves its field out, the rest stand.
+ * engine's version, for the sidebar's top box; then every 30 seconds while the sidebar shows, the
+ * memory in use and the disk's room left, and the machine's again while one is missing. Each read
+ * on its own: one failing leaves its field out, the rest stand.
  *
  * The commands are named by their full paths: `sysctl` lives in `/usr/sbin`, which a PATH Claude
  * Code was started with may lack.
@@ -30,8 +31,11 @@ export async function startDevice($: EngineInterface): Promise<void> {
   await update($, device, () => info)
 
   await readResources($).catch(() => undefined)
+  // Again every 30 seconds while the sidebar shows: nothing else draws them.
   $.clock.every(RESOURCE_MS, () => {
-    void readResources($).catch(() => undefined)
+    void (async () => {
+      if (await isSidebarShown($)) await readResources($)
+    })().catch(() => undefined)
   })
   await checkVersions($).catch(() => undefined)
   $.clock.every(VERSION_CHECK_MS, () => {
