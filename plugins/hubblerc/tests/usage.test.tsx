@@ -91,7 +91,7 @@ test('a 5-hour window that did not move is not named on the closing line', async
   await ui.unmount()
 })
 
-test('idle, the band and the sidebar tell when the last request went out and the last answer\'s cache share; a pace that runs 5h out within the hour shows a chip', async ($, on) => {
+test('the band and the sidebar tell when the last request went out, its input with the cache share, and its output; a pace that runs 5h out within the hour shows a chip', async ($, on) => {
   const standIn = standInForEngine(on)
   answerRequests(on, 100)
   drawBeneath(on)
@@ -109,9 +109,11 @@ test('idle, the band and the sidebar tell when the last request went out and the
   const at = new Date(standIn.clock.now() - 12 * MIN)
   const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
   expect((await band.find({ type: 'Text', text: /마지막 요청/ }))?.text).toBe(`마지막 요청 ${time}`)
+  expect((await band.find({ type: 'Text', text: /^입력/ }))?.text).toBe('입력 10(')
   const share = await band.find({ type: 'Text', text: /^캐시/ })
   expect(share?.text).toBe('캐시 0%')
   expect(share?.props.color).toBe('red')
+  expect((await band.find({ type: 'Text', text: /^\) · 출력/ }))?.text).toBe(') · 출력 100')
   expect((await band.find({ type: 'Text', text: /⚠/ }))?.text).toBe(' ⚠33m')
   await band.unmount()
 
@@ -122,7 +124,7 @@ test('idle, the band and the sidebar tell when the last request went out and the
   await pane.unmount()
 })
 
-test('while an answer runs, the time since the last request is not shown', async ($, on) => {
+test('while an answer runs, the last request still shows: the one this answer made', async ($, on) => {
   const standIn = standInForEngine(on)
   answerRequests(on, 100)
   drawBeneath(on)
@@ -133,7 +135,8 @@ test('while an answer runs, the time since the last request is not shown', async
   await standIn.clock.advance(2 * MIN)
 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND_PROPS, isWorking: true }, viewport: MAIN_SCREEN })
-  expect(await band.find({ type: 'Text', text: /마지막 요청/ })).toBeUndefined()
+  expect((await band.find({ type: 'Text', text: /마지막 요청/ }))?.text).toMatch(/^마지막 요청 \d\d:\d\d$/)
+  expect((await band.find({ type: 'Text', text: /^캐시/ }))?.text).toBe('캐시 0%')
   expect(await band.find({ type: 'Text', text: /⚠/ })).toBeUndefined()
   await band.unmount()
 })

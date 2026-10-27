@@ -6,7 +6,7 @@ import type { Segment } from './band-format'
 import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
-import { burnoutMinutes, cacheShare, requestTime } from './forecast'
+import { burnoutMinutes, requestTime } from './forecast'
 import { CAT_PALETTE, catFrame, catMood, pixelRows } from './pixel-art'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
@@ -31,6 +31,7 @@ const folded = atom({ plugin: 'hubblerc', key: 'folded' } as const, [])
 const filesExpanded = atom({ plugin: 'hubblerc', key: 'filesExpanded' } as const, false)
 const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
 const streamPhase = atom({ plugin: 'hubblerc', key: 'streamPhase' } as const, null)
+const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
 
 /** The sidebar's boxes, by the id their fold is kept under. */
 export type SectionId = 'device' | 'status' | 'activity' | 'files' | 'contents'
@@ -187,7 +188,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded, deviceInfo, phase] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded, deviceInfo, phase, requestLog] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -208,6 +209,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, filesExpanded),
         read($, device),
         read($, streamPhase),
+        read($, effortLog),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
@@ -226,7 +228,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       Number.POSITIVE_INFINITY,
     )
     const isWorking = turnList.at(-1)?.durationMs === null
-    const request = isWorking ? [] : requestSegments(requestTime(lastRequest), cacheShare(turnList.findLast(turn => turn.durationMs !== null)?.tokens), THEME_COLORS)
+    // When the last request went out and what it carried, the cache's share of its input; mid-answer too.
+    const request = requestSegments(requestTime(lastRequest), requestLog.at(-1), THEME_COLORS)
     const activity = activityParts(runningList, agentList, todoList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
     const all = tocEntries(turnList, now)

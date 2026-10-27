@@ -5,7 +5,7 @@ import type { EffortLevel } from '../types'
 import { activityParts, COLORS, EFFORT_LEVELS, lastAnswer, requestSegments, SEPARATOR, statusParts, textStyle } from './band-format'
 import type { Segment } from './band-format'
 import { choose, EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
-import { burnoutMinutes, cacheShare, requestTime } from './forecast'
+import { burnoutMinutes, requestTime } from './forecast'
 import { syncSidebar } from './sidebar'
 import type { Layout } from './sidebar'
 
@@ -25,6 +25,7 @@ const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null
 const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
 const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
 const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
+const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
 
 const LEVEL_LABELS: Record<EffortLevel, string> = { low: 'low', medium: 'med', high: 'high', xhigh: 'xhigh', max: 'max' }
 
@@ -41,7 +42,7 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
     const isSidebarUp = await syncSidebar($, layout, e.viewport).catch(() => false)
     if (e.props.hasSurvey) return next(e)
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt, auto, pick, log, lastRequest] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt, auto, pick, log, lastRequest, requestLog] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -58,6 +59,7 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
         read($, autoPick),
         read($, fiveHourLog),
         read($, lastRequestAt),
+        read($, effortLog),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
@@ -72,10 +74,8 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
     )
     const line2 = activityParts(runningList, agentList, todoList, e.props.isWorking, now).join(SEPARATOR)
     const isIdle = runningList.length === 0 && line2.startsWith('·')
-    const isAnswering = e.props.isWorking || turnList.at(-1)?.durationMs === null
-    // While idle: when the last request went out and how much of the last answer the cache served.
-    const lastDone = turnList.findLast(turn => turn.durationMs !== null)
-    const request = isAnswering ? [] : requestSegments(requestTime(lastRequest), cacheShare(lastDone?.tokens))
+    // When the last request went out and what it carried, the cache's share of its input; mid-answer too.
+    const request = requestSegments(requestTime(lastRequest), requestLog.at(-1))
 
     const { Box, Text, Button } = $.ui.resolve(e)
 

@@ -15,6 +15,7 @@ import {
   todosFromTodoWrite,
   isListed,
   levelStep,
+  requestSegments,
   THEME_COLORS,
   weekStep,
 } from '../hooks/band-format'
@@ -245,6 +246,19 @@ test('in the sidebar the effort value is coloured by its level, never in the war
   expect(effortOf('max')).toMatchObject({ color: 'merged', bold: true })
   // The session's own pick keeps its level's colour; "(세션)" says whose it is.
   expect(effortOf('high', true)).toMatchObject({ color: 'suggestion' })
+})
+
+test("the last request reads as its input with the cache's share, and its output; the share alone is coloured", () => {
+  expect(requestSegments('14:32', { input: 2000, cacheRead: 115_000, cacheWrite: 3000, output: 2100 }).map(segment => segment.text).join('')).toBe(
+    '마지막 요청 14:32 · 입력 120k(캐시 96%) · 출력 2.1k',
+  )
+  expect(requestSegments(null, { input: 900, cacheRead: 100, cacheWrite: 0, output: 5 })).toEqual([
+    { text: '입력 1k(', dim: true },
+    { text: '캐시 10%', color: 'red' },
+    { text: ') · 출력 5', dim: true },
+  ])
+  expect(requestSegments('14:32', undefined)).toEqual([{ text: '마지막 요청 14:32', dim: true }])
+  expect(requestSegments(null, null)).toEqual([])
 })
 
 test('a usage bar is a thin line colored by its level, and its number is colored only when high', () => {

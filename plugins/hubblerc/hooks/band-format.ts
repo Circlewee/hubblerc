@@ -1,4 +1,6 @@
-import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TodoItem, TurnRecord, UsageSnapshot } from '../types'
+import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TodoItem, TokenTotals, TurnRecord, UsageSnapshot } from '../types'
+
+import { cacheShare, tokenCount } from './forecast'
 
 import { formatDuration, summarize } from './summary'
 
@@ -395,17 +397,21 @@ export function todoProgress(todos: readonly TodoItem[]): string {
 }
 
 /**
- * When the last request went out and how much of the last answer the cache served:
- * `마지막 요청 14:32 · 캐시 96%`. The share goes yellow under 80% and red under 50%, an answer that
- * paid for its prompt; the time stays dim. Nothing when neither is known.
+ * When the last main-loop request went out and what it carried: its input, the cache's share of it,
+ * and its output, `마지막 요청 14:32 · 입력 120k(캐시 96%) · 출력 2.1k`. The share goes yellow under
+ * 80% and red under 50%, a request that paid for its prompt; the rest stays dim. Nothing when
+ * neither is known. Only the input can come from the cache: the output is never cached.
  */
-export function requestSegments(time: string | null, share: number | null, palette: Palette = COLORS): Segment[] {
+export function requestSegments(time: string | null, request: TokenTotals | null | undefined, palette: Palette = COLORS): Segment[] {
   const segments: Segment[] = []
   if (time !== null) segments.push({ text: `마지막 요청 ${time}`, dim: true })
-  if (share !== null) {
+  const share = request === null || request === undefined ? null : cacheShare(request)
+  if (request !== null && request !== undefined && share !== null) {
     if (segments.length > 0) segments.push({ text: ' · ', dim: true })
     const text = `캐시 ${share}%`
+    segments.push({ text: `입력 ${tokenCount(request.input + request.cacheRead + request.cacheWrite)}(`, dim: true })
     segments.push(share < 50 ? { text, color: palette.alert } : share < 80 ? { text, color: palette.warn } : { text, dim: true })
+    segments.push({ text: `) · 출력 ${tokenCount(request.output)}`, dim: true })
   }
 
   return segments
