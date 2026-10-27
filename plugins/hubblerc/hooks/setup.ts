@@ -159,12 +159,18 @@ export type AutoUpdateChange = { done: 'on'; backup: string | null } | { done: '
 /** `/setup`'s report: each item ticked or not, what was done, and what is the person's to do. */
 export function setupReport(state: SetupState, keyFile: string, added: readonly string[], backup: string | null, autoUpdate: AutoUpdateChange = null): string {
   const lines = ['hubblerc 설정 점검', '']
-  for (const key of state.keys) {
-    if (key.state === 'ok') lines.push(`✓ 키 ${key.key}: ${key.label}`)
-    else if (added.includes(key.key)) lines.push(`✓ 키 ${key.key}: ${key.label} (방금 추가함)`)
-    else if (key.state === 'conflict') lines.push(`✗ 키 ${key.key}: 이미 \`${key.current}\`에 묶여 있어 그대로 둠. 쓰려면 \`${keyFile}\`에서 직접 바꾸세요`)
-    else lines.push(`✗ 키 ${key.key}: ${key.label}`)
-  }
+  // Our keys on one line, each with what it is for and, when not plainly there, what became of it.
+  const keyParts = state.keys.map(key => {
+    const name = `${key.key}(${key.label})`
+    if (key.state === 'ok') return name
+    if (added.includes(key.key)) return `${name} 방금 추가함`
+    if (key.state === 'conflict') return `${name} 이미 \`${key.current}\`에 묶여 있어 그대로 둠`
+
+    return `${name} 없음`
+  })
+  const isEveryKeySet = state.keys.every(key => key.state === 'ok' || added.includes(key.key))
+  lines.push(`${isEveryKeySet ? '✓' : '✗'} 키: ${keyParts.join(', ')}`)
+  if (state.keys.some(key => key.state === 'conflict')) lines.push(`  다른 동작에 묶인 키는 \`${keyFile}\`에서 직접 바꾸세요`)
   if (state.isKeyFileBroken) lines.push(`✗ \`${keyFile}\`가 JSON이 아니라 키를 읽거나 더할 수 없습니다. 파일을 고친 뒤 다시 \`/setup\``)
   if (backup !== null) lines.push(`  원래 파일은 \`${backup}\`에 두었습니다`)
 

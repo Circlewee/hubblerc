@@ -144,7 +144,7 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
   1. mod가 원격으로 꺼져 있지 않은지: mod 없는 폴더에서 `claude plugin test` [리서치]
   2. 마켓플레이스 추가 후 `hubblerc`를 사용자 범위로 설치
   3. 첫 실행: 세션 시작 때 hubblerc가 필요한 설정(키 `ctrl+x ctrl+e`·`ctrl+x ctrl+p`, 전체 화면)을 점검하고, 빠진 게 있으면 대화에 "hubblerc 설정 N개가 덜 됐습니다. `/setup`" 한 줄을 남긴다
-  4. `/setup`: 자동 업데이트를 켠다(사용자 설정 `extraKnownMarketplaces.hubblerc.autoUpdate: true`, 먼저 `settings.json.bak`). GitHub에서 추가한 마켓플레이스는 기본이 꺼짐이다(엔진 규칙 2.1.310: `autoUpdate`를 정하면 그 값, 아니면 Anthropic 공식 마켓플레이스만 켜짐 [확인: 실행 파일 코드]). 설정 값이 판정에 쓰인다는 것은 함수 이름이 축약돼 있어 [추정]. 켜면 시작할 때 마켓플레이스와 플러그인을 갱신한다(엔진 설명). 빠진 키만 `~/.claude/keybindings.json`(또는 `CLAUDE_CONFIG_DIR`)의 Chat 문맥에 추가한다. 먼저 `.bak`으로 백업하고, 같은 키가 다른 동작에 묶여 있으면 덮어쓰지 않고 알린다. 설정 파일은 직접 고치지 않고 안내만: 전체 화면(`/tui fullscreen` 또는 `"tui": "fullscreen"`), 권장으로 claude-hud `statusLine` 지우기·`/plugin uninstall claude-hud`, 응답 언어(`"language": "korean"`)
+  4. `/setup`: 자동 업데이트를 켠다(사용자 설정 `extraKnownMarketplaces.hubblerc.autoUpdate: true`, 먼저 `settings.json.bak`). GitHub에서 추가한 마켓플레이스는 기본이 꺼짐이다(엔진 규칙 2.1.310: `autoUpdate`를 정하면 그 값, 아니면 Anthropic 공식 마켓플레이스만 켜짐 [확인: 실행 파일 코드]). 설정 값이 판정에 쓰인다는 것은 함수 이름이 축약돼 있어 [추정]. 켜면 시작할 때 마켓플레이스와 플러그인을 갱신한다(엔진 설명). 빠진 키만 `~/.claude/keybindings.json`(또는 `CLAUDE_CONFIG_DIR`)의 Chat 문맥에 추가한다(보고서에는 키 전체를 한 줄로). 먼저 `.bak`으로 백업하고, 같은 키가 다른 동작에 묶여 있으면 덮어쓰지 않고 알린다. 설정 파일은 직접 고치지 않고 안내만: 전체 화면(`/tui fullscreen` 또는 `"tui": "fullscreen"`), 권장으로 claude-hud `statusLine` 지우기·`/plugin uninstall claude-hud`, 응답 언어(`"language": "korean"`)
   5. 사이드바·밴드·고양이·대화 줄이 보이는지 확인
 
 ## 다음 작업 (2026-10-27 UI 점검)

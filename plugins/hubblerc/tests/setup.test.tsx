@@ -93,7 +93,7 @@ test('/setup adds the missing keys, keeps the old file as .bak, and tells the re
   expect(files[`${KEY_FILE}.bak`]).toBe(before)
   expect(JSON.parse(files[KEY_FILE] ?? '{}').bindings[0].bindings).toEqual({ 'ctrl+g': 'chat:externalEditor', ...OURS })
   const text = (ran as { text?: string }).text ?? ''
-  expect(text).toContain('✓ 키 ctrl+x ctrl+e: effort 슬라이더 (방금 추가함)')
+  expect(text).toContain('✓ 키: ctrl+x ctrl+e(effort 슬라이더) 방금 추가함, ctrl+x ctrl+p(사이드바 열기/닫기) 방금 추가함')
   expect(text).toContain('✗ 전체 화면이 아닙니다')
   expect(text).toContain(`원래 파일은 \`${KEY_FILE}.bak\``)
 
@@ -101,7 +101,7 @@ test('/setup adds the missing keys, keeps the old file as .bak, and tells the re
   files[`${KEY_FILE}.bak`] = 'untouched'
   const again = await $.command.run({ ...COMMAND, command: 'setup' })
   expect(files[`${KEY_FILE}.bak`]).toBe('untouched')
-  expect((again as { text?: string }).text).toContain('✓ 키 ctrl+x ctrl+p: 사이드바 열기/닫기')
+  expect((again as { text?: string }).text).toContain('✓ 키: ctrl+x ctrl+e(effort 슬라이더), ctrl+x ctrl+p(사이드바 열기/닫기)')
 })
 
 test("auto-update is turned on in the marketplace's entry of the user's settings, nothing else changed", () => {
