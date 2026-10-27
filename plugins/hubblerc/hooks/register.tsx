@@ -13,7 +13,7 @@ import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
-import { markRunning, noteCall, refreshStatus, startStatus, unmarkRunning } from './status'
+import { markRunning, noteCall, noteTranscript, refreshStatus, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
 import { showToolLines } from './tool-lines'
 
@@ -80,6 +80,19 @@ export const register: Register = (on, options) => {
     }
 
     return done
+  }).catch(($, e, next) => next(e))
+
+  // A classic hook hands the transcript's path: the session's name is read from it.
+  on('classic.SessionStart', async ($, e, next) => {
+    noteTranscript(e.transcript_path)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    noteTranscript(e.transcript_path)
+
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   trackLines(on)

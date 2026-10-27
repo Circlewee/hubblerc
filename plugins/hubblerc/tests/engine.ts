@@ -28,6 +28,10 @@ export type StandIn = {
   latestVersion: string
   /** Every `git status` the plugin ran, its argv. */
   gitStatusArgs: string[][]
+  /** The session's name its transcript's last `custom-title` row gives (null: none). */
+  sessionName: string | null
+  /** Every command the plugin ran, its argv. */
+  ran: string[][]
   /** How many reads of the machine (`sysctl`, `sw_vers`) fail before they answer. */
   failMachineReads: number
 }
@@ -37,7 +41,7 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', gitStatusArgs: [], failMachineReads: 0 }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', gitStatusArgs: [], sessionName: null, failMachineReads: 0, ran: [] }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } as never }))
@@ -73,6 +77,12 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
 
       return { value: { exitCode: 1, stdout: '', stderr: 'not found', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    standIn.ran.push([...e.argv])
+    // The transcript, found by the session's id; its last custom-title row.
+    if (e.argv[0] === '/bin/sh' && e.argv.includes('"type":"custom-title"')) {
+      return ok(standIn.sessionName === null ? '' : `${JSON.stringify({ type: 'custom-title', customTitle: standIn.sessionName, sessionId: standIn.sessionId })}\n`)
+    }
+    if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('projects')) return ok(`/home/me/.claude/projects/-repo-hubblerc/${standIn.sessionId}.jsonl\n`)
     if (e.argv[0] === '/usr/sbin/sysctl') return ok('Apple M3 Pro\n19327352832\n')
     // 13.7 GiB in use (app, wired, compressed); 256 GB left on the disk.
     if (e.argv[0] === '/usr/bin/vm_stat') return ok('Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     6279.\nPages wired down:                             198111.\nPages purgeable:                               15550.\nAnonymous pages:                              392549.\nPages stored in compressor:                   625561.\nPages occupied by compressor:                 323642.\n')

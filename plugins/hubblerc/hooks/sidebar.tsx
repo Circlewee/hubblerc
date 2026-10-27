@@ -34,6 +34,8 @@ const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
 const streamPhase = atom({ plugin: 'hubblerc', key: 'streamPhase' } as const, null)
 const restartPending = atom({ plugin: 'hubblerc', key: 'restartPending' } as const, false)
 const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
+const sessionId = atom({ plugin: 'hubblerc', key: 'sessionId' } as const, '')
+const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, null)
 
 /** The sidebar's boxes, by the id their fold is kept under. */
 export type SectionId = 'device' | 'status' | 'activity' | 'files' | 'contents'
@@ -190,7 +192,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded, deviceInfo, phase, isRestartPending, requestLog] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded, deviceInfo, phase, isRestartPending, requestLog, id, name] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -213,6 +215,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, streamPhase),
         read($, restartPending),
         read($, effortLog),
+        read($, sessionId),
+        read($, sessionName),
       ])
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
@@ -397,6 +401,27 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             )}
           </Box>
         ))}
+        {id === '' ? null : (
+          // The session: its name as `/rename` set it (none, none shown), and its short id, a press
+          // that copies the whole id (what `claude --resume` takes).
+          <Box key="session">
+            {name === null ? null : (
+              <Text key="session-name" wrap="truncate-end">
+                {clipCells(name, Math.max(1, inner - 11))}
+                <Text dimColor> · </Text>
+              </Text>
+            )}
+            <Button
+              key="session-id"
+              plain
+              onPress={() => {
+                void $.ui.copy({ text: id }).then(copied => $.ui.toast(copied.isCopied ? `세션 id를 복사했습니다: ${id}` : `세션 id를 복사하지 못했습니다: ${copied.reason ?? ''}`))
+              }}
+            >
+              <Text dimColor>{id.slice(0, 8)}</Text>
+            </Button>
+          </Box>
+        )}
         {request.length === 0 ? null : <Box key="request">{request.map((segment, i) => segmentText(segment, `request-${i}`))}</Box>}
       </Box>,
     )
@@ -476,7 +501,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const isContentsOpen = !foldedIds.includes('contents')
     const above =
       boxRows('device', 2 + Math.max(catRows.length, deviceText)) +
-      boxRows('status', status.length + (request.length === 0 ? 0 : 1)) +
+      boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1)) +
       boxRows('activity', activity.length) +
       (files.length === 0 ? 0 : boxRows('files', 0)) +
       boxRows('contents', 0)

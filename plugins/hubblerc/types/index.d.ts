@@ -218,6 +218,8 @@ declare module 'claude-code' {
       streamPhase: 'thinking' | 'text' | null
       /** A restart onto the installed version was asked for and waits for what runs to end (`/relaunch`, the sidebar's "재시작"). */
       restartPending: boolean
+      /** The session's name as `/rename` set it (its transcript's last `custom-title` row); null when it has none. */
+      sessionName: string | null
     }
   }
 }

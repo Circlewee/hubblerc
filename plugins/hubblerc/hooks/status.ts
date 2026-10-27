@@ -17,6 +17,7 @@ const model = atom({ plugin: 'hubblerc', key: 'model' } as const, '')
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
+const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, null)
 
 /** While something runs, elapsed times redraw every second. */
 const TICK_MS = 1000
@@ -24,6 +25,10 @@ const TICK_MS = 1000
 const SLOW_REFRESH_MS = 30_000
 /** Git is read this often, so a commit made outside shows soon. */
 const GIT_REFRESH_MS = 5000
+/** What a session's name is kept under in its transcript (`/rename`), a row appended again now and then. */
+const TITLE_ROW = '"type":"custom-title"'
+/** How much of the transcript's end a periodic read of the name looks through. */
+const TITLE_TAIL_BYTES = 262_144
 const MAX_RUNNING = 50
 
 type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
@@ -35,6 +40,7 @@ type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
 export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
   await refreshStatus($)
+  await refreshSessionName($, true).catch(() => undefined)
 
   let lastSlow = await $.clock.now()
   $.clock.every(TICK_MS, () => {
@@ -54,6 +60,7 @@ export async function startStatus($: EngineInterface): Promise<void> {
       if (isSlow) {
         lastSlow = now
         await refreshStatus($).catch(() => undefined)
+        await refreshSessionName($).catch(() => undefined)
       }
       if (isSlow || hasAgents || isRunning || isAnswering) await update($, tick, () => now)
     })().catch(() => undefined)
@@ -207,6 +214,54 @@ function snapshot(figures: SessionUsage): UsageSnapshot {
     ...(sevenDay === undefined ? {} : { sevenDay }),
     ...(figures.cost === undefined ? {} : { costUsd: figures.cost.usd }),
     limits: figures.rateLimits.map(limit => ({ kind: limit.kind, percent: limit.percentUsed })),
+  }
+}
+
+/** The session's transcript, as a classic hook hands it (`transcript_path`); found by the session's id until one does. */
+let transcriptPath: string | undefined
+
+/** From a classic hook's input: where the session's transcript is. */
+export function noteTranscript(path: string | undefined): void {
+  if (path !== undefined && path !== '') transcriptPath = path
+}
+
+async function findTranscript($: EngineInterface): Promise<string | undefined> {
+  if (transcriptPath !== undefined) return transcriptPath
+  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
+  const home = await $.env.get('HOME')
+  const dir = configDir !== undefined && configDir !== '' ? configDir : home !== undefined && home !== '' ? `${home}/.claude` : undefined
+  if (dir === undefined) return undefined
+  const found = await $.process.run(['/bin/sh', '-c', 'ls "$1"/projects/*/"$2".jsonl 2>/dev/null | head -n 1', 'sh', dir, await $.session.id()], { timeoutMs: 3000 })
+  const path = found.stdout.trim()
+  if (path !== '') transcriptPath = path
+
+  return transcriptPath
+}
+
+/**
+ * The session's name as `/rename` set it. The engine hands a mod no name; it keeps it in the
+ * transcript as a `custom-title` row, appended again now and then, so the last one in the
+ * transcript's end is the name now (`whole`: the whole transcript, at start). None found there
+ * leaves the name known. Written only when it changed.
+ */
+export async function refreshSessionName($: EngineInterface, whole = false): Promise<void> {
+  const path = await findTranscript($)
+  if (path === undefined) return
+  const script = whole ? 'grep -F "$2" "$1" | tail -n 1' : `tail -c ${TITLE_TAIL_BYTES} "$1" | grep -F "$2" | tail -n 1`
+  const ran = await $.process.run(['/bin/sh', '-c', script, 'sh', path, TITLE_ROW], { timeoutMs: 3000 })
+  const name = titleIn(ran.stdout)
+  if (name !== undefined && name !== (await read($, sessionName))) await update($, sessionName, () => name)
+}
+
+/** The name in a transcript's `custom-title` row; null for a blank one, undefined when the text is no such row. */
+export function titleIn(line: string): string | null | undefined {
+  try {
+    const row = JSON.parse(line.trim()) as { type?: unknown; customTitle?: unknown }
+    if (row.type !== 'custom-title') return undefined
+
+    return typeof row.customTitle === 'string' && row.customTitle.trim() !== '' ? row.customTitle : null
+  } catch {
+    return undefined
   }
 }
 

@@ -1,7 +1,8 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 import { statusParts } from '../hooks/band-format'
 import { limitsLine } from '../hooks/effort-log'
+import { titleIn } from '../hooks/status'
 import { NOW, standInForEngine, start } from './engine'
 
 const COMMAND = { args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }
@@ -33,6 +34,39 @@ test('/effort-log shows the line in a session', async ($, on) => {
   const ran = ((await $.command.run({ ...COMMAND, command: 'effort-log' })) as { text?: string }).text ?? ''
   // The stand-in hands both windows.
   expect(ran.endsWith('엔진이 준 한도: five_hour 25%, seven_day 12%')).toBe(true)
+})
+
+test("a session's name is its transcript's custom-title row; another row, or none, is no name read", () => {
+  expect(titleIn('{"type":"custom-title","customTitle":"v0.4.0","sessionId":"s"}\n')).toBe('v0.4.0')
+  expect(titleIn('{"type":"custom-title","customTitle":"  ","sessionId":"s"}')).toBeNull()
+  expect(titleIn('{"type":"user"}')).toBeUndefined()
+  expect(titleIn('')).toBeUndefined()
+})
+
+test("the status box ends with the session's name and short id; with no name, the id alone; a press copies the whole id", async ($, on) => {
+  const standIn = standInForEngine(on)
+  mock.env(on, { HOME: '/home/me' })
+  standIn.sessionId = '444027a3-234d-4c3c-8232-a7e561773f2d'
+  const copied: string[] = []
+  on('ui.copy', (_, e) => {
+    copied.push(e.text)
+
+    return { value: { isCopied: true } as never }
+  })
+  await start($)
+
+  const bare = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await bare.find({ key: 'session-id' }))?.text).toBe('444027a3')
+  expect((await bare.find({ key: 'session' }))?.text).toBe('444027a3')
+  await bare.press({ key: 'session-id' })
+  expect(copied).toEqual(['444027a3-234d-4c3c-8232-a7e561773f2d'])
+  await bare.unmount()
+
+  standIn.sessionName = 'v0.4.0'
+  await standIn.clock.advance(30_000)
+  const named = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await named.find({ key: 'session' }))?.text).toBe('v0.4.0 · 444027a3')
+  await named.unmount()
 })
 
 test('a read of the machine that failed at the start is made again, and the chip, memory and OS come back', async ($, on) => {
