@@ -206,6 +206,7 @@ function snapshot(figures: SessionUsage): UsageSnapshot {
     ...(fiveHour === undefined ? {} : { fiveHour }),
     ...(sevenDay === undefined ? {} : { sevenDay }),
     ...(figures.cost === undefined ? {} : { costUsd: figures.cost.usd }),
+    limits: figures.rateLimits.map(limit => ({ kind: limit.kind, percent: limit.percentUsed })),
   }
 }
 

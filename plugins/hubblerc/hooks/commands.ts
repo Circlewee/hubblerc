@@ -1,7 +1,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
-import { effortLogTable } from './effort-log'
+import { effortLogTable, limitsLine } from './effort-log'
 import { requestRestart } from './relaunch'
 import { runSetup } from './setup'
 import { toggleSidebar } from './sidebar'
@@ -11,6 +11,7 @@ import { activityTable } from './summary'
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
 const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
+const usage = atom({ plugin: 'hubblerc', key: 'usage' } as const, null)
 
 /**
  * At session.start: `/activity`, every recorded answer of the session with its summary, and
@@ -47,7 +48,7 @@ export async function registerCommand($: EngineInterface): Promise<void> {
 export function answerCommands(on: On, layout: Layout): void {
   on('command.run', { command: 'activity' }, async $ => ({ text: activityTable(await read($, turns)) }))
   on('command.run', { command: 'effort-log' }, async $ => ({
-    text: effortLogTable(await read($, effortLog), await read($, turns), await read($, autoPick)),
+    text: `${effortLogTable(await read($, effortLog), await read($, turns), await read($, autoPick))}\n\n${limitsLine(await read($, usage))}`,
   }))
   on('command.run', { command: 'setup' }, async $ => ({ text: await runSetup($).catch((error: unknown) => `hubblerc 설정 점검 실패: ${String(error)}`) }))
   on('command.run', { command: 'relaunch' }, async $ => ({ text: await requestRestart($) }))

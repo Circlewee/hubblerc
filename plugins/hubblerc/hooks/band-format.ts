@@ -298,7 +298,10 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
   const context = input.usage?.contextPercent
   parts.push(context === undefined ? [{ text: 'ctx –', dim: true }] : usagePart('ctx', context, [], bar, input.palette))
 
+  // Left out by the engine while it hands other windows (a subscription with no 5-hour figure now):
+  // a dim dash, not a line gone, as ctx does. With no window at all (an API key) there is no line.
   if (fiveHour !== undefined) parts.push(usagePart('5h', fiveHour.percent, fiveHourTail, bar, input.palette))
+  else if ((input.usage?.limits?.length ?? 0) > 0) parts.push([{ text: isWide ? '5h  –' : '5h –', dim: true }])
 
   if (shape.sevenDay && sevenDay !== undefined) {
     const step = weekStep(sevenDay.percent, sevenDay.resetsAt, input.now)

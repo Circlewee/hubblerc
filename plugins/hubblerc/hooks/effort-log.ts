@@ -1,4 +1,4 @@
-import type { AutoPick, EffortSample, EffortSource, TurnRecord } from '../types'
+import type { AutoPick, EffortSample, EffortSource, TurnRecord, UsageSnapshot } from '../types'
 
 const SOURCE_LABELS: Record<EffortSource, string> = { engine: '엔진', manual: '직접', auto: 'auto' }
 
@@ -31,6 +31,21 @@ export function effortLogTable(samples: readonly EffortSample[], list: readonly 
   if (pick !== null) lines.push(`마지막 auto 판정: ${pick.level} (${(pick.ms / 1000).toFixed(1)}s)`)
 
   return lines.join('\n')
+}
+
+/**
+ * Which rate-limit windows the engine handed over (`$.session.usage()`, the status line's figures),
+ * and the usual two it left out: `엔진이 준 한도: seven_day 52% (five_hour 없음)`. What tells a
+ * window the account lacks, or the engine has not had, from one hubblerc failed to draw.
+ */
+export function limitsLine(usage: UsageSnapshot | null): string {
+  if (usage === null) return '엔진이 준 한도: 아직 읽지 못함'
+  const limits = usage.limits ?? []
+  const given = limits.map(limit => `${limit.kind} ${limit.percent}%`)
+  const missing = ['five_hour', 'seven_day'].filter(kind => !limits.some(limit => limit.kind === kind))
+  const listed = given.length === 0 ? '없음' : given.join(', ')
+
+  return `엔진이 준 한도: ${listed}${missing.length === 0 || given.length === 0 ? '' : ` (${missing.map(kind => `${kind} 없음`).join(', ')})`}`
 }
 
 /** The cache's share of each request's prompt, averaged over requests right after a change of effort and the rest. */
