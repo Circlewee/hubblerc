@@ -143,6 +143,10 @@ export type DeviceInfo = {
   diskFreeGb?: number
   /** The engine's version, `2.1.310`. */
   version?: string
+  /** hubblerc's own version, from its plugin.json. */
+  pluginVersion?: string
+  /** hubblerc runs from a folder of its own (`--plugin-dir`), not from the installed copy. */
+  isDevBuild?: boolean
   /** The newest version installed on the machine (`~/.local/share/claude/versions`): above `version`, a restart applies it. */
   installed?: string
   /** The newest version released (the npm registry's `latest`), read hourly. */

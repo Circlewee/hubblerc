@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, newest, parseDf, parseSysctl, parseVmStat, versionNote } from '../hooks/device'
+import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, manifestVersion, newest, parseDf, parseSysctl, parseVmStat, versionNote } from '../hooks/device'
 import { CAT, CAT_PALETTE, catFrame, catMood, pixelRows } from '../hooks/pixel-art'
 import { standInForEngine, start } from './engine'
 
@@ -109,6 +109,21 @@ test('idle, the sidebar\'s cat sleeps; after an answer with a failed call it is 
   const after = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   expect(await after.find({ type: 'Text', text: '!' })).toBeDefined()
   await after.unmount()
+})
+
+test("hubblerc's own version shows under Claude Code's, marked when it runs from its own folder", async ($, on) => {
+  standInForEngine(on)
+  on('fs.read', (_, e) => (e.path.endsWith('/.claude-plugin/plugin.json') ? { value: JSON.stringify({ name: 'hubblerc', version: '0.4.0' }) as never } : { deny: 'no file' }))
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  // The tests run the plugin from the repository, not from the plugin cache.
+  expect((await ui.find({ type: 'Text', text: /^hubblerc \d/ }))?.text).toBe('hubblerc 0.4.0 dev')
+  await ui.unmount()
+
+  expect(manifestVersion('{"version":"0.4.0"}')).toBe('0.4.0')
+  expect(manifestVersion('not json')).toBeUndefined()
+  expect(manifestVersion(undefined)).toBeUndefined()
 })
 
 test('versions compare by their numbers; the newest installed and the latest released are read', () => {

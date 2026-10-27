@@ -16,15 +16,20 @@ export async function startDevice($: EngineInterface): Promise<void> {
 
     return ran !== undefined && ran.exitCode === 0 ? ran.stdout : ''
   }
-  const [sysctl, os, version] = await Promise.all([
+  const [sysctl, os, version, manifest] = await Promise.all([
     run(['sysctl', '-n', 'machdep.cpu.brand_string', 'hw.memsize']),
     run(['sw_vers', '-productVersion']),
     $.session.version().catch(() => undefined),
+    $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).catch(() => undefined),
   ])
 
   const info: DeviceInfo = { ...parseSysctl(sysctl) }
   if (os.trim() !== '') info.os = `macOS ${os.trim()}`
   if (version !== undefined) info.version = version.base ?? version.version
+  const pluginVersion = manifestVersion(manifest)
+  if (pluginVersion !== undefined) info.pluginVersion = pluginVersion
+  // An installed copy sits in Claude Code's plugin cache (`~/.claude/plugins/cache/<market>/<name>/<version>`).
+  info.isDevBuild = !$.plugin.root.includes('/plugins/cache/')
   await update($, device, () => info)
 
   await readResources($).catch(() => undefined)
@@ -94,6 +99,18 @@ async function checkVersions($: EngineInterface): Promise<void> {
     ...(installed === undefined ? {} : { installed }),
     ...(latest === undefined ? {} : { latest }),
   }))
+}
+
+/** The `version` of hubblerc's plugin.json. */
+export function manifestVersion(json: string | undefined): string | undefined {
+  if (json === undefined) return undefined
+  try {
+    const version = (JSON.parse(json) as { version?: unknown }).version
+
+    return typeof version === 'string' && version !== '' ? version : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** The `version` of the registry's `latest` manifest. */

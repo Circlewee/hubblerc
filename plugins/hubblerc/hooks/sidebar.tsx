@@ -345,6 +345,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
               </Text>
             </Box>
           )}
+          {deviceInfo?.pluginVersion === undefined ? null : (
+            // hubblerc itself, and whether it runs from the folder it is made in (`hcc`) or the installed copy.
+            <Text key="plugin-version" wrap="truncate-end">
+              {`hubblerc ${deviceInfo.pluginVersion}`}
+              {deviceInfo.isDevBuild === true ? <Text dimColor> dev</Text> : null}
+            </Text>
+          )}
         </Box>
       </Box>,
     )
@@ -444,7 +451,10 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // contents share the rest, each showing fewer (and "외 N개", more pages) as rows run short.
     // A box takes its two borders; folded, one row.
     const boxRows = (id: SectionId, body: number) => (foldedIds.includes(id) ? 1 : 2 + body)
-    const deviceText = (lines.length === 0 && deviceInfo?.version === undefined ? 1 : lines.length) + (deviceInfo?.version === undefined ? 0 : 1)
+    const deviceText =
+      (lines.length === 0 && deviceInfo?.version === undefined ? 1 : lines.length) +
+      (deviceInfo?.version === undefined ? 0 : 1) +
+      (deviceInfo?.pluginVersion === undefined ? 0 : 1)
     const isFilesOpen = files.length > 0 && !foldedIds.includes('files')
     const isContentsOpen = !foldedIds.includes('contents')
     const above =
