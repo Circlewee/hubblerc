@@ -13,7 +13,7 @@ import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
-import { gitWatchPaths, markRunning, noteCall, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
+import { gitWatchPaths, markRunning, noteCall, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
 import { showToolLines } from './tool-lines'
 
@@ -99,6 +99,14 @@ export const register: Register = (on, options) => {
     if (e.file_path.includes('.git/')) void requestGitRefresh($).catch(() => undefined)
 
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The engine's /rename (its alias /name folded in): the sidebar's session line shows the name at once.
+  on('command.run', { command: 'rename' }, async ($, e, next) => {
+    const ran = await next(e)
+    await noteRename($, e.args).catch(() => undefined)
+
+    return ran
   }).catch(($, e, next) => next(e))
 
   on('classic.UserPromptSubmit', async ($, e, next) => {

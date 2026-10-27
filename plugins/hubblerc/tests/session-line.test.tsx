@@ -88,3 +88,29 @@ test('a read of the machine that failed at the start is made again, and the chip
   expect((await after.find({ type: 'Text', text: /^macOS/ }))?.text).toBe('macOS 27.0.1')
   await after.unmount()
 })
+
+test('/rename shows its name at once; with none given, the name the engine chose, read from the transcript a moment later', async ($, on) => {
+  const standIn = standInForEngine(on)
+  mock.env(on, { HOME: '/home/me' })
+  standIn.sessionId = '444027a3-234d-4c3c-8232-a7e561773f2d'
+  // The engine's own /rename beneath: it renames, and says so.
+  on('command.run', { command: 'rename' }, () => ({ text: 'Session renamed' }))
+  await start($)
+  const line = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+    const text = (await ui.find({ key: 'session' }))?.text
+    await ui.unmount()
+
+    return text
+  }
+
+  await $.command.run({ ...COMMAND, command: 'rename', args: ' 작업 이름 ' })
+  // No sidebar shown, no clock moved: the name came from the command itself.
+  expect(await line()).toBe('작업 이름 · 444027a3')
+
+  standIn.sessionName = 'fix-sidebar-height'
+  await $.command.run({ ...COMMAND, command: 'rename' })
+  expect(await line()).toBe('작업 이름 · 444027a3')
+  await standIn.clock.advance(1000)
+  expect(await line()).toBe('fix-sidebar-height · 444027a3')
+})

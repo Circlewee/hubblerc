@@ -306,6 +306,29 @@ export async function refreshSessionName($: EngineInterface, whole = false): Pro
   if (name !== undefined && name !== (await read($, sessionName))) await update($, sessionName, () => name)
 }
 
+/** After `/rename` asks it, the transcript is read again this long after, for a name the engine chose. */
+const RENAME_READS_MS = [1000, 3000]
+
+/**
+ * After `/rename` (or `/name`) ran: the name it was given shows at once, the sidebar shown or not.
+ * Given none, the engine chooses one and appends its row: the transcript's end is read a second
+ * and three seconds on. A name given is not read back at once (the row may not be written yet, and
+ * the old one would come back); the 30-second read confirms it.
+ */
+export async function noteRename($: EngineInterface, args: string): Promise<void> {
+  const name = args.trim()
+  if (name !== '') {
+    await update($, sessionName, () => name)
+
+    return
+  }
+  for (const ms of RENAME_READS_MS) {
+    $.clock.after(ms, () => {
+      void refreshSessionName($).catch(() => undefined)
+    })
+  }
+}
+
 /** The name in a transcript's `custom-title` row; null for a blank one, undefined when the text is no such row. */
 export function titleIn(line: string): string | null | undefined {
   try {
