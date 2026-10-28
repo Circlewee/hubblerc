@@ -24,6 +24,7 @@ const project = atom({ plugin: 'hubblerc', key: 'project' } as const, '')
 const model = atom({ plugin: 'hubblerc', key: 'model' } as const, '')
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
+const ultracode = atom({ plugin: 'hubblerc', key: 'ultracode' } as const, false)
 const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null)
 const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
 const tocPageIndex = atom({ plugin: 'hubblerc', key: 'tocPage' } as const, 0)
@@ -316,6 +317,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       ])
     // Read so the pictures, once loaded, redraw the cat.
     await read($, catImageCount)
+    const isUltracode = await read($, ultracode)
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
@@ -333,7 +335,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
     const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const status = statusParts(
-      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now, burnout, isRoomy: true, palette: THEME_COLORS, barColumns: inner },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, isUltracode, usage: figures, project: projectName, git: gitInfo, now, burnout, isRoomy: true, palette: THEME_COLORS, barColumns: inner },
       Number.POSITIVE_INFINITY,
     )
     const isWorking = turnList.at(-1)?.durationMs === null

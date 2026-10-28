@@ -19,6 +19,7 @@ const project = atom({ plugin: 'hubblerc', key: 'project' } as const, '')
 const model = atom({ plugin: 'hubblerc', key: 'model' } as const, '')
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
+const ultracode = atom({ plugin: 'hubblerc', key: 'ultracode' } as const, false)
 const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const effortPicker = atom({ plugin: 'hubblerc', key: 'effortPicker' } as const, null)
 const effortAuto = atom({ plugin: 'hubblerc', key: 'effortAuto' } as const, null)
@@ -61,6 +62,7 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
         read($, lastRequestAt),
         read($, effortLog),
       ])
+    const isUltracode = await read($, ultracode)
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
@@ -69,7 +71,7 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
     const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
     const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const line1 = statusParts(
-      { model: modelId, effort, isOverridden: override !== null, isAuto, usage: figures, project: projectName, git: gitInfo, now, burnout },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, isUltracode, usage: figures, project: projectName, git: gitInfo, now, burnout },
       e.props.bodyColumns,
     )
     const line2 = activityParts(runningList, agentList, todoList, e.props.isWorking, now).join(SEPARATOR)

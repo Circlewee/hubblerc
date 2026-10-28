@@ -19,6 +19,7 @@ const tick = atom({ plugin: 'hubblerc', key: 'tick' } as const, 0)
 const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, null)
+const ultracode = atom({ plugin: 'hubblerc', key: 'ultracode' } as const, false)
 
 /** While something runs, elapsed times redraw every second. */
 const TICK_MS = 1000
@@ -51,6 +52,7 @@ export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
   await refreshStatus($)
   await refreshSessionName($, true).catch(() => undefined)
+  await startUltracode($).catch(() => undefined)
 
   let lastSlow = await $.clock.now()
   let idleTicks = 0
@@ -326,6 +328,66 @@ export async function noteRename($: EngineInterface, args: string): Promise<void
     $.clock.after(ms, () => {
       void refreshSessionName($).catch(() => undefined)
     })
+  }
+}
+
+/** The transcript row the engine's `/effort` writes when ultracode turns on or off (`Ultracode on (this session only): …`, `Ultracode off. …`). */
+const ULTRACODE_ROW = 'local-command-stdout>Ultracode (on|off)'
+/** How far back from the transcript's end to look for it: right after `/effort`, it is the last thing written. */
+const ULTRACODE_TAIL_BYTES = 65_536
+/** After `/effort` runs, the transcript is read this long after, for the row it writes. */
+const EFFORT_READS_MS = [500, 2000]
+/** When this session started: an ultracode row older than it is another session's (a resume). */
+let sessionStartedAt = 0
+
+/**
+ * At session.start: ultracode is off unless the `ultracode` setting starts every session in it.
+ * The engine hands a mod nothing else of it (no setting, `/config` row or render prop changes when
+ * `/effort ultracode` turns it on [checked in a session]).
+ */
+async function startUltracode($: EngineInterface): Promise<void> {
+  sessionStartedAt = await $.clock.now()
+  const setting = await $.settings.read({ key: 'ultracode' })
+  await update($, ultracode, () => setting === true)
+}
+
+/**
+ * After the engine's `/effort` ran (with arguments or through its slider, Tab toggling ultracode):
+ * what it said of ultracode, read from the transcript a moment later. A level alone says nothing
+ * of it and leaves it as it was, as the engine does.
+ */
+export function noteEffortCommand($: EngineInterface): void {
+  for (const ms of EFFORT_READS_MS) {
+    $.clock.after(ms, () => {
+      void refreshUltracode($).catch(() => undefined)
+    })
+  }
+}
+
+async function refreshUltracode($: EngineInterface): Promise<void> {
+  const path = await findTranscript($)
+  if (path === undefined) return
+  const ran = await $.process.run(['/bin/sh', '-c', `tail -c ${ULTRACODE_TAIL_BYTES} "$1" | grep -E "$2" | tail -n 1`, 'sh', path, ULTRACODE_ROW], { timeoutMs: 3000 })
+  const said = ultracodeIn(ran.stdout, sessionStartedAt)
+  if (said !== undefined && said !== (await read($, ultracode))) await update($, ultracode, () => said)
+}
+
+/**
+ * Whether a transcript row of `/effort`'s output turned ultracode on or off; undefined when the
+ * text is no such row, or one written before `since` (another session's, in a resumed transcript).
+ */
+export function ultracodeIn(line: string, since = 0): boolean | undefined {
+  try {
+    const row = JSON.parse(line.trim()) as { timestamp?: unknown; message?: { content?: unknown } }
+    const content = row.message?.content
+    if (typeof content !== 'string') return undefined
+    const at = typeof row.timestamp === 'string' ? Date.parse(row.timestamp) : Number.NaN
+    if (Number.isNaN(at) || at < since) return undefined
+    const said = /^<local-command-stdout>Ultracode (on|off)\b/.exec(content)
+
+    return said === null ? undefined : said[1] === 'on'
+  } catch {
+    return undefined
   }
 }
 

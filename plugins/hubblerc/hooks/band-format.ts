@@ -31,6 +31,8 @@ export type Palette = {
   dirty: string
   running: string
   faint: string
+  /** Ultracode, beside the effort. */
+  ultracode: string
 }
 
 /**
@@ -49,6 +51,7 @@ export const COLORS: Palette = {
   dirty: 'yellow',
   running: 'blue',
   faint: 'gray',
+  ultracode: 'magenta',
 }
 
 /**
@@ -68,6 +71,8 @@ export const THEME_COLORS: Palette = {
   dirty: 'warning',
   running: 'permission',
   faint: 'inactive',
+  // Claude's orange, as the engine draws its own ultracode mark.
+  ultracode: 'claude',
 }
 
 /** A segment's style as `Text` props, only those it sets. */
@@ -211,6 +216,8 @@ export type StatusInput = {
   isOverridden: boolean
   /** Auto effort is on: `effort` is its latest pick (null before the first). */
   isAuto?: boolean
+  /** Ultracode is on for the session: named after the effort. */
+  isUltracode?: boolean
   usage: UsageSnapshot | null
   project: string
   git: GitInfo | null
@@ -277,6 +284,7 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
       : { text: effort, role: 'effort', color: input.isOverridden ? (input.palette ?? COLORS).sessionEffort : (input.palette ?? COLORS).effort },
   )
   if (input.isOverridden) head.push({ text: ' (세션)', dim: true })
+  if (input.isUltracode === true) head.push({ text: ' · ', dim: true }, { text: 'ultracode', color: (input.palette ?? COLORS).ultracode, bold: true })
   parts.push(head)
 
   const fiveHour = input.usage?.fiveHour

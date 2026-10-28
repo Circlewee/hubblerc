@@ -218,6 +218,8 @@ declare module 'claude-code' {
       catPicture: 'unknown' | 'shown' | 'blocked'
       /** How many pictures of the cat (`assets/cat/<mood>/*.png`) were read at session.start; the PNGs themselves are kept outside state. */
       catImageCount: number
+      /** Ultracode is on for the session (`/effort ultracode`, its slider, or the `ultracode` setting): what the engine said last. */
+      ultracode: boolean
       /** What the main loop's response streams now: thinking, or the answer's text; null between and after. */
       streamPhase: 'thinking' | 'text' | null
       /** A restart onto the installed version was asked for and waits for what runs to end (`/relaunch`, the sidebar's "재시작"). */

@@ -30,6 +30,9 @@ export type StandIn = {
   gitStatusArgs: string[][]
   /** The session's name its transcript's last `custom-title` row gives (null: none). */
   sessionName: string | null
+  /** The transcript's last row of `/effort` turning ultracode on or off ('' none), and whether the `ultracode` setting is on. */
+  ultracodeRow: string
+  ultracodeSetting: boolean
   /** Every command the plugin ran, its argv. */
   ran: string[][]
   /** How many times the plugin read the subagent list. */
@@ -43,7 +46,7 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', gitStatusArgs: [], sessionName: null, failMachineReads: 0, ran: [], agentListCalls: 0 }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0 }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } as never }))
@@ -88,6 +91,7 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     if (e.argv[0] === '/bin/sh' && e.argv.includes('"type":"custom-title"')) {
       return ok(standIn.sessionName === null ? '' : `${JSON.stringify({ type: 'custom-title', customTitle: standIn.sessionName, sessionId: standIn.sessionId })}\n`)
     }
+    if (e.argv[0] === '/bin/sh' && e.argv.some(arg => arg.includes('Ultracode (on|off)'))) return ok(standIn.ultracodeRow === '' ? '' : `${standIn.ultracodeRow}\n`)
     if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('projects')) return ok(`/home/me/.claude/projects/-repo-hubblerc/${standIn.sessionId}.jsonl\n`)
     if (e.argv.includes('--absolute-git-dir')) return ok('/repo/hubblerc/.git\n')
     if (e.argv[0] === '/usr/sbin/sysctl') return ok('Apple M3 Pro\n19327352832\n')
@@ -106,7 +110,7 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
   })
   // The read answers the merged settings; a read of one key is that object, projected.
   on('settings.read', () => ({
-    value: { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'xhigh' } } } as never,
+    value: { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'xhigh' } }, ...(standIn.ultracodeSetting ? { ultracode: true } : {}) } as never,
   }))
   on('ui.toast', (_, e) => {
     standIn.toasts.push(e)
