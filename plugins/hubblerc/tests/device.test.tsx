@@ -99,6 +99,27 @@ test('where the terminal draws the picture\'s alt, the cat goes back to half blo
   await ui.unmount()
 })
 
+test('a picture that stands still is sent again every ten seconds while the sidebar shows, and not when it is hidden', async ($, on) => {
+  const standIn = standInForEngine(on)
+  let blits = 0
+  on('ui.blit', () => {
+    blits += 1
+
+    return { value: {} }
+  })
+  await start($)
+  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  // The probe at one second; the idle cat seen at ten, sent again at twenty and thirty.
+  await standIn.clock.advance(31_000)
+  expect(blits).toBe(3)
+  standIn.panes = []
+  await standIn.clock.advance(20_000)
+  expect(blits).toBe(3)
+  await ui.unmount()
+})
+
 test('a blit taken keeps the picture, and is not asked again', async ($, on) => {
   const standIn = standInForEngine(on)
   let blits = 0

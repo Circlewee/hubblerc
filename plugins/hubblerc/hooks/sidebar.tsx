@@ -7,7 +7,7 @@ import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
-import { SIDEBAR_ID } from './pane'
+import { isSidebarShown, SIDEBAR_ID } from './pane'
 import { catImagesFor } from './cat-images'
 import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } from './pixel-art'
 import { requestRestart } from './relaunch'
@@ -143,6 +143,10 @@ export async function startSidebar($: EngineInterface, layout: Layout): Promise<
       })
       .catch(() => undefined)
   })
+  // A picture that stands still is sent again now and then: the terminal can lose one it drew.
+  $.clock.every(REFRESH_MS, () => {
+    void refreshPicture($).catch(() => undefined)
+  })
   if (layout !== 'band') return
   if ((await $.ui.panes()).some(open => open.id === SIDEBAR_ID)) await $.ui.close({ id: SIDEBAR_ID })
 }
@@ -210,6 +214,26 @@ async function probePicture($: EngineInterface): Promise<boolean> {
 }
 
 const PROBE_MS = 1000
+
+/** How long a picture stands unchanged before it is sent again. */
+const REFRESH_MS = 10_000
+/** The picture the last refresh tick saw: one seen again unchanged has stood a whole tick. */
+let lastSeenPicture: string | null = null
+
+/**
+ * Sends the cat's picture again when it has not changed for a tick and the sidebar shows. A
+ * drawing with an unchanged source sends nothing, so an idle cat is never sent again; a terminal
+ * that lost it (seen in Orca: the box left blank while idle) shows nothing till it changes. A blit
+ * always sends. While the cat moves, each new frame is sent anyway and this does nothing.
+ */
+async function refreshPicture($: EngineInterface): Promise<void> {
+  const drawn = drawnPicture
+  const seen = lastSeenPicture
+  lastSeenPicture = drawn?.source.png ?? null
+  if (drawn === null || drawn.source.png !== seen) return
+  if ((await read($, catPicture)) !== 'shown' || !(await isSidebarShown($))) return
+  await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn })
+}
 
 /**
  * The sidebar, in four boxes each titled on its top border: the band's status, one item a line,
