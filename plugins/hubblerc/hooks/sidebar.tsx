@@ -8,7 +8,8 @@ import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
 import { SIDEBAR_ID } from './pane'
-import { CAT_PALETTE, catFrame, catMood, pixelRows } from './pixel-art'
+import { catImagesFor } from './cat-images'
+import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } from './pixel-art'
 import { requestRestart } from './relaunch'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
@@ -32,6 +33,8 @@ const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const
 const folded = atom({ plugin: 'hubblerc', key: 'folded' } as const, [])
 const filesExpanded = atom({ plugin: 'hubblerc', key: 'filesExpanded' } as const, false)
 const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
+const catPicture = atom({ plugin: 'hubblerc', key: 'catPicture' } as const, 'unknown')
+const catImageCount = atom({ plugin: 'hubblerc', key: 'catImageCount' } as const, 0)
 const streamPhase = atom({ plugin: 'hubblerc', key: 'streamPhase' } as const, null)
 const restartPending = atom({ plugin: 'hubblerc', key: 'restartPending' } as const, false)
 const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
@@ -132,6 +135,14 @@ export async function startSidebar($: EngineInterface, layout: Layout): Promise<
   isDismissed = false
   isPeeking = false
   await loadFolds($).catch(() => undefined)
+  // Each second till the terminal has said whether it draws the cat's picture.
+  const probe = $.clock.every(PROBE_MS, () => {
+    void probePicture($)
+      .then(isKnown => {
+        if (isKnown) probe.cancel()
+      })
+      .catch(() => undefined)
+  })
   if (layout !== 'band') return
   if ((await $.ui.panes()).some(open => open.id === SIDEBAR_ID)) await $.ui.close({ id: SIDEBAR_ID })
 }
@@ -171,6 +182,34 @@ export async function toggleSidebar($: EngineInterface, layout: Layout, presenta
 
   return opened.isPlaced ? undefined : `사이드바가 아직 그려지지 않았습니다: ${opened.reason}`
 }
+
+/** The cat as a picture: as tall as the lines beside it. */
+const PICTURE_ROWS = 5
+/** The picture's key in the drawing: what a blit names. */
+const PICTURE_KEY = 'cat-picture'
+/** A blit refused because the terminal drew the picture's `alt`: no placeholder images, or a file it cannot read. */
+const NO_PICTURE = /placeholder|\balt\b|cannot read/i
+/** The picture the sidebar last drew, for the probe to send again; null while it draws none. */
+let drawnPicture: { source: { png: string }; columns: number; rows: number } | null = null
+
+/**
+ * Whether the terminal draws the cat's picture: once the sidebar has drawn one, a blit of the same
+ * source answers. Refused for the `alt`, the cat goes back to half blocks (the sidebar redraws on
+ * the write); refused for anything else (not mounted yet), the next second asks again. Asked from
+ * a timer: a render hook writes no state.
+ */
+async function probePicture($: EngineInterface): Promise<boolean> {
+  if ((await read($, catPicture)) !== 'unknown') return true
+  const drawn = drawnPicture
+  if (drawn === null) return false
+  const result = await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn }).catch((error: unknown) => ({ deny: String(error) }))
+  if (result.deny !== undefined && !NO_PICTURE.test(result.deny)) return false
+  await update($, catPicture, () => (result.deny === undefined ? 'shown' : 'blocked'))
+
+  return true
+}
+
+const PROBE_MS = 1000
 
 /**
  * The sidebar, in four boxes each titled on its top border: the band's status, one item a line,
@@ -219,11 +258,17 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, sessionId),
         read($, sessionName),
       ])
+    // Read so the pictures, once loaded, redraw the cat.
+    await read($, catImageCount)
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
 
-    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = elements
+    // The terminal's picture leaf: absent elsewhere, and given up on where the terminal draws its alt.
+    const pictureState = await read($, catPicture)
+    const Image = e.surface === 'terminal' && pictureState !== 'blocked' ? (elements as { Image?: typeof elements.Box }).Image : undefined
     const width = e.props.bodyColumns
     /** What a box holds: the width less the box's frame. */
     const inner = Math.max(1, width - BOX_FRAME)
@@ -299,7 +344,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       )
     }
 
-    // The machine and the engine, beside a cat drawn in half blocks that shows what the session does.
+    // A cat that shows what the session does, and the machine and the engine: the cat a picture beside
+    // the lines where the terminal draws one, else half blocks above them.
     const lines = deviceLines(deviceInfo)
     const note = versionNote(deviceInfo)
     const lastDone = turnList.findLast(turn => turn.durationMs !== null)
@@ -309,30 +355,53 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       phase,
       lastFailed: lastDone !== undefined && lastDone.runs.some(run => run.isError),
     })
-    const cat = catFrame(mood, Math.floor(now / 1000))
-    const catRows = pixelRows(cat.art, CAT_PALETTE)
+    const second = Math.floor(now / 1000)
+    const cat = catFrame(mood, second)
+    // As a picture, the cat keeps its pixels square in a box as tall as the lines beside it: the
+    // PNGs in assets/cat for the mood (a frame a second) where there are some, else the art drawn
+    // as one. In half blocks it takes a cell for two pixels and stands above the lines.
+    const ownImages = Image === undefined ? null : catImagesFor(mood)
+    const ownImage = ownImages === null ? undefined : ownImages[second % ownImages.length]
+    const artSize = ownImage ?? pixelSize(cat.art)
+    const picture = Image === undefined ? null : ownImage !== undefined ? { png: ownImage.png } : pixelPicture(cat.art, CAT_PALETTE)
+    const pictureColumns = Math.max(1, Math.round((PICTURE_ROWS * 2 * artSize.width) / Math.max(1, artSize.height)))
+    drawnPicture = picture === null ? null : { source: picture, columns: pictureColumns, rows: PICTURE_ROWS }
+    const catRows = picture === null ? pixelRows(cat.art, CAT_PALETTE) : []
+    const mark = (
+      // Beside the head: z, ?, !; a column of its own, so nothing moves. Over the blocks' empty last
+      // column; a picture's cells are its own.
+      <Box key="cat-mark-box" width={1} flexShrink={0} {...(picture === null ? { marginLeft: -1 } : {})}>
+        <Text key="cat-mark" {...(mood === 'startled' ? { color: THEME_COLORS.alert, bold: true } : { dimColor: true })}>
+          {cat.mark === '' ? ' ' : cat.mark}
+        </Text>
+      </Box>
+    )
     const deviceBox = box(
       'device',
       '장비',
       // A row of air above and below: the cat and its lines sit apart from the borders.
-      <Box key="device-body" columnGap={2} paddingY={1}>
-        <Box flexDirection="column" flexShrink={0}>
-          {catRows.map((row, y) => (
-            <Box key={`cat-${y}`}>
-              {row.map((run, x) => (
-                <Text key={`cat-${y}-${x}`} {...(run.color === undefined ? {} : { color: run.color })} {...(run.backgroundColor === undefined ? {} : { backgroundColor: run.backgroundColor })}>
-                  {run.text}
-                </Text>
+      <Box key="device-body" {...(picture === null ? { flexDirection: 'column' as const, rowGap: 1 } : { columnGap: 2 })} paddingY={1}>
+        {picture !== null && Image !== undefined ? (
+          <Box key="cat" flexShrink={0}>
+            <Image key={PICTURE_KEY} source={picture} columns={pictureColumns} rows={PICTURE_ROWS} alt=" " />
+            {mark}
+          </Box>
+        ) : (
+          <Box key="cat" flexShrink={0}>
+            <Box flexDirection="column" flexShrink={0}>
+              {catRows.map((row, y) => (
+                <Box key={`cat-${y}`}>
+                  {row.map((run, x) => (
+                    <Text key={`cat-${y}-${x}`} {...(run.color === undefined ? {} : { color: run.color })} {...(run.backgroundColor === undefined ? {} : { backgroundColor: run.backgroundColor })}>
+                      {run.text}
+                    </Text>
+                  ))}
+                </Box>
               ))}
             </Box>
-          ))}
-        </Box>
-        {/* Beside the head: z, ?, !; a column of its own, so the lines never move. */}
-        <Box width={1} flexShrink={0} marginLeft={-1}>
-          <Text key="cat-mark" {...(mood === 'startled' ? { color: THEME_COLORS.alert, bold: true } : { dimColor: true })}>
-            {cat.mark === '' ? ' ' : cat.mark}
-          </Text>
-        </Box>
+            {mark}
+          </Box>
+        )}
         <Box flexDirection="column">
           {lines.length === 0 && deviceInfo?.version === undefined ? <Text dimColor>장비 정보를 읽는 중</Text> : null}
           {lines.map((line, i) => (
@@ -501,7 +570,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const isFilesOpen = files.length > 0 && !foldedIds.includes('files')
     const isContentsOpen = !foldedIds.includes('contents')
     const above =
-      boxRows('device', 2 + Math.max(catRows.length, deviceText)) +
+      // Air above and below; a picture beside the lines, or blocks above them with a row between.
+      boxRows('device', 2 + (picture === null ? catRows.length + 1 + deviceText : Math.max(PICTURE_ROWS, deviceText))) +
       boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1)) +
       boxRows('activity', activity.length) +
       (files.length === 0 ? 0 : boxRows('files', 0)) +

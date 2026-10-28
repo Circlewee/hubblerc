@@ -214,6 +214,10 @@ declare module 'claude-code' {
       filesExpanded: boolean
       /** The machine and the engine's version, for the sidebar's top box. */
       device: DeviceInfo | null
+      /** Whether the terminal draws the cat as a picture: not known yet, drawn (a blit was taken), or its `alt` drawn (then half blocks). */
+      catPicture: 'unknown' | 'shown' | 'blocked'
+      /** How many pictures of the cat (`assets/cat/<mood>/*.png`) were read at session.start; the PNGs themselves are kept outside state. */
+      catImageCount: number
       /** What the main loop's response streams now: thinking, or the answer's text; null between and after. */
       streamPhase: 'thinking' | 'text' | null
       /** A restart onto the installed version was asked for and waits for what runs to end (`/relaunch`, the sidebar's "재시작"). */

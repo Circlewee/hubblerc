@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, manifestVersion, newest, parseDf, parseSysctl, parseVmStat, versionNote } from '../hooks/device'
 import { CAT, CAT_PALETTE, catFrame, catMood, pixelRows } from '../hooks/pixel-art'
+import { pngSize } from '../hooks/cat-images'
 import { standInForEngine, start } from './engine'
 
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const
@@ -34,20 +35,25 @@ test('the lines name only what is known', () => {
   expect(deviceLines({ diskFreeGb: 256 })).toEqual(['디스크 256GB 남음'])
 })
 
-test('the cat is twelve cells by four, two pixels to a cell', () => {
+test('the cat is thirty-two cells by sixteen in half blocks, two pixels to a cell', () => {
   const rows = pixelRows(CAT, CAT_PALETTE)
-  expect(rows).toHaveLength(4)
-  for (const row of rows) expect(row.reduce((sum, run) => sum + [...run.text].length, 0)).toBe(12)
-  // The ears: fur over fur a full block, fur below alone ▄; cells of one style run together.
+  expect(rows).toHaveLength(16)
+  for (const row of rows) expect(row.reduce((sum, run) => sum + [...run.text].length, 0)).toBe(32)
+  // The ear tips: outline over seal; outline under nothing a lower half; runs of one style together.
+  const O = CAT_PALETTE.O
   expect(rows[0]).toEqual([
-    { text: ' ' },
-    { text: '█▄', color: CAT_PALETTE.O },
     { text: '      ' },
-    { text: '▄█', color: CAT_PALETTE.O },
-    { text: ' ' },
+    { text: '▄', color: O },
+    { text: '▀', color: O, backgroundColor: CAT_PALETTE.S },
+    { text: '▄▄', color: O },
+    { text: '            ' },
+    { text: '▄▄', color: O },
+    { text: '▀', color: O, backgroundColor: CAT_PALETTE.S },
+    { text: '▄', color: O },
+    { text: '      ' },
   ])
-  // An eye over fur: the top pixel dark on a fur background.
-  expect(pixelRows(['D', 'O'], CAT_PALETTE)[0]).toEqual([{ text: '▀', color: CAT_PALETTE.D, backgroundColor: CAT_PALETTE.O }])
+  // An eye over the mask: the top pixel blue on a mask background, in the row under the eyes.
+  expect(pixelRows(['B', 'M'], CAT_PALETTE)[0]).toEqual([{ text: '▀', color: CAT_PALETTE.B, backgroundColor: CAT_PALETTE.M }])
 })
 
 test('the sidebar opens with a box of the machine and the engine, beside the cat', async ($, on) => {
@@ -64,7 +70,50 @@ test('the sidebar opens with a box of the machine and the engine, beside the cat
   expect((await ui.find({ type: 'Text', text: /^메모리/ }))?.text).toBe('메모리 13.7/18GB · 디스크 256GB 남음')
   expect(await ui.find({ type: 'Text', text: /켜진 지/ })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /Claude Code/ }))?.text).toBe('Claude Code 2.1.310')
+  // Where the terminal draws pictures, the cat is one, five rows tall beside the lines; no half blocks.
+  const picture = await ui.find({ key: 'cat-picture' })
+  expect(picture?.props.rows).toBe(5)
+  expect(picture?.props.columns).toBe(10)
+  expect((picture?.props.source as { png: string }).png.startsWith('iVBORw0KGgo')).toBe(true)
+  expect((await ui.findAll({ type: 'Text', text: /[▀▄█]/ })).length).toBe(0)
+  await ui.unmount()
+})
+
+test('where the terminal draws the picture\'s alt, the cat goes back to half blocks above the lines', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const blits: unknown[] = []
+  on('ui.blit', (_, e) => {
+    blits.push(e)
+
+    return { value: { deny: 'the Image draws its alt: no placeholder images' } }
+  })
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await ui.find({ key: 'cat-picture' })).toBeDefined()
+  await standIn.clock.advance(1000)
+  expect(blits).toHaveLength(1)
+  expect(await ui.find({ key: 'cat-picture' })).toBeUndefined()
   expect((await ui.findAll({ type: 'Text', text: /[▀▄█]/ })).length).toBeGreaterThan(0)
+  expect((await ui.find({ key: 'device-body' }))?.props.flexDirection).toBe('column')
+  await ui.unmount()
+})
+
+test('a blit taken keeps the picture, and is not asked again', async ($, on) => {
+  const standIn = standInForEngine(on)
+  let blits = 0
+  on('ui.blit', () => {
+    blits += 1
+
+    return { value: {} }
+  })
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  await standIn.clock.advance(1000)
+  await standIn.clock.advance(5000)
+  expect(blits).toBe(1)
+  expect(await ui.find({ key: 'cat-picture' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -91,8 +140,50 @@ test('only a cat at work moves: its picture changes with the second, a resting o
   expect(catFrame('awake', 4).art).not.toEqual(catFrame('awake', 5).art)
   expect(catFrame('awake', 5).art).toEqual(catFrame('awake', 6).art)
   for (const mood of ['sleeping', 'awake', 'thinking', 'writing', 'busy', 'startled'] as const) {
-    for (const row of catFrame(mood, 1).art) expect(row).toHaveLength(12)
+    for (const second of [1, 2]) {
+      expect(catFrame(mood, second).art).toHaveLength(32)
+      for (const row of catFrame(mood, second).art) expect(row).toHaveLength(32)
+    }
   }
+})
+
+/** A 4×2 PNG, base64. */
+const PNG_4X2 = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAEklEQVR4nGP4z8DwHxkzoAsAAA8hD/EEN8afAAAAAElFTkSuQmCC'
+
+test('a PNG\'s size is read from its header; what is not a PNG has none', () => {
+  expect(pngSize(PNG_4X2)).toEqual({ width: 4, height: 2 })
+  expect(pngSize('aGVsbG8gd29ybGQsIHRoaXMgaXMgbm90IGEgcG5n')).toBeNull()
+  expect(pngSize('')).toBeNull()
+})
+
+test('the user\'s own PNGs in assets/cat/<mood> are the picture, a frame a second; a mood without any shows the awake ones', async ($, on) => {
+  standInForEngine(on)
+  // No sleeping folder: the idle cat shows the awake pictures.
+  const folders: Record<string, string[]> = { awake: ['02.png', '01.png', 'notes.txt'] }
+  on('fs.list', (_, e) => {
+    const mood = /assets\/cat\/([a-z]+)$/.exec(e.path)?.[1] ?? ''
+    const names = folders[mood]
+
+    return names === undefined ? { deny: 'no folder' } : { value: names.map(name => ({ name, kind: 'file' as const, size: 70 })) }
+  })
+  const reads: string[] = []
+  on('fs.read', (_, e) => {
+    if (!e.path.includes('/assets/cat/')) return { deny: 'no file' }
+    reads.push(e.path.replace(/.*assets\/cat\//, ''))
+
+    return { value: { base64: PNG_4X2 } as never }
+  })
+  await start($)
+  // Each folder's PNGs in name order; other files left alone.
+  expect(reads).toEqual(['awake/01.png', 'awake/02.png'])
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  const picture = await ui.find({ key: 'cat-picture' })
+  expect((picture?.props.source as { png: string }).png).toBe(PNG_4X2)
+  // Square pixels in five rows: 4×2 pixels is twenty cells wide.
+  expect(picture?.props.columns).toBe(20)
+  expect(picture?.props.rows).toBe(5)
+  await ui.unmount()
 })
 
 test('idle, the sidebar\'s cat sleeps; after an answer with a failed call it is startled', async ($, on) => {

@@ -3,6 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { DeviceInfo } from '../types'
 import { isSidebarShown } from './pane'
+import { loadCatImages } from './cat-images'
 
 const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
 
@@ -21,6 +22,7 @@ export async function startDevice($: EngineInterface): Promise<void> {
     $.session.version().catch(() => undefined),
     $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).catch(() => undefined),
   ])
+  await loadCatImages($).catch(() => undefined)
 
   const info: DeviceInfo = { ...machine }
   if (version !== undefined) info.version = version.base ?? version.version
