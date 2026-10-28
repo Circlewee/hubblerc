@@ -120,6 +120,47 @@ test('a picture that stands still is sent again every ten seconds while the side
   await ui.unmount()
 })
 
+test('a sidebar first drawn after the probe stopped is still asked about', async ($, on) => {
+  const standIn = standInForEngine(on)
+  let blits = 0
+  on('ui.blit', () => {
+    blits += 1
+
+    return { value: {} }
+  })
+  await start($)
+  // Nothing drawn for half a minute: the probe stops after ten seconds.
+  await standIn.clock.advance(30_000)
+  expect(blits).toBe(0)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  // The refresh tick at forty seconds starts the probe again; it asks at forty-one.
+  await standIn.clock.advance(12_000)
+  expect(blits).toBe(1)
+  await ui.unmount()
+})
+
+test('awake, the cat\'s pictures blink one second in four, not every other', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const BLINK = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEElEQVR4nGNgYPj/H4KhDAA/0gf5tBJPzQAAAABJRU5ErkJggg=='
+  on('fs.list', (_, e) => (e.path.endsWith('/assets/cat/awake') ? { value: ['01.png', '02.png'].map(name => ({ name, kind: 'file' as const, size: 70 })) } : { deny: 'no folder' }))
+  on('fs.read', (_, e) => (e.path.includes('/assets/cat/awake/') ? { value: { base64: e.path.endsWith('02.png') ? BLINK : PNG_4X2 } as never } : { deny: 'no file' }))
+  await start($)
+  await $.turn.start({ text: '안녕', turnId: 't1' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  const shown: string[] = []
+  for (let i = 0; i < 8; i += 1) {
+    const second = Math.floor(standIn.clock.now() / 1000)
+    const png = ((await ui.find({ key: 'cat-picture' }))?.props.source as { png: string }).png
+    shown.push(`${second % 4}:${png === BLINK ? 'blink' : 'open'}`)
+    await standIn.clock.advance(1000)
+  }
+  expect(shown.filter(entry => entry.endsWith('blink')).every(entry => entry.startsWith('0:'))).toBe(true)
+  expect(shown.filter(entry => entry.endsWith('blink'))).toHaveLength(2)
+  await ui.unmount()
+})
+
 test('a blit taken keeps the picture, and is not asked again', async ($, on) => {
   const standIn = standInForEngine(on)
   let blits = 0

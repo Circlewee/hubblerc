@@ -50,11 +50,19 @@ export async function loadCatImages($: EngineInterface): Promise<void> {
 }
 
 /**
- * The pictures for a mood: its own, else the awake cat's (a mood left without any still shows the
- * cat), else none.
+ * The picture for a mood at a second of the clock: its own frames a second each, else the awake
+ * cat's (a mood left without any still shows the cat); none when there are no pictures. The awake
+ * frames are the cat and its blinks: the first, and a blink one second in four.
  */
-export function catImagesFor(mood: CatMood): readonly CatImage[] | null {
-  return images.get(mood) ?? images.get('awake') ?? null
+export function catImageAt(mood: CatMood, second: number): CatImage | null {
+  const own = images.get(mood)
+  const frames = own ?? images.get('awake')
+  if (frames === undefined) return null
+  if ((own === undefined || mood === 'awake') && frames.length > 1) {
+    return (second % 4 === 0 ? frames[1 + (Math.floor(second / 4) % (frames.length - 1))] : frames[0]) ?? null
+  }
+
+  return frames[second % frames.length] ?? null
 }
 
 /** A PNG's width and height, from its header (base64); null when it is not a PNG. */

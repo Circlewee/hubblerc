@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { CommandPresentation, EngineInterface, On, RenderViewport } from 'claude-code'
+import type { CommandPresentation, EngineInterface, On, RenderViewport, Timer } from 'claude-code'
 
 import { activityParts, cellWidth, requestSegments, statusParts, textStyle, THEME_COLORS } from './band-format'
 import type { Segment } from './band-format'
@@ -8,7 +8,7 @@ import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
 import { isSidebarShown, SIDEBAR_ID } from './pane'
-import { catImagesFor } from './cat-images'
+import { catImageAt } from './cat-images'
 import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } from './pixel-art'
 import { requestRestart } from './relaunch'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
@@ -136,13 +136,8 @@ export async function startSidebar($: EngineInterface, layout: Layout): Promise<
   isPeeking = false
   await loadFolds($).catch(() => undefined)
   // Each second till the terminal has said whether it draws the cat's picture.
-  const probe = $.clock.every(PROBE_MS, () => {
-    void probePicture($)
-      .then(isKnown => {
-        if (isKnown) probe.cancel()
-      })
-      .catch(() => undefined)
-  })
+  probeTimer = null
+  startProbe($)
   // A picture that stands still is sent again now and then: the terminal can lose one it drew.
   $.clock.every(REFRESH_MS, () => {
     void refreshPicture($).catch(() => undefined)
@@ -214,6 +209,32 @@ async function probePicture($: EngineInterface): Promise<boolean> {
 }
 
 const PROBE_MS = 1000
+/** Seconds the probe waits for a drawn picture before it stops; the refresh tick starts it again on one. */
+const PROBE_IDLE_TICKS = 10
+let probeTimer: Timer | null = null
+
+/**
+ * Asks each second whether the terminal draws the picture, till it has said. With no picture drawn
+ * for ten seconds (a band layout, a closed sidebar) it stops rather than wake each second all
+ * session; the refresh tick starts it again once a picture is drawn.
+ */
+function startProbe($: EngineInterface): void {
+  if (probeTimer !== null) return
+  let idleTicks = 0
+  const stop = () => {
+    timer.cancel()
+    if (probeTimer === timer) probeTimer = null
+  }
+  const timer = $.clock.every(PROBE_MS, () => {
+    idleTicks = drawnPicture === null ? idleTicks + 1 : 0
+    void probePicture($)
+      .then(isKnown => {
+        if (isKnown || idleTicks >= PROBE_IDLE_TICKS) stop()
+      })
+      .catch(() => undefined)
+  })
+  probeTimer = timer
+}
 
 /** How long a picture stands unchanged before it is sent again. */
 const REFRESH_MS = 10_000
@@ -230,8 +251,15 @@ async function refreshPicture($: EngineInterface): Promise<void> {
   const drawn = drawnPicture
   const seen = lastSeenPicture
   lastSeenPicture = drawn?.source.png ?? null
-  if (drawn === null || drawn.source.png !== seen) return
-  if ((await read($, catPicture)) !== 'shown' || !(await isSidebarShown($))) return
+  if (drawn === null) return
+  const state = await read($, catPicture)
+  // Drawn while the probe had stopped: ask again.
+  if (state === 'unknown') {
+    startProbe($)
+
+    return
+  }
+  if (state !== 'shown' || drawn.source.png !== seen || !(await isSidebarShown($))) return
   await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn })
 }
 
@@ -384,8 +412,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // As a picture, the cat keeps its pixels square in a box as tall as the lines beside it: the
     // PNGs in assets/cat for the mood (a frame a second) where there are some, else the art drawn
     // as one. In half blocks it takes a cell for two pixels and stands above the lines.
-    const ownImages = Image === undefined ? null : catImagesFor(mood)
-    const ownImage = ownImages === null ? undefined : ownImages[second % ownImages.length]
+    const ownImage = Image === undefined ? undefined : (catImageAt(mood, second) ?? undefined)
     const artSize = ownImage ?? pixelSize(cat.art)
     const picture = Image === undefined ? null : ownImage !== undefined ? { png: ownImage.png } : pixelPicture(cat.art, CAT_PALETTE)
     const pictureColumns = Math.max(1, Math.round((PICTURE_ROWS * 2 * artSize.width) / Math.max(1, artSize.height)))
