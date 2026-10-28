@@ -331,8 +331,13 @@ export async function noteRename($: EngineInterface, args: string): Promise<void
   }
 }
 
-/** The transcript row the engine's `/effort` writes when ultracode turns on or off (`Ultracode on (this session only): …`, `Ultracode off. …`). */
-const ULTRACODE_ROW = 'local-command-stdout>Ultracode (on|off)'
+/**
+ * The transcript row of the engine's `/effort` output that says ultracode is on or off: at its start
+ * (`Ultracode on (this session only): …`, `Ultracode off. …`) or at its end, after a level the
+ * slider set (`Set effort level to high (…): … · Ultracode on`).
+ */
+// The row's own `content` field (quotes unescaped): a tool call or message quoting the words does not match.
+const ULTRACODE_ROW = '"content":"<local-command-stdout>[^<]*Ultracode (on|off)'
 /** How far back from the transcript's end to look for it: right after `/effort`, it is the last thing written. */
 const ULTRACODE_TAIL_BYTES = 65_536
 /** After `/effort` runs, the transcript is read this long after, for the row it writes. */
@@ -383,7 +388,7 @@ export function ultracodeIn(line: string, since = 0): boolean | undefined {
     if (typeof content !== 'string') return undefined
     const at = typeof row.timestamp === 'string' ? Date.parse(row.timestamp) : Number.NaN
     if (Number.isNaN(at) || at < since) return undefined
-    const said = /^<local-command-stdout>Ultracode (on|off)\b/.exec(content)
+    const said = /^<local-command-stdout>[^<]*\bUltracode (on|off)\b/.exec(content)
 
     return said === null ? undefined : said[1] === 'on'
   } catch {

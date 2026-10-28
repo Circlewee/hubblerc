@@ -101,6 +101,9 @@ test('ultracode is read from the row /effort writes: on, off, not one from befor
   expect(ultracodeIn(effortRow('on', NOW + 1000), NOW)).toBe(true)
   expect(ultracodeIn(effortRow('off', NOW + 1000), NOW)).toBe(false)
   expect(ultracodeIn(effortRow('on', NOW - 1000), NOW)).toBeUndefined()
+  // The slider setting a level says ultracode at the end.
+  const levelRow = JSON.stringify({ type: 'user', message: { content: '<local-command-stdout>Set effort level to high (saved as your default for new sessions): Comprehensive implementation with extensive testing and documentation · Ultracode on</local-command-stdout>' }, timestamp: new Date(NOW + 1000).toISOString() })
+  expect(ultracodeIn(levelRow, NOW)).toBe(true)
   expect(ultracodeIn('{"type":"user","message":{"content":"<local-command-stdout>Set effort level to high</local-command-stdout>"},"timestamp":"2026-10-25T09:00:01Z"}', NOW)).toBeUndefined()
   expect(ultracodeIn('', NOW)).toBeUndefined()
 })
