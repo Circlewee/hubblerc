@@ -236,15 +236,19 @@ function startProbe($: EngineInterface): void {
   probeTimer = timer
 }
 
-/** How long a picture stands unchanged before it is sent again. */
-const REFRESH_MS = 10_000
+/**
+ * How long a picture stands unchanged before it is sent again. Orca drops a picture while its tab is
+ * hidden behind another: back on the tab, the cat is blank till this sends it again. Every second
+ * cost no more than every two (measured, docs/spec.md); two keeps idle wake-ups fewer.
+ */
+const REFRESH_MS = 2000
 /** The picture the last refresh tick saw: one seen again unchanged has stood a whole tick. */
 let lastSeenPicture: string | null = null
 
 /**
  * Sends the cat's picture again when it has not changed for a tick and the sidebar shows. A
  * drawing with an unchanged source sends nothing, so an idle cat is never sent again; a terminal
- * that lost it (seen in Orca: the box left blank while idle) shows nothing till it changes. A blit
+ * that lost it (Orca, back from another tab) shows nothing till it changes. A blit
  * always sends. While the cat moves, each new frame is sent anyway and this does nothing.
  */
 async function refreshPicture($: EngineInterface): Promise<void> {

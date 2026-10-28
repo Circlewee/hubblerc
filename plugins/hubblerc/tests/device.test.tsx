@@ -99,7 +99,7 @@ test('where the terminal draws the picture\'s alt, the cat goes back to half blo
   await ui.unmount()
 })
 
-test('a picture that stands still is sent again every ten seconds while the sidebar shows, and not when it is hidden', async ($, on) => {
+test('a picture that stands still is sent again every two seconds while the sidebar shows, and not when it is hidden', async ($, on) => {
   const standIn = standInForEngine(on)
   let blits = 0
   on('ui.blit', () => {
@@ -111,12 +111,12 @@ test('a picture that stands still is sent again every ten seconds while the side
   standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  // The probe at one second; the idle cat seen at ten, sent again at twenty and thirty.
+  // The probe at one second; the idle cat seen at two, sent again at four, six, … thirty.
   await standIn.clock.advance(31_000)
-  expect(blits).toBe(3)
+  expect(blits).toBe(15)
   standIn.panes = []
   await standIn.clock.advance(20_000)
-  expect(blits).toBe(3)
+  expect(blits).toBe(15)
   await ui.unmount()
 })
 
@@ -134,7 +134,7 @@ test('a sidebar first drawn after the probe stopped is still asked about', async
   expect(blits).toBe(0)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  // The refresh tick at forty seconds starts the probe again; it asks at forty-one.
+  // The next refresh tick, at thirty-two seconds, starts the probe again; it asks at thirty-three.
   await standIn.clock.advance(12_000)
   expect(blits).toBe(1)
   await ui.unmount()
