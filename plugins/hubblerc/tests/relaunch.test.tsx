@@ -191,7 +191,7 @@ test('/setup copies the relaunch function and adds the line to ~/.zshrc, the old
   expect(files['/home/me/.claude/hubblerc/relaunch.zsh']).toBe('SCRIPT')
   expect(files['/home/me/.zshrc.bak']).toBe(before)
   expect(files['/home/me/.zshrc']).toContain('source "$HOME/.claude/hubblerc/relaunch.zsh"')
-  expect(ran).toContain('재시작 셸 함수(사이드바 "재시작", `/relaunch`): 방금')
+  expect(ran).toContain('셸 설정(재시작 함수: 사이드바 "재시작"·`/relaunch`, Orca 그림): 방금')
 
   files['/home/me/.zshrc.bak'] = 'untouched'
   const again = ((await $.command.run({ ...COMMAND, command: 'setup' })) as { text?: string }).text ?? ''

@@ -1,7 +1,14 @@
-# hubblerc: Claude Code를 새 버전으로 다시 띄우는 셸 함수.
+# hubblerc의 셸 설정: Orca에서 그림을 켜는 값, 그리고 Claude Code를 새 버전으로 다시 띄우는 셸 함수.
 # `/setup`이 이 파일을 ~/.claude/hubblerc/relaunch.zsh로 복사하고, ~/.zshrc에 불러오는 줄을 넣는다:
 #   source ~/.claude/hubblerc/relaunch.zsh
-#
+
+# Orca의 터미널은 그림(kitty 유니코드 placeholder)을 그리지만, Claude Code는 Orca를 그림 되는 터미널로
+# 알아보지 못한다. Orca는 자기 에이전트 실행으로 띄운 Claude에만 이 값을 넣어 주므로, 탭에서 직접 띄울
+# 때도 사이드바 고양이가 그림으로 나오게 여기서 넣는다. 이미 정해 둔 값(0 포함)은 그대로 둔다.
+if [[ "$TERM_PROGRAM" == Orca && -z "${CLAUDE_CODE_FORCE_TERMINAL_IMAGES+set}" ]]; then
+  export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1
+fi
+
 # 사이드바의 "재시작"이나 `/relaunch`를 쓰면 hubblerc는 진행 중인 답변이 끝나기를 기다렸다가
 # 세션 id를 $HUBBLERC_RELAUNCH_FILE에 적고 Claude Code를 끝낸다. 이 함수는 그 파일을 보고 같은
 # 세션을 `--resume`으로 다시 연다. 그때 실행 파일은 받아 둔 새 버전이다.

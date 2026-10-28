@@ -4,8 +4,8 @@ import { canRelaunch } from './relaunch'
 
 /**
  * What a machine needs beside the plugin, which no install carries: the keys in
- * `~/.claude/keybindings.json`, auto-update, the relaunch shell function (sourced from
- * `~/.zshrc`), the fullscreen layout; and what it is better without or with: claude-hud's status
+ * `~/.claude/keybindings.json`, auto-update, the shell setup (sourced from `~/.zshrc`: the relaunch
+ * function, and in Orca the value that lets Claude Code draw pictures), the fullscreen layout; and what it is better without or with: claude-hud's status
  * line (the band takes its place), a response language.
  *
  * At session.start the needed ones are checked and, when one is missing, one line says so; `/setup`
@@ -168,7 +168,7 @@ export function needsRelaunch(state: RelaunchState | null): boolean {
 export function withRelaunchLine(zshrc: string | undefined, scriptPath: string, home: string): string | null {
   if (zshrc?.includes(RELAUNCH_MARK) === true) return null
   const path = home !== '' && scriptPath.startsWith(`${home}/`) ? `$HOME${scriptPath.slice(home.length)}` : scriptPath
-  const block = `# hubblerc: 재시작한 Claude Code를 같은 세션으로 다시 띄우는 셸 함수 (hubblerc의 /setup이 추가)\n[ -f "${path}" ] && source "${path}"\n`
+  const block = `# hubblerc: 재시작한 Claude Code를 같은 세션으로 다시 띄우는 셸 함수, Orca에서 그림 켜기 (hubblerc의 /setup이 추가)\n[ -f "${path}" ] && source "${path}"\n`
   const text = zshrc ?? ''
   const gap = text === '' ? '' : text.endsWith('\n') ? '\n' : '\n\n'
 
@@ -283,7 +283,7 @@ export function setupReport(
 
 /** The report's lines on the relaunch function: there, just put there, or why not. */
 function relaunchLines(state: RelaunchState | null, change: RelaunchChange): string[] {
-  const name = '재시작 셸 함수(사이드바 "재시작", `/relaunch`)'
+  const name = '셸 설정(재시작 함수: 사이드바 "재시작"·`/relaunch`, Orca 그림)'
   if (state === null) return [`✗ ${name}: 플러그인의 셸 스크립트를 읽지 못했습니다`]
   if (!state.isZsh) return [`· ${name}: 셸이 zsh가 아니라 넣지 않았습니다. zsh 전용입니다`]
   if (state.hasAlias) return [`✗ ${name}: \`~/.zshrc\`에 \`alias claude=\`가 있어 넣지 않았습니다. 그 alias를 지운 뒤 다시 \`/setup\``]

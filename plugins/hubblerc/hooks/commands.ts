@@ -35,7 +35,7 @@ export async function registerCommand($: EngineInterface): Promise<void> {
   })
   await $.command.register({
     name: 'setup',
-    description: '이 기기의 hubblerc 설정 점검: 빠진 키 설정과 재시작 셸 함수를 추가하고, 전체 화면·claude-hud·언어 설정을 안내 (hubblerc)',
+    description: '이 기기의 hubblerc 설정 점검: 빠진 키 설정과 셸 설정(재시작 함수, Orca 그림)을 추가하고, 전체 화면·claude-hud·언어 설정을 안내 (hubblerc)',
     immediate: true,
   })
   await $.command.register({
