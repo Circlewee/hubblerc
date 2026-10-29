@@ -115,6 +115,10 @@ test('the band and the sidebar tell when the last request went out, its input wi
   expect(share?.props.color).toBe('red')
   expect((await band.find({ type: 'Text', text: /^\) · 출력/ }))?.text).toBe(') · 출력 100')
   expect((await band.find({ type: 'Text', text: /⚠/ }))?.text).toBe(' ⚠33m')
+  // On a line of its own under the last answer's summary, not after it.
+  const requestLine = await band.find({ key: 'request' })
+  expect(requestLine?.text.startsWith(`마지막 요청 ${time}`)).toBe(true)
+  expect(requestLine?.text).not.toContain('│')
   await band.unmount()
 
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })

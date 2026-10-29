@@ -169,18 +169,13 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
         {pickerOpenedAt !== null ? (
           slider
         ) : (
-          <Box>
-            <Text dimColor wrap="truncate-end">
-              {lastAnswer(turnList)}
-            </Text>
-            {request.length === 0 ? null : (
-              // Kept whole: the summary before it gives way first.
-              <Box flexShrink={0}>
-                <Text dimColor>{SEPARATOR}</Text>
-                {request.map(segment => segmentText(segment))}
-              </Box>
-            )}
-          </Box>
+          <Text dimColor wrap="truncate-end">
+            {lastAnswer(turnList)}
+          </Text>
+        )}
+        {request.length === 0 ? null : (
+          // The last request on a line of its own, under the last answer's summary.
+          <Box key="request">{request.map(segment => segmentText(segment))}</Box>
         )}
       </Box>
     )
