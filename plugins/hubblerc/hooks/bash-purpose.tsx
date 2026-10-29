@@ -8,8 +8,23 @@ export function bashPurpose(input: unknown): string | undefined {
   return typeof description === 'string' && description.trim() !== '' ? description.trim() : undefined
 }
 
+/**
+ * Added to the Bash tool's description: the `description` is drawn under the command, so the model
+ * writes it in Korean. The response language setting does not reach tool arguments (seen: sessions
+ * in other projects wrote them in English).
+ */
+export const KOREAN_PURPOSE_RULE =
+  '\n\nThe `description` you give is shown to the user on screen, under the command. Write it in Korean: a short phrase saying what the command does, such as "전체 테스트 실행" or "작업 트리 상태 확인".'
+
 /** Shows what each Bash call is for under the line that names the command (a folded run's: tool-lines.tsx). */
 export function showBashPurpose(on: On): void {
+  // Read once a session (the engine caches the answer), so it costs nothing per turn.
+  on('tool.describe', { tool: 'Bash' }, async ($, e, next) => {
+    const described = await next(e)
+
+    return described.description.includes(KOREAN_PURPOSE_RULE) ? described : { ...described, description: described.description + KOREAN_PURPOSE_RULE }
+  }).catch(($, e, next) => next(e))
+
   // A Bash call drawn as its own row: the purpose goes under the command line, above its result.
   on('ui.render', { component: 'ToolUse', props: { tool: 'Bash' } }, async ($, e, next) => {
     const purpose = bashPurpose(e.props.input)

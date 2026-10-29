@@ -65,3 +65,16 @@ test('a Bash call with no description, and any other tool, is drawn as the engin
   expect(await read.find({ type: 'Text', text: /↳/ })).toBeUndefined()
   await read.unmount()
 })
+
+test('the Bash tool asks for its description in Korean, once, and leaves other tools alone', async ($, on) => {
+  on('tool.describe', (_, e) => ({ description: e.description }))
+  const provider = { plugin: 'engine', tier: 'core' } as const
+
+  const bash = await $.tool.describe({ tool: 'Bash', description: 'Executes a bash command.', provider })
+  expect(bash.description.startsWith('Executes a bash command.')).toBe(true)
+  expect(bash.description).toContain('Write it in Korean')
+  expect(bash.description.split('Write it in Korean').length).toBe(2)
+
+  const read = await $.tool.describe({ tool: 'Read', description: 'Reads a file.', provider })
+  expect(read.description).toBe('Reads a file.')
+})
