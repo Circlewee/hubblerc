@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { needsRelaunch, relaunchState, withRelaunchLine } from '../hooks/setup'
+import { needsRelaunch, relaunchState, shellVersion, withRelaunchLine } from '../hooks/setup'
 import { NOW, standInForEngine, start } from './engine'
 
 const COMMAND = { args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }
@@ -168,6 +168,15 @@ test('the relaunch function: copied when missing or changed, sourced once from ~
   expect(needsRelaunch(relaunchState({ ...facts, installed: 'SCRIPT', zshrc: `${facts.zshrc}source ~/.claude/hubblerc/relaunch.zsh\n` }))).toBe(false)
   expect(needsRelaunch(relaunchState({ ...facts, zshrc: "alias claude='claude --foo'\n" }))).toBe(false)
   expect(needsRelaunch(relaunchState({ ...facts, isZsh: false }))).toBe(false)
+  // Numbered copies: a newer one installed stays (an older hubblerc's /setup must not undo it); an older one is replaced.
+  const sourced = `${facts.zshrc}source ~/.claude/hubblerc/relaunch.zsh\n`
+  const v = (n: number, body: string) => `# hubblerc-shell-version: ${n}\n${body}`
+  expect(shellVersion(v(2, 'x'))).toBe(2)
+  expect(shellVersion('no number')).toBe(0)
+  expect(needsRelaunch(relaunchState({ ...facts, shipped: 'OLD', installed: v(1, 'NEW'), zshrc: sourced }))).toBe(false)
+  expect(needsRelaunch(relaunchState({ ...facts, shipped: v(1, 'A'), installed: v(2, 'B'), zshrc: sourced }))).toBe(false)
+  expect(needsRelaunch(relaunchState({ ...facts, shipped: v(2, 'B'), installed: v(1, 'A'), zshrc: sourced }))).toBe(true)
+  expect(needsRelaunch(relaunchState({ ...facts, shipped: v(1, 'B'), installed: v(1, 'A'), zshrc: sourced }))).toBe(true)
 
   const line = '[ -f "$HOME/.claude/hubblerc/relaunch.zsh" ] && source "$HOME/.claude/hubblerc/relaunch.zsh"'
   const next = withRelaunchLine(facts.zshrc, '/home/me/.claude/hubblerc/relaunch.zsh', '/home/me') ?? ''
@@ -178,6 +187,19 @@ test('the relaunch function: copied when missing or changed, sourced once from ~
   expect(withRelaunchLine(undefined, '/home/me/.claude/hubblerc/relaunch.zsh', '/home/me')?.startsWith('# hubblerc:')).toBe(true)
   expect(withRelaunchLine('export A=1', '/home/me/.claude/hubblerc/relaunch.zsh', '/home/me')?.startsWith('export A=1\n\n# hubblerc:')).toBe(true)
   expect(withRelaunchLine('', '/etc/claude/hubblerc/relaunch.zsh', '/home/me')).toContain('[ -f "/etc/claude/hubblerc/relaunch.zsh" ]')
+})
+
+test('/setup in a session on an older hubblerc leaves a newer shell file in place', async ($, on) => {
+  standInForEngine(on)
+  const { files } = machine(on, { HOME: '/home/me', SHELL: '/bin/zsh' }, {}, 'OLD SCRIPT')
+  const newer = '# hubblerc-shell-version: 1\nNEW SCRIPT'
+  files['/home/me/.claude/hubblerc/relaunch.zsh'] = newer
+  files['/home/me/.zshrc'] = '[ -f "$HOME/.claude/hubblerc/relaunch.zsh" ] && source "$HOME/.claude/hubblerc/relaunch.zsh"\n'
+  await start($)
+
+  const ran = ((await $.command.run({ ...COMMAND, command: 'setup' })) as { text?: string }).text ?? ''
+  expect(files['/home/me/.claude/hubblerc/relaunch.zsh']).toBe(newer)
+  expect(ran).toContain('셸 설정(재시작 함수: 사이드바 "재시작"·`/relaunch`, Orca 그림): 설치됨')
 })
 
 test('/setup copies the relaunch function and adds the line to ~/.zshrc, the old one kept; a second run changes nothing', async ($, on) => {

@@ -1,6 +1,10 @@
 # hubblerc의 셸 설정: Orca에서 그림을 켜는 값, 그리고 Claude Code를 새 버전으로 다시 띄우는 셸 함수.
 # `/setup`이 이 파일을 ~/.claude/hubblerc/relaunch.zsh로 복사하고, ~/.zshrc에 불러오는 줄을 넣는다:
 #   source ~/.claude/hubblerc/relaunch.zsh
+#
+# 아래 번호는 이 파일의 판이다. 내용을 바꾸면 올린다: `/setup`은 설치된 판이 같거나 새로우면 덮어쓰지
+# 않아서, 예전 hubblerc로 도는 다른 세션의 `/setup`이 새 파일을 되돌리지 못한다.
+# hubblerc-shell-version: 1
 
 # Orca의 터미널은 그림(kitty 유니코드 placeholder)을 그리지만, Claude Code는 Orca를 그림 되는 터미널로
 # 알아보지 못한다. Orca는 자기 에이전트 실행으로 띄운 Claude에만 이 값을 넣어 주므로, 탭에서 직접 띄울

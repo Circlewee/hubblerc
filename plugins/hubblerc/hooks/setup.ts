@@ -146,10 +146,22 @@ export type RelaunchState = {
   isActive: boolean
 }
 
+/** A shell file's own number (`# hubblerc-shell-version: N`); 0 for one from before the numbers. */
+export function shellVersion(text: string | undefined): number {
+  const found = /^# hubblerc-shell-version: (\d+)$/m.exec(text ?? '')
+
+  return found === null ? 0 : Number(found[1])
+}
+
 export function relaunchState(facts: RelaunchFacts): RelaunchState {
+  const installed = shellVersion(facts.installed)
+  const shipped = shellVersion(facts.shipped)
+
   return {
     isZsh: facts.isZsh,
-    isInstalled: facts.installed === facts.shipped,
+    // A newer copy (put there by a session on a later hubblerc) is left alone: overwritten, sessions
+    // on two versions would each put back their own at every /setup (seen: an older session's undid it).
+    isInstalled: facts.installed !== undefined && (installed > shipped || (installed === shipped && facts.installed === facts.shipped)),
     isSourced: facts.zshrc?.includes(RELAUNCH_MARK) === true,
     hasAlias: /^\s*alias\s+claude=/m.test(facts.zshrc ?? ''),
     isActive: facts.isActive,
