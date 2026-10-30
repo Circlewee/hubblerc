@@ -1,6 +1,6 @@
 {
   "name": "hubblerc",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "description": "hubble's Claude Code environment: mods, skills and hooks in one plugin",
   "author": {
     "name": "hubble"
