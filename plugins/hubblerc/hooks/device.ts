@@ -33,20 +33,29 @@ export async function startDevice($: EngineInterface): Promise<void> {
   await update($, device, () => info)
 
   await readResources($).catch(() => undefined)
-  // Again every 30 seconds while the sidebar shows: nothing else draws them.
+  lastInstalledCheck = Number.NEGATIVE_INFINITY
+  lastLatestCheck = Number.NEGATIVE_INFINITY
+  await checkVersions($).catch(() => undefined)
+  // Again every 30 seconds while the sidebar shows: nothing else draws them. The versions go by the
+  // wall clock, not by a timer of their own: a timer's hour stood still while the Mac slept, so a
+  // version installed in the morning went unseen (2026-10-30).
   $.clock.every(RESOURCE_MS, () => {
     void (async () => {
-      if (await isSidebarShown($)) await readResources($)
+      if (!(await isSidebarShown($))) return
+      await readResources($)
+      await checkVersions($)
     })().catch(() => undefined)
-  })
-  await checkVersions($).catch(() => undefined)
-  $.clock.every(VERSION_CHECK_MS, () => {
-    void checkVersions($).catch(() => undefined)
   })
 }
 
 const RESOURCE_MS = 30_000
-const VERSION_CHECK_MS = 60 * 60_000
+/** How often the versions folder is listed: the auto-update installs there, a restart away. */
+const INSTALLED_CHECK_MS = 5 * 60_000
+/** How often the npm registry is asked for the latest release. */
+const LATEST_CHECK_MS = 60 * 60_000
+/** When each was last read, by the wall clock; reset at session.start. */
+let lastInstalledCheck = Number.NEGATIVE_INFINITY
+let lastLatestCheck = Number.NEGATIVE_INFINITY
 
 /** A command's output, or '' when it failed or did not end in time. */
 async function output($: EngineInterface, argv: string[]): Promise<string> {
@@ -111,9 +120,15 @@ export const CHANGELOG_URL = 'https://github.com/anthropics/claude-code/blob/mai
  * own, one failing keeps what the other found.
  */
 async function checkVersions($: EngineInterface): Promise<void> {
+  const now = await $.clock.now()
+  const isInstalledDue = now - lastInstalledCheck >= INSTALLED_CHECK_MS
+  const isLatestDue = now - lastLatestCheck >= LATEST_CHECK_MS
+  if (!isInstalledDue && !isLatestDue) return
+  if (isInstalledDue) lastInstalledCheck = now
+  if (isLatestDue) lastLatestCheck = now
   const [listed, fetched] = await Promise.all([
-    $.process.run(['sh', '-c', 'ls "$HOME/.local/share/claude/versions" 2>/dev/null'], { timeoutMs: 3000 }).catch(() => undefined),
-    $.http.fetch(LATEST_URL).catch(() => undefined),
+    isInstalledDue ? $.process.run(['sh', '-c', 'ls "$HOME/.local/share/claude/versions" 2>/dev/null'], { timeoutMs: 3000 }).catch(() => undefined) : undefined,
+    isLatestDue ? $.http.fetch(LATEST_URL).catch(() => undefined) : undefined,
   ])
   const installed = newest(listed?.exitCode === 0 ? listed.stdout.split('\n') : [])
   const latest = fetched?.ok === true ? latestVersion(fetched.text) : undefined

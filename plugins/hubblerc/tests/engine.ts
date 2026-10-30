@@ -26,6 +26,8 @@ export type StandIn = {
   /** The files of `~/.local/share/claude/versions`, and what the npm registry calls latest. */
   installedVersions: string[]
   latestVersion: string
+  /** How many times the plugin asked the npm registry. */
+  fetches: number
   /** Every `git status` the plugin ran, its argv. */
   gitStatusArgs: string[][]
   /** The session's name its transcript's last `custom-title` row gives (null: none). */
@@ -46,7 +48,7 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0 }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0 }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } as never }))
@@ -74,7 +76,11 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
 
     return { value: agents as never }
   })
-  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: '@anthropic-ai/claude-code', version: standIn.latestVersion }) } }))
+  on('http.fetch', () => {
+    standIn.fetches += 1
+
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: '@anthropic-ai/claude-code', version: standIn.latestVersion }) } }
+  })
   on('session.version', () => ({ value: { version: '2.1.310', base: '2.1.310' } }))
   on('process.run', (_, e) => {
     // The status hubblerc polls must never take the index lock a person's commit needs.

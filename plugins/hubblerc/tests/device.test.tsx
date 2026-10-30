@@ -331,3 +331,26 @@ test('a current version shows nothing beside it', async ($, on) => {
   expect((await ui.find({ type: 'Text', text: /^Claude Code/ }))?.text).toBe('Claude Code 2.1.310')
   await ui.unmount()
 })
+
+test('while the sidebar shows, a version installed later appears within five minutes; the registry is asked once an hour', async ($, on) => {
+  const standIn = standInForEngine(on)
+  await start($)
+  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
+  const listings = () => standIn.ran.filter(argv => argv[0] === 'sh').length
+  expect(listings()).toBe(1)
+  expect(standIn.fetches).toBe(1)
+
+  standIn.installedVersions = ['2.1.310', '2.1.311']
+  await standIn.clock.advance(4 * 60_000)
+  expect(listings()).toBe(1)
+  await standIn.clock.advance(60_000)
+  expect(listings()).toBe(2)
+  expect(standIn.fetches).toBe(1)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await ui.find({ type: 'Link' }))?.children).toEqual(['2.1.311'])
+  await ui.unmount()
+
+  await standIn.clock.advance(55 * 60_000)
+  expect(standIn.fetches).toBe(2)
+})
