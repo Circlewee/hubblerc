@@ -1,5 +1,14 @@
 import type { EngineInterface } from 'claude-code'
 
+/**
+ * The surfaces drawn by an app, not a terminal: the desktop app, and VS Code [assumed to draw the
+ * same way; not seen]. There a Button is drawn padded, a box's border and its title over the top
+ * border do not show, and half blocks part with a gap between rows (2026-11-05, the desktop app).
+ */
+export function isAppSurface(surface: string): boolean {
+  return surface === 'desktop' || surface === 'vscode'
+}
+
 /** The sidebar's pane, by the id it is opened under. */
 export const SIDEBAR_ID = 'hubblerc'
 export const SIDEBAR_TITLE = 'hubblerc'

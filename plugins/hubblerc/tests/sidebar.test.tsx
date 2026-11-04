@@ -312,7 +312,8 @@ test('the sidebar shows the status, the files changed and the contents', async (
     const ui = await $.ui.mount({ ...PANE, surface, props: PANE_PROPS })
 
     expect((await ui.find({ type: 'Text', text: /^Opus/ }))?.text).toBe('Opus 5.5')
-    expect((await ui.find({ key: 'effort' }))?.text).toBe('xhigh')
+    // A press that opens the slider in the terminal; text in the desktop app.
+    expect((await ui.find(surface === 'terminal' ? { key: 'effort' } : { type: 'Text', text: 'xhigh' }))?.text).toBe('xhigh')
     expect(await ui.find({ type: 'Text', text: '45%' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: /대기 중/ }))?.text).toBe('· 대기 중')
     // The stand-in's git has notes.md in the repository and nothing of it left to commit.

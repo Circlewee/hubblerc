@@ -1,7 +1,7 @@
 import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { completeTurn, IGNORED_TOOLS, noteFiveHourUsed, noteShellChanges, recordRun, startShellWatch, startTurn, trackLines, trackPrompts } from './activity'
+import { completeTurn, isIgnoredTool, noteFiveHourUsed, noteShellChanges, recordRun, startShellWatch, startTurn, trackLines, trackPrompts } from './activity'
 import { rememberAnswer, startAutoEffort } from './auto-effort'
 import { showBand } from './band'
 import { showBashPurpose } from './bash-purpose'
@@ -64,7 +64,7 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
-    if (IGNORED_TOOLS.has(String(e.tool))) return next(e)
+    if (isIgnoredTool(String(e.tool))) return next(e)
 
     const startedAt = await $.clock.now()
     const id = await markRunning($, e, startedAt).catch(() => undefined)

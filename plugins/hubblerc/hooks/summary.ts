@@ -121,7 +121,7 @@ export function fileTotals(runs: readonly ToolRun[]): FileTotal[] {
 /** Tool names with their call counts, most called first, then by name. */
 function countByTool(runs: readonly ToolRun[]): [string, number][] {
   const counts = new Map<string, number>()
-  for (const run of runs) counts.set(run.tool, (counts.get(run.tool) ?? 0) + 1)
+  for (const run of runs) counts.set(shortToolName(run.tool), (counts.get(shortToolName(run.tool)) ?? 0) + 1)
 
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 }
@@ -135,4 +135,9 @@ export function signed(added: number, removed: number): string {
 
 export function basename(path: string): string {
   return path.split('/').pop() || path
+}
+
+/** An MCP tool by its own name, its server's dropped: `mcp__claude_ai_Gmail__search` → `search`. */
+export function shortToolName(tool: string): string {
+  return tool.replace(/^mcp__.+?__/, '')
 }

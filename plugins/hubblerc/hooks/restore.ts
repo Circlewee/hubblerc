@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, SessionMessage, ToolCallResult, ToolUseSummary } from 'claude-code'
 
 import type { ToolRun, TurnRecord } from '../types'
-import { describeRun, IGNORED_TOOLS, MAX_RUNS_PER_TURN, MAX_TURNS, promptKey, promptLabel } from './activity'
+import { describeRun, isIgnoredTool, MAX_RUNS_PER_TURN, MAX_TURNS, promptKey, promptLabel } from './activity'
 import { restoreSnapshot } from './relaunch'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
@@ -72,7 +72,7 @@ async function rebuildTurns($: EngineInterface): Promise<TurnRecord[]> {
       agentsRead += 1
       const found = await $.session.messages({ agentId }).catch(() => undefined)
       if (!Array.isArray(found)) continue
-      const uses = found.flatMap(message => message.toolUses).filter(use => !IGNORED_TOOLS.has(use.tool))
+      const uses = found.flatMap(message => message.toolUses).filter(use => !isIgnoredTool(use.tool))
       for (const use of uses) if (turn.runs.length < MAX_RUNS_PER_TURN) turn.runs.push(runFromUse(use, agentId))
     }
   }
@@ -130,7 +130,7 @@ export function turnsFromTranscript(sent: readonly ApiLike[], rows: readonly Ses
 
       const id = String(block.id ?? '')
       const tool = String(block.name ?? '')
-      if (IGNORED_TOOLS.has(tool)) continue
+      if (isIgnoredTool(tool)) continue
       const input = typeof block.input === 'object' && block.input !== null ? (block.input as Record<string, unknown>) : {}
       const use: ToolUseSummary = stored.get(id) ?? { tool_use_id: id, tool, input, ...(failed.has(id) ? { isError: true as const } : {}) }
       if (turn.runs.length < MAX_RUNS_PER_TURN) turn.runs.push(runFromUse(use))

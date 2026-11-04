@@ -616,7 +616,7 @@ test('a press on an item\'s text edits it below: Enter saves, empty cancels, the
 
   await ui.press({ key: 'todo-text-1' })
   const field = await editField(ui, 1)
-  expect(field?.props).toMatchObject({ value: '일 1', label: '1번 수정 ', submitLabel: '저장' })
+  expect(field?.props).toMatchObject({ value: '일 1', label: '수정 중 ', submitLabel: '저장' })
   expect(await ui.find({ key: 'todo-input' })).toBeUndefined()
   // The row edited stands out.
   expect((await ui.find({ type: 'Text', text: ' 일 1' }))?.props).toMatchObject({ bold: true })

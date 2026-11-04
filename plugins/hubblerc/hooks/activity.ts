@@ -12,6 +12,14 @@ export const MAX_RUNS_PER_TURN = 400
 /** Calls the engine makes for its own bookkeeping, not work the person would count. */
 export const IGNORED_TOOLS = new Set(['SubagentHandback'])
 
+/**
+ * Whether a call is left out of the record, the summaries and line 2: the engine's bookkeeping, and
+ * the desktop app's own tools (`mcp__ccd_turn__update_plan`, `mcp__ccd_turn__wrap_up`, 2026-11-05).
+ */
+export function isIgnoredTool(tool: string): boolean {
+  return IGNORED_TOOLS.has(tool) || tool.startsWith('mcp__ccd_')
+}
+
 /** The session's main-loop turns, oldest first, each with the tool calls made while it ran. */
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const usage = atom({ plugin: 'hubblerc', key: 'usage' } as const, null)

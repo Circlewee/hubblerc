@@ -21,7 +21,10 @@ test('the band shows the model, effort, usage and branch, then idle, then no ans
     const ui = await $.ui.mount({ ...BAND, surface, props: BAND_PROPS })
 
     expect((await ui.find({ type: 'Text', text: /^Opus/ }))?.text).toBe('Opus 5.5')
-    expect((await ui.find({ key: 'effort' }))?.text).toBe('xhigh')
+    // A press that opens the slider in the terminal; text in the desktop app (its button padded the value apart).
+    if (surface === 'terminal') expect((await ui.find({ key: 'effort' }))?.text).toBe('xhigh')
+    else expect(await ui.find({ key: 'effort' })).toBeUndefined()
+    expect((await ui.find({ type: 'Text', text: 'xhigh' }))?.text).toBe('xhigh')
     expect(await ui.find({ type: 'Text', text: '45%' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: /↻/ }))?.text).toBe(' ↻1h30m')
     expect(await ui.find({ type: 'Text', text: '7d ' })).toBeDefined()

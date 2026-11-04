@@ -5,6 +5,7 @@ import type { EffortLevel } from '../types'
 import { activityParts, COLORS, EFFORT_LEVELS, lastAnswer, requestSegments, SEPARATOR, statusParts, textStyle } from './band-format'
 import type { Segment } from './band-format'
 import { choose, EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
+import { isAppSurface } from './pane'
 import { burnoutMinutes, requestTime } from './forecast'
 import { syncSidebar } from './sidebar'
 import type { Layout } from './sidebar'
@@ -146,7 +147,9 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
           {line1.map((part, i) => [
             i > 0 && <Text dimColor>{SEPARATOR}</Text>,
             part.map(segment =>
-              segment.role === 'effort' ? (
+              // In the desktop app a Button is drawn as a button, padded: the value stands apart there
+              // (2026-11-05). The app has an effort control of its own; the slider is the terminal's.
+              segment.role === 'effort' && !isAppSurface(e.surface) ? (
                 <Button
                   key="effort"
                   plain

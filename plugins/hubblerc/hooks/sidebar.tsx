@@ -7,7 +7,7 @@ import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
-import { isSidebarShown, SIDEBAR_COLUMNS, SIDEBAR_ID, SIDEBAR_TITLE } from './pane'
+import { isAppSurface, isSidebarShown, SIDEBAR_COLUMNS, SIDEBAR_ID, SIDEBAR_TITLE } from './pane'
 import { catImageAt } from './cat-images'
 import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } from './pixel-art'
 import { requestRestart } from './relaunch'
@@ -333,6 +333,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     await read($, userTodoVersion)
     const userTodos = sortTodos(await todosForDrawing($))
 
+    // The desktop app (and VS Code): no cat, no borders, the effort value as text (`isAppSurface`).
+    const isApp = isAppSurface(e.surface)
     const elements = $.ui.resolve(e)
     const { Box, Text, Button, Link } = elements
     // The field the to-do tab writes with: absent where the surface draws none (mobile).
@@ -398,6 +400,25 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       const isFolded = foldedIds.includes(id)
       const { element: heading, cells } = typeof title === 'string' ? titleHeading(id, title, isFolded) : title(isFolded)
 
+      // The app draws no border and no title over one: the title on its own row, a dim rule under it.
+      if (isApp) {
+        return (
+          <Box key={`box-${id}`} flexDirection="column">
+            <Box key={`title-${id}`}>{heading}</Box>
+            {isFolded ? null : (
+              <Text key={`rule-${id}`} dimColor wrap="truncate-end">
+                {'─'.repeat(width)}
+              </Text>
+            )}
+            {isFolded ? null : (
+              <Box flexDirection="column" paddingX={1}>
+                {body}
+              </Box>
+            )}
+          </Box>
+        )
+      }
+
       if (isFolded) {
         const rule = Math.max(0, width - 3 - cells)
 
@@ -440,12 +461,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // As a picture, the cat keeps its pixels square in a box as tall as the lines beside it: the
     // PNGs in assets/cat for the mood (a frame a second) where there are some, else the art drawn
     // as one. In half blocks it takes a cell for two pixels and stands above the lines.
-    const ownImage = Image === undefined ? undefined : (catImageAt(mood, second) ?? undefined)
+    // The app draws no cat: it has no Image, and its rows part the half blocks into stripes.
+    const ownImage = Image === undefined || isApp ? undefined : (catImageAt(mood, second) ?? undefined)
     const artSize = ownImage ?? pixelSize(cat.art)
-    const picture = Image === undefined ? null : ownImage !== undefined ? { png: ownImage.png } : pixelPicture(cat.art, CAT_PALETTE)
+    const picture = Image === undefined || isApp ? null : ownImage !== undefined ? { png: ownImage.png } : pixelPicture(cat.art, CAT_PALETTE)
     const pictureColumns = Math.max(1, Math.round((PICTURE_ROWS * 2 * artSize.width) / Math.max(1, artSize.height)))
     drawnPicture = picture === null ? null : { source: picture, columns: pictureColumns, rows: PICTURE_ROWS }
-    const catRows = picture === null ? pixelRows(cat.art, CAT_PALETTE) : []
+    const catRows = picture === null && !isApp ? pixelRows(cat.art, CAT_PALETTE) : []
     const mark = (
       // Beside the head: z, ?, !; a column of its own, so nothing moves. Over the blocks' empty last
       // column; a picture's cells are its own.
@@ -460,7 +482,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       '장비',
       // A row of air above and below: the cat and its lines sit apart from the borders.
       <Box key="device-body" {...(picture === null ? { flexDirection: 'column' as const, rowGap: 1 } : { columnGap: 2 })} paddingY={1}>
-        {picture !== null && Image !== undefined ? (
+        {isApp ? null : picture !== null && Image !== undefined ? (
           <Box key="cat" flexShrink={0}>
             <Image key={PICTURE_KEY} source={picture} columns={pictureColumns} rows={PICTURE_ROWS} alt=" " />
             {mark}
@@ -533,7 +555,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         {status.map((part, i) => (
           <Box key={`status-${i}`}>
             {part.map((segment, j) =>
-              segment.role === 'effort' ? (
+              segment.role === 'effort' && !isApp ? (
                 <Button
                   key="effort"
                   plain
@@ -655,7 +677,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const isContentsOpen = !foldedIds.includes('contents')
     const above =
       // Air above and below; a picture beside the lines, or blocks above them with a row between.
-      boxRows('device', 2 + (picture === null ? catRows.length + 1 + deviceText : Math.max(PICTURE_ROWS, deviceText))) +
+      boxRows('device', 2 + (isApp ? deviceText : picture === null ? catRows.length + 1 + deviceText : Math.max(PICTURE_ROWS, deviceText))) +
       boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1) + (likelyLine === '' ? 0 : 1)) +
       boxRows('activity', activity.length) +
       (files.length === 0 ? 0 : boxRows('files', 0)) +
@@ -898,7 +920,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         {Input === undefined ? null : edited !== null ? (
           <Input
             key={editFieldKey()}
-            label={`${edited.id}번 수정 `}
+            label="수정 중 "
             value={edited.text}
             placeholder="비우고 Enter면 취소"
             submitLabel="저장"
