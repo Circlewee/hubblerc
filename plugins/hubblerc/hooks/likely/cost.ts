@@ -67,7 +67,7 @@ export type Spend = {
   warnedPeriod?: string
 }
 
-/** The decide options' figures the limits are checked against. */
+/** The likely options' figures the limits are checked against. */
 export type Limits = { dailyCapUsd: number; budgetUsd: number; periodStartDay: number }
 
 /** The local date of a time, `2026-11-04`. */
@@ -134,9 +134,9 @@ export function dollars(usd: number): string {
   return Number.isInteger(usd) ? `$${usd}` : `$${usd.toFixed(2)}`
 }
 
-/** The sidebar's line: `판정 오늘 12건 · 이번 달 $0.42 / $100`. */
+/** The sidebar's line: `likely 오늘 12건 · 이번 달 $0.42 / $100`. */
 export function statusLine(status: { todayCount: number; periodUsd: number; budgetUsd: number }): string {
-  return `판정 오늘 ${status.todayCount}건 · 이번 달 $${status.periodUsd.toFixed(2)} / ${dollars(status.budgetUsd)}`
+  return `likely 오늘 ${status.todayCount}건 · 이번 달 $${status.periodUsd.toFixed(2)} / ${dollars(status.budgetUsd)}`
 }
 
 function daysIn(year: number, month: number): number {

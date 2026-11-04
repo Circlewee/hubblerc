@@ -1,7 +1,7 @@
 /**
  * The decision log: one JSON line a decision in a machine's own `<machine>.jsonl`, and the answer
  * that turned out true appended later as a line of its own (the file is only ever appended to).
- * Read back for `/decide stats`. Pure: the engine side writes and reads the files.
+ * Read back for `/likely stats`. Pure: the engine side writes and reads the files.
  */
 import type { Tokens } from './cost'
 import type { Answer, CallLayout, Question } from './method'
@@ -94,7 +94,7 @@ export function utf8Length(text: string): number {
   return bytes
 }
 
-/** A decision as `/decide stats` reads it, with what came true when an outcome line was found. */
+/** A decision as `/likely stats` reads it, with what came true when an outcome line was found. */
 export type LoggedDecision = {
   id: string
   task: string

@@ -2,9 +2,9 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { bashInput, bashOutcome, BASH_TASK, THINKING_EVERY } from '../hooks/decide/bash-fail'
-import { addSpend, costOf, limitReached, localDay, periodStart, spendAt, statusLine } from '../hooks/decide/cost'
-import { decideOptions } from '../hooks/decide/decide'
+import { bashInput, bashOutcome, BASH_TASK, THINKING_EVERY } from '../hooks/likely/bash-fail'
+import { addSpend, costOf, limitReached, localDay, periodStart, spendAt, statusLine } from '../hooks/likely/cost'
+import { likelyOptions } from '../hooks/likely/likely'
 import {
   answerLength,
   clip,
@@ -19,9 +19,9 @@ import {
   seededRandom,
   shuffledOrder,
   toDistribution,
-} from '../hooks/decide/method'
-import type { Question } from '../hooks/decide/method'
-import { calibrationOf, maskSecrets, predicatePairs, readLog, safeFileName, taskCounts, utf8Length } from '../hooks/decide/record'
+} from '../hooks/likely/method'
+import type { Question } from '../hooks/likely/method'
+import { calibrationOf, maskSecrets, predicatePairs, readLog, safeFileName, taskCounts, utf8Length } from '../hooks/likely/record'
 import { messageReply, NOW, standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
 
@@ -29,7 +29,7 @@ const KEY = 'sk-ant-api03-test-key-0000'
 const WITH_KEY = { options: { anthropicApiKey: KEY } }
 const HOME = '/home/me'
 const ICLOUD = `${HOME}/Library/Mobile Documents/com~apple~CloudDocs`
-const LOG = `${HOME}/.claude/hubblerc/decide/Test-Mac.jsonl`
+const LOG = `${HOME}/.claude/hubblerc/likely/Test-Mac.jsonl`
 const COMMAND = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const
 const PANE_PROPS = { title: 'hubblerc', isFocused: false, bodyColumns: 56, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 60 }, view: {} }
@@ -94,9 +94,9 @@ function knowingModel(truth: { predicate?: number; options?: Record<string, numb
 const near = (value: number | undefined, digits: number) => Math.round((value ?? Number.NaN) * 10 ** digits) / 10 ** digits
 
 /** The decisions line of the sidebar's status box, or undefined when it has none. */
-async function decideLineShown($: Engine): Promise<string | undefined> {
+async function likelyLineShown($: Engine): Promise<string | undefined> {
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  const found = (await pane.find({ type: 'Text', text: /^판정 오늘/ }))?.text
+  const found = (await pane.find({ type: 'Text', text: /^likely 오늘/ }))?.text
   await pane.unmount()
 
   return found
@@ -112,8 +112,8 @@ async function bash($: Engine, command: string, extra: Record<string, unknown> =
   return $.tool.call({ tool: 'Bash', command, description: '테스트 실행', ...extra } as never)
 }
 
-async function decideCommand($: Engine, args: string): Promise<string> {
-  return (await $.command.run({ command: 'decide', args, ...COMMAND })).text ?? ''
+async function likelyCommand($: Engine, args: string): Promise<string> {
+  return (await $.command.run({ command: 'likely', args, ...COMMAND })).text ?? ''
 }
 
 // ── The method, pure ──────────────────────────────────────────────
@@ -235,12 +235,12 @@ test('a budget period starts on its day, or a short month\'s last; a new day and
   expect(limitReached(kept, { dailyCapUsd: 5, budgetUsd: 4, periodStartDay: 1 })).toBe('budget')
   expect(limitReached(kept, { dailyCapUsd: 5, budgetUsd: 100, periodStartDay: 1 })).toBeNull()
   expect(localDay(now)).toBe('2026-11-04')
-  expect(statusLine({ todayCount: 12, periodUsd: 0.4238, budgetUsd: 100 })).toBe('판정 오늘 12건 · 이번 달 $0.42 / $100')
+  expect(statusLine({ todayCount: 12, periodUsd: 0.4238, budgetUsd: 100 })).toBe('likely 오늘 12건 · 이번 달 $0.42 / $100')
 })
 
 test('the options: no key, the default caps, a start day held to 1-31', () => {
-  expect(decideOptions({})).toEqual({ apiKey: '', model: 'claude-haiku-5-5', dailyCapUsd: 5, budgetUsd: 100, periodStartDay: 1, logDir: '' })
-  expect(decideOptions({ anthropicApiKey: ' k ', decidePeriodStartDay: 40, decideDailyCapUsd: -1, decideModel: '' })).toMatchObject({ apiKey: 'k', periodStartDay: 31, dailyCapUsd: 5, model: 'claude-haiku-5-5' })
+  expect(likelyOptions({})).toEqual({ apiKey: '', model: 'claude-haiku-5-5', dailyCapUsd: 5, budgetUsd: 100, periodStartDay: 1, logDir: '' })
+  expect(likelyOptions({ anthropicApiKey: ' k ', likelyPeriodStartDay: 40, likelyDailyCapUsd: -1, likelyModel: '' })).toMatchObject({ apiKey: 'k', periodStartDay: 31, dailyCapUsd: 5, model: 'claude-haiku-5-5' })
 })
 
 test('what looks like a secret is masked; paths, short hashes and words stay', () => {
@@ -332,7 +332,7 @@ test('a decision: five calls at once with the key, no sampling, thinking off, on
   const store = machine(on, standIn)
   standIn.anthropic = knowingModel({ predicate: 0.7 })
   await start($)
-  const shown = await decideCommand($, 'test 사과는 빨갛다')
+  const shown = await likelyCommand($, '사과는 빨갛다')
 
   expect(standIn.anthropicCalls.length).toBe(5)
   for (const call of standIn.anthropicCalls) {
@@ -347,19 +347,19 @@ test('a decision: five calls at once with the key, no sampling, thinking off, on
   // Two of the five ask the predicate as "no"; the answer is the same.
   const prompts = standIn.anthropicCalls.map(call => (call.body.messages as { content: string }[])[0]?.content ?? '')
   expect(prompts.filter(prompt => prompt.includes('answer is NO')).length).toBe(2)
-  expect(shown).toContain('참일 확률 0.70 (참) · 호출 5/5')
+  expect(shown).toContain('likely: 예일 확률 0.70 (예) · 호출 5/5')
   expect(shown).toContain(`비용 $${(5 * costOf({ input: 300, output: 20, cacheRead: 0, cacheWrite: 0 })).toFixed(5)}`)
   expect(shown).toContain('토큰: 입력 1500 · 출력 100')
 
   // One line in this machine's log (no iCloud Drive here), the spend in the store.
   const [line] = lines(standIn)
-  expect(line).toMatchObject({ type: 'decision', task: 'test', methodVersion: METHOD_VERSION, model: 'claude-haiku-5-5', samples: 5, thinking: false, effort: 'low', input: '사과는 빨갛다', outcome: null })
-  expect(line?.answers).toEqual([{ type: 'predicate', name: 'true', probability: 0.7, value: true }])
+  expect(line).toMatchObject({ type: 'decision', task: 'ask', methodVersion: METHOD_VERSION, model: 'claude-haiku-5-5', samples: 5, thinking: false, effort: 'low', input: '사과는 빨갛다', outcome: null })
+  expect(line?.answers).toEqual([{ type: 'predicate', name: 'yes', probability: 0.7, value: true }])
   expect((line?.calls as { distributions: number[][] }[]).map(call => call.distributions)).toEqual(new Array(5).fill([[0.7]]))
-  expect(store.decideSpend).toMatchObject({ dayCount: 1, periodCount: 1 })
+  expect(store.likelySpend).toMatchObject({ dayCount: 1, periodCount: 1 })
 })
 
-test('with iCloud Drive on, the log goes to its hubblerc/decide folder', WITH_KEY, async ($, on) => {
+test('with iCloud Drive on, the log goes to its hubblerc/likely folder', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn)
   standIn.existing.push(ICLOUD)
@@ -367,7 +367,7 @@ test('with iCloud Drive on, the log goes to its hubblerc/decide folder', WITH_KE
   await start($)
   await bash($, 'ls')
   await standIn.clock.settle()
-  expect(lines(standIn, `${ICLOUD}/hubblerc/decide/Test-Mac.jsonl`).map(line => line.type)).toEqual(['decision', 'outcome'])
+  expect(lines(standIn, `${ICLOUD}/hubblerc/likely/Test-Mac.jsonl`).map(line => line.type)).toEqual(['decision', 'outcome'])
 })
 
 test('some calls failing, the rest decide; all failing is an error; all refusing answers a refusal', WITH_KEY, async ($, on) => {
@@ -382,32 +382,88 @@ test('some calls failing, the rest decide; all failing is an error; all refusing
 
     return knowingModel({ predicate: 0.6 })(body)
   }
-  const partly = await decideCommand($, 'test 하나')
-  expect(partly).toContain('참일 확률 0.60 (참) · 호출 3/5')
+  const partly = await likelyCommand($, '하나')
+  expect(partly).toContain('예일 확률 0.60 (예) · 호출 3/5')
   expect(partly).toContain('실패(HTTP 529 overloaded_error: Overloaded) · 실패(HTTP 529 overloaded_error: Overloaded) · 0.60 · 0.60 · 0.60')
 
   standIn.anthropic = () => ({ status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } } })
-  expect(await decideCommand($, 'test 둘')).toContain('판정 호출 5개가 모두 실패했습니다: HTTP 401 authentication_error: invalid x-api-key')
+  expect(await likelyCommand($, '둘')).toContain('판정 호출 5개가 모두 실패했습니다: HTTP 401 authentication_error: invalid x-api-key')
 
   standIn.anthropic = () => messageReply('', { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber' } })
-  const refused = await decideCommand($, 'test 셋')
+  const refused = await likelyCommand($, '셋')
   expect(refused).toContain('모든 호출이 거절했습니다 · 호출 0/5')
   expect(refused).toContain('거절 · 거절 · 거절 · 거절 · 거절')
   // A failed decision is not counted, but what its calls cost is (the refusals' tokens here).
-  expect(store.decideSpend).toMatchObject({ dayCount: 2 })
+  expect(store.likelySpend).toMatchObject({ dayCount: 2 })
   expect(lines(standIn).map(line => line.input)).toEqual(['하나', '셋'])
 })
 
-test('with no key nothing is decided: no call, no log, no line in the sidebar', async ($, on) => {
+test('with no key in the options or the keychain nothing is decided: no call, no log, no line; /likely says how to add one', async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn)
   await start($)
+  expect(standIn.keychainReads).toBe(1)
   await bash($, 'ls')
+  await bash($, 'pwd')
   await standIn.clock.settle()
+  // A Bash call never asks the keychain again.
+  expect(standIn.keychainReads).toBe(1)
   expect(standIn.anthropicCalls.length).toBe(0)
   expect(standIn.files).toEqual({})
-  expect(await decideLineShown($)).toBeUndefined()
-  expect(await decideCommand($, 'test 하늘은 파랗다')).toContain('API 키가 설정되지 않아')
+  expect(await likelyLineShown($)).toBeUndefined()
+  const said = await likelyCommand($, '하늘은 파랗다')
+  expect(said).toContain('API 키가 없어 판정하지 않습니다')
+  expect(said).toContain('security add-generic-password -s hubblerc-likely -a "$USER" -w')
+  expect(said).toContain('/plugin configure hubblerc@hubblerc')
+})
+
+test('a key in the keychain is read once as the session starts and used; it is kept nowhere but the module', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const store = machine(on, standIn)
+  const secret = 'sk-ant-api03-from-keychain-9999'
+  standIn.keychain = secret
+  standIn.anthropic = knowingModel({ predicate: 0.4 })
+  await start($)
+  await bash($, 'ls')
+  await bash($, 'pwd')
+  await standIn.clock.settle()
+
+  expect(standIn.keychainReads).toBe(1)
+  expect(standIn.anthropicCalls.length).toBe(10)
+  expect(standIn.anthropicCalls.every(call => call.headers['x-api-key'] === secret)).toBe(true)
+  expect(JSON.stringify(store)).not.toContain(secret)
+  expect(Object.values(standIn.files).join('')).not.toContain(secret)
+  expect(await likelyLineShown($)).toBe('likely 오늘 2건 · 이번 달 $0.00 / $100')
+  expect(await likelyCommand($, '')).toContain('API 키: 키체인에서')
+})
+
+test('the options\' key comes first: the keychain is not asked', WITH_KEY, async ($, on) => {
+  const standIn = standInForEngine(on)
+  machine(on, standIn)
+  standIn.keychain = 'sk-ant-api03-from-keychain-9999'
+  standIn.anthropic = knowingModel({ predicate: 0.4 })
+  await start($)
+  await bash($, 'ls')
+  await standIn.clock.settle()
+  expect(standIn.keychainReads).toBe(0)
+  expect(standIn.anthropicCalls.every(call => call.headers['x-api-key'] === KEY)).toBe(true)
+  expect(await likelyCommand($, '')).toContain('API 키: 설정에서')
+})
+
+test('a key added to the keychain mid-session works from the next /likely, no reload', async ($, on) => {
+  const standIn = standInForEngine(on)
+  machine(on, standIn)
+  standIn.anthropic = knowingModel({ predicate: 0.8 })
+  await start($)
+  expect(await likelyCommand($, '하나')).toContain('API 키가 없어')
+  standIn.keychain = 'sk-ant-api03-added-later-0000'
+  expect(await likelyCommand($, '둘')).toContain('likely: 예일 확률 0.80 (예)')
+  expect(standIn.anthropicCalls[0]?.headers['x-api-key']).toBe('sk-ant-api03-added-later-0000')
+  // From then on a Bash call is predicted too.
+  await bash($, 'ls')
+  await standIn.clock.settle()
+  expect(standIn.anthropicCalls.length).toBe(10)
+  expect(standIn.keychainReads).toBe(3)
 })
 
 // ── Bash failure prediction ───────────────────────────────────────
@@ -431,7 +487,7 @@ test('a Bash call is predicted in the background; the command does not wait, and
   expect(String(decision?.input)).toContain('Command:\nfalse')
   expect(String(decision?.input)).toContain('What it is for: 테스트 실행')
   expect(String(decision?.input)).toContain('Working folder: /repo/hubblerc')
-  expect(await decideLineShown($)).toMatch(/^판정 오늘 1건 · 이번 달 \$0\.00 \/ \$100$/)
+  expect(await likelyLineShown($)).toMatch(/^likely 오늘 1건 · 이번 달 \$0\.00 \/ \$100$/)
 })
 
 test('a command that answered is not failed; one refused, or run in the background, has no outcome to learn', WITH_KEY, async ($, on) => {
@@ -496,7 +552,7 @@ test('a secret in a command is masked before it is sent and logged', WITH_KEY, a
 test('at the runaway cap nothing is decided for the day, and a toast says so once', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
   const today = localDay(NOW)
-  const store = machine(on, standIn, { decideSpend: { day: today, dayUsd: 5, dayCount: 4000, period: periodStart(NOW, 1), periodUsd: 12, periodCount: 9000 } })
+  const store = machine(on, standIn, { likelySpend: { day: today, dayUsd: 5, dayCount: 4000, period: periodStart(NOW, 1), periodUsd: 12, periodCount: 9000 } })
   await start($)
   await bash($, 'ls')
   await bash($, 'pwd')
@@ -505,13 +561,13 @@ test('at the runaway cap nothing is decided for the day, and a toast says so onc
   const toasts = standIn.toasts.map(toast => JSON.stringify(toast)).filter(text => text.includes('폭주 방지 상한'))
   expect(toasts.length).toBe(1)
   expect(toasts[0]).toContain('하루 $5')
-  expect(store.decideSpend).toMatchObject({ warnedDay: today })
-  expect(await decideCommand($, 'test 하늘은 파랗다')).toContain('폭주 방지 상한')
+  expect(store.likelySpend).toMatchObject({ warnedDay: today })
+  expect(await likelyCommand($, '하늘은 파랗다')).toContain('폭주 방지 상한')
 })
 
-test('past the period\'s budget nothing is decided till the next period, with one toast', { options: { anthropicApiKey: KEY, decideMonthlyBudgetUsd: 10, decidePeriodStartDay: 15 } }, async ($, on) => {
+test('past the period\'s budget nothing is decided till the next period, with one toast', { options: { anthropicApiKey: KEY, likelyMonthlyBudgetUsd: 10, likelyPeriodStartDay: 15 } }, async ($, on) => {
   const standIn = standInForEngine(on)
-  machine(on, standIn, { decideSpend: { day: localDay(NOW), dayUsd: 0.5, dayCount: 1, period: periodStart(NOW, 15), periodUsd: 10, periodCount: 9 } })
+  machine(on, standIn, { likelySpend: { day: localDay(NOW), dayUsd: 0.5, dayCount: 1, period: periodStart(NOW, 15), periodUsd: 10, periodCount: 9 } })
   await start($)
   await bash($, 'ls')
   await bash($, 'ls')
@@ -523,29 +579,34 @@ test('past the period\'s budget nothing is decided till the next period, with on
   expect(toasts[0]).toContain('매달 15일')
 })
 
-// ── /decide and the sidebar ──────────────────────────────────────
+// ── /likely and the sidebar ──────────────────────────────────────
 
-test('/decide alone tells how to use it; test decides one statement and shows each call', WITH_KEY, async ($, on) => {
+test('/likely alone tells how to use it; any other text is one question, decided and shown call by call', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn)
   standIn.anthropic = knowingModel({ predicate: 0.9 })
   await start($)
-  expect(standIn.commands.find(command => command.name === 'decide')).toMatchObject({ immediate: true })
+  expect(standIn.commands.find(command => command.name === 'likely')).toMatchObject({ immediate: true, argumentHint: '<질문> | stats [task] | export' })
 
-  const usage = await decideCommand($, '')
-  expect(usage).toContain('/decide stats [task]')
-  expect(usage).toContain('API 키: 설정됨')
+  const usage = await likelyCommand($, '')
+  expect(usage).toContain('/likely <질문이나 글>')
+  expect(usage).toContain('/likely stats [task]')
+  expect(usage).toContain('/likely export')
+  expect(usage).toContain('API 키: 설정에서')
+  expect(usage).toContain('security add-generic-password -s hubblerc-likely')
+  expect(standIn.anthropicCalls.length).toBe(0)
 
-  const shown = await decideCommand($, 'test 서울은 한국의 수도다')
-  expect(shown).toContain('참일 확률 0.90 (참)')
+  const shown = await likelyCommand($, '이 명령은 실패할까: ls /없는경로')
+  expect(shown).toContain('likely: 예일 확률 0.90 (예)')
   expect(shown).toContain('호출 5/5')
-  expect(shown).toContain('호출별 참일 확률: 0.90 · 0.90 · 0.90 · 0.90 · 0.90')
+  expect(shown).toContain('호출별 예일 확률: 0.90 · 0.90 · 0.90 · 0.90 · 0.90')
   expect(shown).toContain(`기록: ${LOG}`)
-  expect(lines(standIn)[0]).toMatchObject({ task: 'test', input: '서울은 한국의 수도다' })
-  expect(await decideCommand($, 'test')).toContain('판정할 글을 적어 주세요')
+  expect(lines(standIn)[0]).toMatchObject({ task: 'ask', input: '이 명령은 실패할까: ls /없는경로', questions: [{ type: 'predicate', name: 'yes' }] })
+  const prompt = (standIn.anthropicCalls[0]?.body.messages as { content: string }[])[0]?.content ?? ''
+  expect(prompt).toContain('<input>\n이 명령은 실패할까: ls /없는경로\n</input>')
 })
 
-test('/decide stats counts by task, tells the spend, and scores bash-fail\'s calibration, thinking apart', WITH_KEY, async ($, on) => {
+test('/likely stats counts by task, tells the spend, and scores bash-fail\'s calibration, thinking apart', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn)
   standIn.anthropic = knowingModel({ predicate: 0.8 })
@@ -554,9 +615,9 @@ test('/decide stats counts by task, tells the spend, and scores bash-fail\'s cal
   await bash($, 'ls')
   await standIn.clock.settle()
   // Another machine's log in the same folder counts too.
-  standIn.files[`${HOME}/.claude/hubblerc/decide/Studio.jsonl`] = `${JSON.stringify({ type: 'decision', id: 'x1', task: BASH_TASK, methodVersion: METHOD_VERSION, thinking: true, costUsd: 0, answers: [{ type: 'predicate', name: 'fails', probability: 0.15, value: false }] })}\n${JSON.stringify({ type: 'outcome', id: 'x1', outcome: false })}\n`
+  standIn.files[`${HOME}/.claude/hubblerc/likely/Studio.jsonl`] = `${JSON.stringify({ type: 'decision', id: 'x1', task: BASH_TASK, methodVersion: METHOD_VERSION, thinking: true, costUsd: 0, answers: [{ type: 'predicate', name: 'fails', probability: 0.15, value: false }] })}\n${JSON.stringify({ type: 'outcome', id: 'x1', outcome: false })}\n`
 
-  const stats = await decideCommand($, 'stats')
+  const stats = await likelyCommand($, 'stats')
   expect(stats).toContain('파일 2개')
   expect(stats).toMatch(/bash-fail\s+3건 \(3\)/)
   expect(stats).toContain('비용(이 기기): 오늘 2건')
@@ -567,30 +628,30 @@ test('/decide stats counts by task, tells the spend, and scores bash-fail\'s cal
   expect(stats).toContain('0.8~0.9       2   0.80    0.50')
   expect(stats).toContain('thinking 끔: 2건')
   expect(stats).toContain('thinking low: 1건')
-  expect(await decideCommand($, 'stats test')).toContain('test 판정이 없습니다')
+  expect(await likelyCommand($, 'stats test')).toContain('test 판정이 없습니다')
 })
 
-test('/decide export zips the log folder into Downloads', WITH_KEY, async ($, on) => {
+test('/likely export zips the log folder into Downloads', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn)
   standIn.existing.push(`${HOME}/Downloads`)
   standIn.anthropic = knowingModel({ predicate: 0.5 })
   await start($)
-  expect(await decideCommand($, 'export')).toContain('판정 기록이 아직 없습니다')
+  expect(await likelyCommand($, 'export')).toContain('판정 기록이 아직 없습니다')
   await bash($, 'ls')
   await standIn.clock.settle()
-  const said = await decideCommand($, 'export')
-  expect(said).toMatch(/^판정 기록을 묶었습니다: \/home\/me\/Downloads\/hubblerc-decide-\d{8}-\d{6}\.zip$/)
+  const said = await likelyCommand($, 'export')
+  expect(said).toMatch(/^판정 기록을 묶었습니다: \/home\/me\/Downloads\/hubblerc-likely-\d{8}-\d{6}\.zip$/)
   const zip = standIn.ran.find(argv => argv[0] === '/usr/bin/zip')
   expect(zip?.slice(1, 4)).toEqual(['-r', '-q', '-X'])
-  expect(zip?.slice(5)).toEqual(['decide', `cwd=${HOME}/.claude/hubblerc`])
+  expect(zip?.slice(5)).toEqual(['likely', `cwd=${HOME}/.claude/hubblerc`])
 })
 
 test('with a key, the sidebar\'s status box ends with today\'s decisions and the month\'s spend against the budget', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
-  machine(on, standIn, { decideSpend: { day: localDay(NOW), dayUsd: 0.01, dayCount: 7, period: periodStart(NOW, 1), periodUsd: 3.456, periodCount: 70 } })
+  machine(on, standIn, { likelySpend: { day: localDay(NOW), dayUsd: 0.01, dayCount: 7, period: periodStart(NOW, 1), periodUsd: 3.456, periodCount: 70 } })
   await start($)
-  expect(await decideLineShown($)).toBe('판정 오늘 7건 · 이번 달 $3.46 / $100')
+  expect(await likelyLineShown($)).toBe('likely 오늘 7건 · 이번 달 $3.46 / $100')
 })
 
 test('a log past the 3 MiB a read takes at once is read in pieces of whole lines, a Korean character cut at the edge included', WITH_KEY, async ($, on) => {
@@ -603,8 +664,8 @@ test('a log past the 3 MiB a read takes at once is read in pieces of whole lines
 
     return `${JSON.stringify(decision)}\n${JSON.stringify({ type: 'outcome', id: `b${i}`, outcome: i % 3 === 0 })}\n`
   }).join('')
-  standIn.files[`${HOME}/.claude/hubblerc/decide/Mini.jsonl`] = big
-  const stats = await decideCommand($, 'stats')
+  standIn.files[`${HOME}/.claude/hubblerc/likely/Mini.jsonl`] = big
+  const stats = await likelyCommand($, 'stats')
   expect(stats).toMatch(/bash-fail\s+700건 \(700\)/)
   expect(stats).toContain('전체: 700건')
   const pieces = standIn.ran.filter(argv => argv[0] === '/bin/sh' && argv[2]?.includes('| head -c'))

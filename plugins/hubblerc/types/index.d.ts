@@ -171,8 +171,8 @@ export type GitInfo = {
   ignored?: string[]
 }
 
-/** What the sidebar's status box shows of decisions (`hooks/decide/`): this machine's totals, read from `$.store`. */
-export type DecideStatus = {
+/** What the sidebar's status box shows of likely's decisions (`hooks/likely/`): this machine's totals, read from `$.store`. */
+export type LikelyStatus = {
   /** Decisions made today (local date). */
   todayCount: number
   /** What the budget period's decisions cost, in dollars. */
@@ -244,7 +244,7 @@ declare module 'claude-code' {
        */
       userTodoVersion: number
       /** Decisions' spend for the sidebar's line; null while no API key is set (no line). */
-      decideStatus: DecideStatus | null
+      likelyStatus: LikelyStatus | null
     }
   }
 }

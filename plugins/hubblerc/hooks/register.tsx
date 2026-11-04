@@ -9,9 +9,9 @@ import { answerCommands, registerCommand } from './commands'
 import { startDevice } from './device'
 import { controlEffort, startEffort } from './effort'
 import { closeEffortPicker } from './effort-picker'
-import { noteBashOutcome, predictBashFailure } from './decide/bash-fail'
-import { answerDecideCommand, registerDecideCommand } from './decide/command'
-import { configureDecide, startDecide } from './decide/decide'
+import { noteBashOutcome, predictBashFailure } from './likely/bash-fail'
+import { answerLikelyCommand, registerLikelyCommand } from './likely/command'
+import { configureLikely, startLikely } from './likely/likely'
 import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
@@ -29,7 +29,7 @@ const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 export const register: Register = (on, options) => {
   const layout = layoutOption(options.layout)
   const autoByDefault = options.autoEffort === true
-  configureDecide(options)
+  configureLikely(options)
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -39,8 +39,8 @@ export const register: Register = (on, options) => {
     await startEffort($).catch(() => undefined)
     await startSidebar($, layout).catch(() => undefined)
     await startTodos($).catch(() => undefined)
-    await startDecide($).catch(() => undefined)
-    await registerDecideCommand($).catch(() => undefined)
+    await startLikely($).catch(() => undefined)
+    await registerLikelyCommand($).catch(() => undefined)
     await startDevice($).catch(() => undefined)
     await startRelaunch($).catch(() => undefined)
     await checkSetup($).catch(() => undefined)
@@ -140,7 +140,7 @@ export const register: Register = (on, options) => {
   trackPrompts(on)
   answerCommands(on, layout)
   serveTodoTool(on)
-  answerDecideCommand(on)
+  answerLikelyCommand(on)
   controlEffort(on, autoByDefault)
   showBashPurpose(on)
   showToolLines(on)

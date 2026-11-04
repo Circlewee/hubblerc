@@ -2,45 +2,53 @@ import type { EngineInterface, On } from 'claude-code'
 
 import { BASH_TASK } from './bash-fail'
 import { dollars } from './cost'
-import { currentOptions, currentSpend, decide, hasApiKey, logFolder, NO_KEY_TEXT, readLogPieces } from './decide'
+import { currentOptions, currentSpend, hasApiKey, KEY_HOWTO, keySource, likely, logFolder, NO_KEY_TEXT, readKeychainKey, readLogPieces } from './likely'
 import { METHOD_VERSION } from './method'
 import { calibrationLines, calibrationOf, predicatePairs, readLog, taskCounts } from './record'
 import type { LoggedDecision } from './record'
 
-/** At session.start: `/decide`, a temporary name till the feature has one. */
-export async function registerDecideCommand($: EngineInterface): Promise<void> {
+/** At session.start: `/likely`. */
+export async function registerLikelyCommand($: EngineInterface): Promise<void> {
   await $.command.register({
-    name: 'decide',
-    description: '판정(Haiku로 확률 판정): stats [task] 기록 통계 · export 기록 zip · test <글> 시험 판정 (hubblerc, 임시 이름)',
-    argumentHint: 'stats [task] | export | test <글>',
+    name: 'likely',
+    description: 'likely(Haiku로 확률 판정): 질문이나 글을 주면 예일 확률 · stats [task] 기록 통계 · export 기록 zip (hubblerc)',
+    argumentHint: '<질문> | stats [task] | export',
     immediate: true,
   })
 }
 
-export function answerDecideCommand(on: On): void {
-  on('command.run', { command: 'decide' }, async ($, e) => ({
-    text: await runDecideCommand($, e.args).catch((error: unknown) => `판정 명령을 마치지 못했습니다: ${String(error)}`),
+export function answerLikelyCommand(on: On): void {
+  on('command.run', { command: 'likely' }, async ($, e) => ({
+    text: await runLikelyCommand($, e.args).catch((error: unknown) => `판정 명령을 마치지 못했습니다: ${String(error)}`),
   }))
 }
 
-export async function runDecideCommand($: EngineInterface, args: string): Promise<string> {
-  const [word = '', ...rest] = args.trim().split(/\s+/)
-  const tail = args.trim().slice(word.length).trim()
+/**
+ * `/likely stats [task]` and `/likely export`; any other text is a question (or a statement) decided
+ * at once; nothing, how to use it. With no key yet, the keychain is read again first: a key added
+ * there works without a reload.
+ */
+export async function runLikelyCommand($: EngineInterface, args: string): Promise<string> {
+  const text = args.trim()
+  const [word = '', ...rest] = text.split(/\s+/)
   if (word === 'stats') return statsText($, rest[0])
   if (word === 'export') return exportLog($)
-  if (word === 'test') return testDecision($, tail)
+  if (!hasApiKey()) await readKeychainKey($).catch(() => undefined)
+  if (text !== '') return askOnce($, text)
 
   return usageText($)
 }
 
 async function usageText($: EngineInterface): Promise<string> {
   const folder = await logFolder($).catch(() => '(알 수 없음)')
+  const source = keySource()
 
   return [
-    '/decide stats [task]  판정 기록 통계: task별 건수·정답 수, 비용, bash-fail의 보정(Brier·ECE·정확도)',
-    '/decide export        기록 폴더를 zip으로 묶기',
-    '/decide test <글>     그 글이 참일 확률을 판정 하나로(키 확인용, 크레딧이 듭니다)',
-    `API 키: ${hasApiKey() ? '설정됨' : '없음'} · 기록 폴더: ${folder}`,
+    '/likely <질문이나 글>  예일(참일) 확률을 판정 하나로. 키 확인용, 크레딧이 듭니다. 예) /likely 이 명령은 실패할까: ls /없는경로',
+    '/likely stats [task]   판정 기록 통계: task별 건수·정답 수, 비용, bash-fail의 보정(Brier·ECE·정확도)',
+    '/likely export         기록 폴더를 zip으로 묶기',
+    `API 키: ${source === 'options' ? '설정에서' : source === 'keychain' ? '키체인에서' : '없음'} · 기록 폴더: ${folder}`,
+    KEY_HOWTO,
   ].join('\n')
 }
 
@@ -57,7 +65,7 @@ async function readAllLogs($: EngineInterface): Promise<{ folder: string; files:
 }
 
 /**
- * `/decide stats [task]`: decisions and outcomes by task (every machine's log in the folder), this
+ * `/likely stats [task]`: decisions and outcomes by task (every machine's log in the folder), this
  * machine's spend against its limits, and a predicate task's calibration (bash-fail unless named),
  * with thinking off and on apart.
  */
@@ -97,14 +105,14 @@ async function statsText($: EngineInterface, task: string | undefined): Promise<
   return lines.join('\n')
 }
 
-/** `/decide export`: the log folder in a zip, in Downloads (else the home folder). */
+/** `/likely export`: the log folder in a zip, in Downloads (else the home folder). */
 async function exportLog($: EngineInterface): Promise<string> {
   const folder = await logFolder($)
   if (!(await $.fs.exists(folder).catch(() => false))) return `판정 기록이 아직 없습니다: ${folder}`
   const home = (await $.env.get('HOME')) ?? ''
   const downloads = `${home}/Downloads`
   const into = (await $.fs.exists(downloads).catch(() => false)) ? downloads : home
-  const out = `${into}/hubblerc-decide-${stamp(await $.clock.now())}.zip`
+  const out = `${into}/hubblerc-likely-${stamp(await $.clock.now())}.zip`
   const cut = folder.lastIndexOf('/')
   const ran = await $.process.run(['/usr/bin/zip', '-r', '-q', '-X', out, folder.slice(cut + 1)], { cwd: cut <= 0 ? '/' : folder.slice(0, cut), timeoutMs: 120_000 })
   if (ran.exitCode !== 0) return `zip이 실패했습니다(${ran.exitCode}): ${ran.stderr.trim()}`
@@ -112,20 +120,22 @@ async function exportLog($: EngineInterface): Promise<string> {
   return `판정 기록을 묶었습니다: ${out}`
 }
 
-/** `/decide test <글>`: one predicate, whether the text is true, decided and shown call by call. */
-async function testDecision($: EngineInterface, text: string): Promise<string> {
+/** The one question `/likely <글>` asks of its text. */
+export const ASK_QUESTION = {
+  type: 'predicate' as const,
+  name: 'yes',
+  instructions: 'The input is a yes-or-no question, or a statement. Answer the question; for a statement, whether it is true.',
+}
+
+/** `/likely <글>`: one predicate on the text, decided and shown call by call. */
+async function askOnce($: EngineInterface, text: string): Promise<string> {
   if (!hasApiKey()) return NO_KEY_TEXT
-  if (text === '') return '판정할 글을 적어 주세요: /decide test <글>'
-  const result = await decide($, {
-    task: 'test',
-    input: text,
-    questions: [{ type: 'predicate', name: 'true', instructions: 'Is the statement in the input true?' }],
-  })
+  const result = await likely($, { task: 'ask', input: text, questions: [ASK_QUESTION] })
   if ('skipped' in result) return result.reason
   const answer = result.answers[0]
   const head =
     answer?.type === 'predicate'
-      ? `참일 확률 ${answer.probability.toFixed(2)} (${answer.value ? '참' : '거짓'})`
+      ? `예일 확률 ${answer.probability.toFixed(2)} (${answer.value ? '예' : '아니오'})`
       : answer?.type === 'refusal'
         ? '모든 호출이 거절했습니다'
         : '답 없음'
@@ -133,8 +143,8 @@ async function testDecision($: EngineInterface, text: string): Promise<string> {
   const seconds = (result.latencyMs / 1000).toFixed(1)
 
   return [
-    `판정: ${head} · 호출 ${result.samples}/${result.raw.length} · ${seconds}초 · ${result.model}`,
-    `호출별 참일 확률: ${calls.join(' · ')}`,
+    `likely: ${head} · 호출 ${result.samples}/${result.raw.length} · ${seconds}초 · ${result.model}`,
+    `호출별 예일 확률: ${calls.join(' · ')}`,
     `토큰: 입력 ${result.tokens.input} · 출력 ${result.tokens.output} · 캐시 읽기 ${result.tokens.cacheRead} · 비용 $${result.costUsd.toFixed(5)}`,
     result.logPath !== undefined ? `기록: ${result.logPath} (${result.id})` : `기록하지 못했습니다: ${result.logError ?? ''}`,
     'Console의 Billing에서 크레딧이 줄었는지 확인해 보세요.',

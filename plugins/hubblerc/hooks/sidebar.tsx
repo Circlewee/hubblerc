@@ -16,7 +16,7 @@ import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
 import { addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, offerTodo, selectTab, todosForDrawing } from './todo'
 import { oneLine, openCount, rowTailCells, showsTurn, sortTodos, STATUS_MARK, todoRows, todosShown } from './todo-format'
 import type { SidebarTab, UserTodo } from './todo-format'
-import { statusLine } from './decide/cost'
+import { statusLine } from './likely/cost'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
@@ -47,7 +47,7 @@ const sessionId = atom({ plugin: 'hubblerc', key: 'sessionId' } as const, '')
 const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, null)
 const sidebarTab = atom({ plugin: 'hubblerc', key: 'sidebarTab' } as const, 'contents')
 const userTodoVersion = atom({ plugin: 'hubblerc', key: 'userTodoVersion' } as const, 0)
-const decideStatus = atom({ plugin: 'hubblerc', key: 'decideStatus' } as const, null)
+const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)
 
 /** The sidebar's boxes, by the id their fold is kept under. */
 export type SectionId = 'device' | 'status' | 'activity' | 'files' | 'contents'
@@ -325,9 +325,9 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // Read so the pictures, once loaded, redraw the cat.
     await read($, catImageCount)
     const isUltracode = await read($, ultracode)
-    // Decisions' spend, one line when an API key is set (`hooks/decide/`).
-    const decisions = await read($, decideStatus)
-    const decideLine = decisions === null ? '' : statusLine(decisions)
+    // likely's spend, one line when an API key is set (`hooks/likely/`).
+    const decisions = await read($, likelyStatus)
+    const likelyLine = decisions === null ? '' : statusLine(decisions)
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
@@ -575,9 +575,9 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
           </Box>
         )}
         {request.length === 0 ? null : <Box key="request">{request.map((segment, i) => segmentText(segment, `request-${i}`))}</Box>}
-        {decideLine === '' ? null : (
-          <Text key="decide" wrap="truncate-end" dimColor>
-            {decideLine}
+        {likelyLine === '' ? null : (
+          <Text key="likely" wrap="truncate-end" dimColor>
+            {likelyLine}
           </Text>
         )}
       </Box>,
@@ -659,7 +659,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const above =
       // Air above and below; a picture beside the lines, or blocks above them with a row between.
       boxRows('device', 2 + (picture === null ? catRows.length + 1 + deviceText : Math.max(PICTURE_ROWS, deviceText))) +
-      boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1) + (decideLine === '' ? 0 : 1)) +
+      boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1) + (likelyLine === '' ? 0 : 1)) +
       boxRows('activity', activity.length) +
       (files.length === 0 ? 0 : boxRows('files', 0)) +
       boxRows('contents', 0)

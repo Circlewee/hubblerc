@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions } from 'claude-code'
 
-import type { DecideStatus } from '../../types'
+import type { LikelyStatus } from '../../types'
 import { addSpend, addTokens, costOf, dollars, limitReached, NO_TOKENS, spendAt, tokensOf } from './cost'
 import type { Limits, Spend, Tokens } from './cost'
 import { combine, distributionsOf, invalidQuestions, layoutCall, MAX_SAMPLES, METHOD_VERSION, readReply, requestBody, seededRandom, seedOf } from './method'
@@ -9,17 +9,17 @@ import type { Answer, Question, Reply } from './method'
 import { maskSecrets, MAX_INPUT_CHARS, safeFileName, utf8Length } from './record'
 import type { CallLog, DecisionLine, OutcomeLine } from './record'
 
-const decideStatus = atom({ plugin: 'hubblerc', key: 'decideStatus' } as const, null)
+const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)
 
 export const API_URL = 'https://api.anthropic.com/v1/messages'
 export const API_VERSION = '2026-10-21'
 export const DEFAULT_MODEL = 'claude-haiku-5-5'
 /** Where this machine's totals are kept (`$.store` is the machine's own). */
-const SPEND_KEY = 'decideSpend'
+const SPEND_KEY = 'likelySpend'
 
-/** The decide options of the plugin's `userConfig`, read once a load. */
-export type DecideOptions = {
-  /** The Anthropic API key (a secret option); '' when unset: nothing is decided. */
+/** The likely options of the plugin's `userConfig`, read once a load. */
+export type LikelyOptions = {
+  /** The Anthropic API key (a secret option); '' when unset: the keychain's is looked for. */
   apiKey: string
   model: string
   /** A runaway guard: decisions stop for the day once they cost this much. */
@@ -32,34 +32,65 @@ export type DecideOptions = {
   logDir: string
 }
 
-export function decideOptions(raw: PluginOptions): DecideOptions {
+export function likelyOptions(raw: PluginOptions): LikelyOptions {
   const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
   const amount = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback)
-  const day = typeof raw.decidePeriodStartDay === 'number' && Number.isFinite(raw.decidePeriodStartDay) ? Math.round(raw.decidePeriodStartDay) : 1
+  const day = typeof raw.likelyPeriodStartDay === 'number' && Number.isFinite(raw.likelyPeriodStartDay) ? Math.round(raw.likelyPeriodStartDay) : 1
 
   return {
     apiKey: text(raw.anthropicApiKey),
-    model: text(raw.decideModel) || DEFAULT_MODEL,
-    dailyCapUsd: amount(raw.decideDailyCapUsd, 5),
-    budgetUsd: amount(raw.decideMonthlyBudgetUsd, 100),
+    model: text(raw.likelyModel) || DEFAULT_MODEL,
+    dailyCapUsd: amount(raw.likelyDailyCapUsd, 5),
+    budgetUsd: amount(raw.likelyMonthlyBudgetUsd, 100),
     periodStartDay: Math.min(31, Math.max(1, day)),
-    logDir: text(raw.decideLogDir),
+    logDir: text(raw.likelyLogDir),
   }
 }
 
-let options: DecideOptions = decideOptions({})
+let options: LikelyOptions = likelyOptions({})
 
 /** At load (`register`): the options a change in `/config` reloads the module with. */
-export function configureDecide(raw: PluginOptions): void {
-  options = decideOptions(raw)
+export function configureLikely(raw: PluginOptions): void {
+  options = likelyOptions(raw)
+}
+
+/** The keychain item the key is read from where the options have none (`security add-generic-password -s hubblerc-likely`). */
+export const KEYCHAIN_SERVICE = 'hubblerc-likely'
+
+/**
+ * The key read from the keychain, kept in the module alone: never in state, the store or the log.
+ * Read at session.start where the options have no key (a plugin loaded from its folder, `--plugin-dir`,
+ * is not installed, so `/plugin configure` cannot set its secret option), and again when `/likely`
+ * finds none. No environment variable is read: what is set in this process reaches every Bash child.
+ */
+let keychainKey = ''
+
+/** The key decisions are made with: the secret option, else the keychain's; '' for none. */
+function apiKey(): string {
+  return options.apiKey !== '' ? options.apiKey : keychainKey
+}
+
+/** Where the key comes from: the secret option, the keychain, or nowhere. */
+export function keySource(): 'options' | 'keychain' | null {
+  return options.apiKey !== '' ? 'options' : keychainKey !== '' ? 'keychain' : null
 }
 
 /** Whether decisions can be made at all: an API key is set. */
 export function hasApiKey(): boolean {
-  return options.apiKey !== ''
+  return apiKey() !== ''
 }
 
-export function currentOptions(): Readonly<DecideOptions> {
+/**
+ * The key from the macOS keychain (any account), where the options have none. Missing, refused or
+ * not answering in time: none, said nowhere.
+ */
+export async function readKeychainKey($: EngineInterface): Promise<void> {
+  if (options.apiKey !== '') return
+  const ran = await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], { timeoutMs: 5000 }).catch(() => undefined)
+  keychainKey = ran?.exitCode === 0 ? ran.stdout.trim() : ''
+}
+
+export function currentOptions(): Readonly<LikelyOptions> {
   return options
 }
 
@@ -72,23 +103,24 @@ let spendQueue: Promise<unknown> = Promise.resolve()
 /** Lines are appended one at a time. */
 let writeQueue: Promise<unknown> = Promise.resolve()
 
-/** At session.start: what the sidebar shows of the spend, and the command. */
-export async function startDecide($: EngineInterface): Promise<void> {
+/** At session.start: the key from the keychain where the options have none, and what the sidebar shows of the spend. */
+export async function startLikely($: EngineInterface): Promise<void> {
   logFile = null
   isLogReady = false
-  await refreshDecideStatus($)
+  await readKeychainKey($).catch(() => undefined)
+  await refreshLikelyStatus($)
 }
 
 /**
  * The sidebar's line from the machine's totals: at session.start, after each decision, and on the
  * 30-second tick while the sidebar shows (another session's decisions, a new day). Null with no key.
  */
-export async function refreshDecideStatus($: EngineInterface): Promise<void> {
+export async function refreshLikelyStatus($: EngineInterface): Promise<void> {
   const next = hasApiKey() ? statusOf(spendAt(await $.store.get(SPEND_KEY), await $.clock.now(), options.periodStartDay)) : null
-  if (JSON.stringify(next) !== JSON.stringify(await read($, decideStatus))) await update($, decideStatus, () => next)
+  if (JSON.stringify(next) !== JSON.stringify(await read($, likelyStatus))) await update($, likelyStatus, () => next)
 }
 
-function statusOf(spend: Spend): DecideStatus {
+function statusOf(spend: Spend): LikelyStatus {
   return { todayCount: spend.dayCount, periodUsd: Math.round(spend.periodUsd * 10_000) / 10_000, budgetUsd: options.budgetUsd }
 }
 
@@ -111,8 +143,8 @@ async function withSpend<T>($: EngineInterface, change: (spend: Spend) => { spen
   return run
 }
 
-export type DecideRequest = {
-  /** What the decision is for (`bash-fail`): the log and `/decide stats` group by it. */
+export type LikelyRequest = {
+  /** What the decision is for (`bash-fail`): the log and `/likely stats` group by it. */
   task: string
   input: string
   questions: Question[]
@@ -127,7 +159,7 @@ export type DecideRequest = {
 /** One call's outcome: its distributions in each question's own order, a refusal, or why it gave nothing. */
 export type RawCall = { distributions?: number[][]; refused?: true; error?: string }
 
-export type DecideResult = {
+export type LikelyResult = {
   id: string
   answers: Answer[]
   /** Each call's distributions, before averaging: what a later calibration is fitted on. */
@@ -147,9 +179,16 @@ export type DecideResult = {
 }
 
 /** No decision made, and why: no API key, or a limit reached. */
-export type DecideSkip = { skipped: 'no-key' | 'daily-cap' | 'budget'; reason: string }
+export type LikelySkip = { skipped: 'no-key' | 'daily-cap' | 'budget'; reason: string }
 
-export const NO_KEY_TEXT = 'Anthropic API 키가 설정되지 않아 판정하지 않습니다. hubblerc 설정의 anthropicApiKey에 넣어 주세요(세션 안 `/plugin configure`, 또는 `claude plugin configure`).'
+/** How to give likely a key, where it has none. */
+export const KEY_HOWTO = [
+  'API 키 넣는 법(둘 중 하나, 설정이 먼저):',
+  `  키체인: 터미널에서 security add-generic-password -s ${KEYCHAIN_SERVICE} -a "$USER" -w  (키를 물으면 붙여 넣기. 개발판 hcc는 이 길뿐)`,
+  '  설정: 설치본은 세션 안 /plugin configure hubblerc@hubblerc 의 anthropicApiKey',
+].join('\n')
+
+export const NO_KEY_TEXT = `Anthropic API 키가 없어 판정하지 않습니다.\n${KEY_HOWTO}`
 
 /**
  * A decision: `samples` calls at once to the Messages API, each showing the questions its own way;
@@ -157,7 +196,7 @@ export const NO_KEY_TEXT = 'Anthropic API 키가 설정되지 않아 판정하�
  * every call refusing answers refusals. Not made with no key or past a limit (a toast, the first time
  * a day or a period). The decision is logged, its cost added to the machine's totals.
  */
-export async function decide($: EngineInterface, request: DecideRequest): Promise<DecideResult | DecideSkip> {
+export async function likely($: EngineInterface, request: LikelyRequest): Promise<LikelyResult | LikelySkip> {
   if (!hasApiKey()) return { skipped: 'no-key', reason: NO_KEY_TEXT }
   const invalid = invalidQuestions(request.questions)
   if (invalid !== undefined) throw new Error(`판정 질문이 잘못됐습니다: ${invalid}`)
@@ -226,7 +265,7 @@ export async function decide($: EngineInterface, request: DecideRequest): Promis
   const costUsd = calls.reduce((total, call) => total + costOf(call.tokens), 0)
   const isDecided = answered.length > 0 || refusals > 0
   await withSpend($, spend => ({ spend: addSpend(spend, costUsd, isDecided), value: undefined })).catch(() => undefined)
-  await refreshDecideStatus($).catch(() => undefined)
+  await refreshLikelyStatus($).catch(() => undefined)
   if (!isDecided) throw new Error(`판정 호출 ${samples}개가 모두 실패했습니다: ${raw.find(call => call.error !== undefined)?.error ?? '응답 없음'}`)
 
   const answers = combine(request.questions, answered)
@@ -250,7 +289,7 @@ export async function decide($: EngineInterface, request: DecideRequest): Promis
     ...(request.meta === undefined ? {} : { meta: request.meta }),
     outcome: null,
   }
-  const result: DecideResult = { id, answers, raw, calibrated: false, samples: answered.length, model, latencyMs, costUsd, tokens, methodVersion: METHOD_VERSION }
+  const result: LikelyResult = { id, answers, raw, calibrated: false, samples: answered.length, model, latencyMs, costUsd, tokens, methodVersion: METHOD_VERSION }
   try {
     result.logPath = await appendLine($, JSON.stringify(line))
   } catch (error) {
@@ -262,13 +301,13 @@ export async function decide($: EngineInterface, request: DecideRequest): Promis
 
 type CallOutcome = { latencyMs: number; tokens: Tokens; reply?: Reply; model?: string; error?: string }
 
-/** One call to the Messages API with the key of the options: what it answered, or why not. */
+/** One call to the Messages API with the key: what it answered, or why not. */
 async function callOnce($: EngineInterface, body: Record<string, unknown>): Promise<CallOutcome> {
   const started = await $.clock.now()
   try {
     const response = await $.http.fetch(API_URL, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': options.apiKey, 'anthropic-version': API_VERSION },
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey(), 'anthropic-version': API_VERSION },
       body: JSON.stringify(body),
     })
     const latencyMs = (await $.clock.now()) - started
@@ -299,15 +338,15 @@ export function httpError(status: number, body: unknown): string {
 
 /**
  * The log's folder: the one set in the options (`~/` for home); else iCloud Drive's
- * `hubblerc/decide` where iCloud Drive is on; else `~/.claude/hubblerc/decide`.
+ * `hubblerc/likely` where iCloud Drive is on; else `~/.claude/hubblerc/likely`.
  */
 export async function logFolder($: EngineInterface): Promise<string> {
   const home = (await $.env.get('HOME')) ?? ''
   if (options.logDir !== '') return options.logDir.replace(/^~(?=\/|$)/, home).replace(/\/+$/, '')
   const icloud = `${home}/Library/Mobile Documents/com~apple~CloudDocs`
-  if (await $.fs.exists(icloud).catch(() => false)) return `${icloud}/hubblerc/decide`
+  if (await $.fs.exists(icloud).catch(() => false)) return `${icloud}/hubblerc/likely`
 
-  return `${home}/.claude/hubblerc/decide`
+  return `${home}/.claude/hubblerc/likely`
 }
 
 /** The machine's name (its Sharing name, else its host name), as its log file is named. */

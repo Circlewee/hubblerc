@@ -61,6 +61,9 @@ export type StandIn = {
   files: Record<string, string>
   /** Paths `$.fs.exists` finds, besides the files above. */
   existing: string[]
+  /** The key the keychain holds under `hubblerc-likely` (null: no such item), and how many times it was read. */
+  keychain: string | null
+  keychainReads: number
 }
 
 /** A Messages API reply holding `text` as its one text block. */
@@ -89,7 +92,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [] }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0 }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -170,6 +173,15 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
       return done(decoder.decode(bytes.slice(from, from + Number(e.argv[6]))))
     }
     if (e.argv[0] === '/usr/sbin/scutil') return done('Test Mac\n')
+    // The keychain, as `security find-generic-password -s hubblerc-likely -w` answers: the password and a newline, or 44.
+    if (e.argv[0] === '/usr/bin/security') {
+      standIn.keychainReads += 1
+      if (standIn.keychain === null || !e.argv.includes('hubblerc-likely')) {
+        return { value: { exitCode: 44, stdout: '', stderr: 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n', isStdoutTruncated: false, isStderrTruncated: false } }
+      }
+
+      return done(`${standIn.keychain}\n`)
+    }
     if (e.argv[0] === '/usr/bin/zip') {
       standIn.ran.push([...e.argv, `cwd=${e.init?.cwd ?? ''}`])
 

@@ -1,6 +1,6 @@
 import type { EngineInterface, ToolCallResult } from 'claude-code'
 
-import { decide, hasApiKey, recordOutcome } from './decide'
+import { likely, hasApiKey, recordOutcome } from './likely'
 import type { Question } from './method'
 
 /**
@@ -42,7 +42,7 @@ export function predictBashFailure($: EngineInterface, e: BashCall): Promise<str
   return (async () => {
     const cwd = await $.session.cwd().catch(() => '')
     const description = typeof e.description === 'string' ? e.description : ''
-    const result = await decide($, { task: BASH_TASK, input: bashInput(command, description, cwd), questions: [BASH_QUESTION], samples: 5, thinking, meta })
+    const result = await likely($, { task: BASH_TASK, input: bashInput(command, description, cwd), questions: [BASH_QUESTION], samples: 5, thinking, meta })
 
     return 'skipped' in result || result.logPath === undefined ? null : result.id
   })().catch(() => null)
