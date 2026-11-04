@@ -5,16 +5,35 @@ import { isAutoUpdating, keyStates, missingCount, setupState, withAutoUpdate, wi
 import { standInForEngine, start } from './engine'
 
 const OURS = { 'ctrl+x ctrl+e': 'app:cycleDiffBase', 'ctrl+x ctrl+p': 'command:panel' }
+const CLOSE = { 'ctrl+x ctrl+x': 'pane:close' }
+/** Every block of ours, as a file that has them all holds them. */
+const ALL = [
+  { context: 'Chat', bindings: OURS },
+  { context: 'Pane', bindings: CLOSE },
+  { context: 'PaneField', bindings: CLOSE },
+]
 const COMMAND = { args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }
 const KEY_FILE = '/home/me/.claude/keybindings.json'
 const HUD = { type: 'command', command: 'node ~/.claude/plugins/cache/claude-hud/dist/index.js' }
 
-test("our keys are found in the Chat context: bound, missing, or bound to something else", () => {
-  expect(keyStates(JSON.stringify({ bindings: [{ context: 'Chat', bindings: OURS }] })).map(key => key.state)).toEqual(['ok', 'ok'])
-  expect(keyStates(undefined).map(key => key.state)).toEqual(['missing', 'missing'])
+test("our keys are found each in its context: bound, missing, or bound to something else", () => {
+  expect(keyStates(JSON.stringify({ bindings: ALL })).map(key => [key.id, key.state])).toEqual([
+    ['Chat ctrl+x ctrl+e', 'ok'],
+    ['Chat ctrl+x ctrl+p', 'ok'],
+    ['Pane ctrl+x ctrl+x', 'ok'],
+    ['PaneField ctrl+x ctrl+x', 'ok'],
+  ])
+  expect(keyStates(undefined).map(key => key.state)).toEqual(['missing', 'missing', 'missing', 'missing'])
   const other = keyStates(JSON.stringify({ bindings: [{ context: 'Chat', bindings: { 'ctrl+x ctrl+e': 'chat:externalEditor' } }] }))
   expect(other[0]).toMatchObject({ state: 'conflict', current: 'chat:externalEditor' })
   expect(other[1]?.state).toBe('missing')
+  // The close key ours in a pane, and in a pane's field bound to another action: told apart by context.
+  // The same key in the Chat context is not the pane's.
+  const panes = keyStates(JSON.stringify({ bindings: [{ context: 'Chat', bindings: { ...OURS, ...CLOSE } }, { context: 'Pane', bindings: CLOSE }, { context: 'PaneField', bindings: { 'ctrl+x ctrl+x': 'pane:next' } }] }))
+  expect(panes.slice(2).map(key => [key.context, key.state, key.current])).toEqual([
+    ['Pane', 'ok', undefined],
+    ['PaneField', 'conflict', 'pane:next'],
+  ])
 })
 
 test('the missing keys are added to the Chat context, everything else kept; a key bound elsewhere is left', () => {
@@ -30,15 +49,37 @@ test('the missing keys are added to the Chat context, everything else kept; a ke
   expect(next.bindings[0]).toEqual(file.bindings[0])
   expect(next.bindings[1].bindings).toEqual({ 'ctrl+x ctrl+e': 'chat:externalEditor', 'ctrl+g': 'chat:externalEditor', 'ctrl+x ctrl+p': 'command:panel' })
 
+  // A context with no block gets one at the end: the pane's two here.
+  expect(next.bindings.slice(2)).toEqual([
+    { context: 'Pane', bindings: CLOSE },
+    { context: 'PaneField', bindings: CLOSE },
+  ])
+
   // A new file is made whole; one with every key, or one that is not JSON, is not written.
-  expect(JSON.parse(withKeys(undefined) ?? '{}').bindings).toEqual([{ context: 'Chat', bindings: OURS }])
-  expect(withKeys(JSON.stringify({ bindings: [{ context: 'Chat', bindings: OURS }] }))).toBeNull()
+  expect(JSON.parse(withKeys(undefined) ?? '{}').bindings).toEqual(ALL)
+  expect(withKeys(JSON.stringify({ bindings: ALL }))).toBeNull()
   expect(withKeys('{ not json')).toBeNull()
+})
+
+test('the close key joins a Pane block already there, the engine\'s own ctrl+x x and the other keys kept', () => {
+  const file = { bindings: [{ context: 'Pane', bindings: { 'ctrl+x x': null, 'ctrl+x left': 'pane:grow' } }, { context: 'Chat', bindings: OURS }] }
+  const next = JSON.parse(withKeys(JSON.stringify(file)) ?? '{}')
+  expect(next.bindings).toEqual([
+    { context: 'Pane', bindings: { 'ctrl+x x': null, 'ctrl+x left': 'pane:grow', 'ctrl+x ctrl+x': 'pane:close' } },
+    { context: 'Chat', bindings: OURS },
+    { context: 'PaneField', bindings: CLOSE },
+  ])
+  // Bound to something else in a pane: left as it is, the field's still added.
+  const taken = { bindings: [...ALL.slice(0, 1), { context: 'Pane', bindings: { 'ctrl+x ctrl+x': 'pane:next' } }] }
+  expect(JSON.parse(withKeys(JSON.stringify(taken)) ?? '{}').bindings.slice(1)).toEqual([
+    { context: 'Pane', bindings: { 'ctrl+x ctrl+x': 'pane:next' } },
+    { context: 'PaneField', bindings: CLOSE },
+  ])
 })
 
 test('needed: our keys and the fullscreen layout; claude-hud and the language are advice', () => {
   const done = setupState(
-    JSON.stringify({ bindings: [{ context: 'Chat', bindings: OURS }] }),
+    JSON.stringify({ bindings: ALL }),
     { tui: 'fullscreen', language: 'korean', statusLine: undefined },
     JSON.stringify({ extraKnownMarketplaces: { hubblerc: { source: { source: 'github', repo: 'Circlewee/hubblerc' }, autoUpdate: true } } }),
   )
@@ -46,7 +87,7 @@ test('needed: our keys and the fullscreen layout; claude-hud and the language ar
   expect(done.hasClaudeHud).toBe(false)
 
   const bare = setupState(undefined, { tui: undefined, language: undefined, statusLine: HUD })
-  expect(missingCount(bare)).toBe(4)
+  expect(missingCount(bare)).toBe(6)
   expect(bare.hasClaudeHud).toBe(true)
   expect(bare.hasLanguage).toBe(false)
 
@@ -78,9 +119,9 @@ test('a first run on a new machine says what is missing, once, in the conversati
   })
   await start($)
 
-  // The stand-in's settings have no tui, and no settings file turns auto-update on: the two keys,
-  // the fullscreen layout and auto-update are missing.
-  expect(logged).toEqual(['hubblerc 설정 4개가 덜 됐습니다. `/setup`으로 확인하세요'])
+  // The stand-in's settings have no tui, and no settings file turns auto-update on: the four keys
+  // (two in Chat, the close key in a pane and its field), the fullscreen layout and auto-update.
+  expect(logged).toEqual(['hubblerc 설정 6개가 덜 됐습니다. `/setup`으로 확인하세요'])
 })
 
 test('/setup adds the missing keys, keeps the old file as .bak, and tells the rest', async ($, on) => {
@@ -91,9 +132,11 @@ test('/setup adds the missing keys, keeps the old file as .bak, and tells the re
 
   const ran = await $.command.run({ ...COMMAND, command: 'setup' })
   expect(files[`${KEY_FILE}.bak`]).toBe(before)
-  expect(JSON.parse(files[KEY_FILE] ?? '{}').bindings[0].bindings).toEqual({ 'ctrl+g': 'chat:externalEditor', ...OURS })
+  expect(JSON.parse(files[KEY_FILE] ?? '{}').bindings).toEqual([{ context: 'Chat', bindings: { 'ctrl+g': 'chat:externalEditor', ...OURS } }, ...ALL.slice(1)])
   const text = (ran as { text?: string }).text ?? ''
-  expect(text).toContain('✓ 키: ctrl+x ctrl+e(effort 슬라이더) 방금 추가함, ctrl+x ctrl+p(사이드바 열기/닫기) 방금 추가함')
+  expect(text).toContain(
+    '✓ 키: ctrl+x ctrl+e(effort 슬라이더) 방금 추가함, ctrl+x ctrl+p(사이드바 열기/닫기) 방금 추가함, ctrl+x ctrl+x(패널 닫기) 방금 추가함, ctrl+x ctrl+x(패널 입력칸에서 닫기) 방금 추가함',
+  )
   expect(text).toContain('✗ 전체 화면이 아닙니다')
   expect(text).toContain(`원래 파일은 \`${KEY_FILE}.bak\``)
 
@@ -101,7 +144,7 @@ test('/setup adds the missing keys, keeps the old file as .bak, and tells the re
   files[`${KEY_FILE}.bak`] = 'untouched'
   const again = await $.command.run({ ...COMMAND, command: 'setup' })
   expect(files[`${KEY_FILE}.bak`]).toBe('untouched')
-  expect((again as { text?: string }).text).toContain('✓ 키: ctrl+x ctrl+e(effort 슬라이더), ctrl+x ctrl+p(사이드바 열기/닫기)')
+  expect((again as { text?: string }).text).toContain('✓ 키: ctrl+x ctrl+e(effort 슬라이더), ctrl+x ctrl+p(사이드바 열기/닫기), ctrl+x ctrl+x(패널 닫기), ctrl+x ctrl+x(패널 입력칸에서 닫기)')
 })
 
 test("auto-update is turned on in the marketplace's entry of the user's settings, nothing else changed", () => {
@@ -121,7 +164,7 @@ test("auto-update is turned on in the marketplace's entry of the user's settings
 test('/setup turns auto-update on, the old settings kept as .bak', async ($, on) => {
   standInForEngine(on)
   const before = JSON.stringify({ theme: 'dark', extraKnownMarketplaces: { hubblerc: { source: { source: 'github', repo: 'Circlewee/hubblerc' } } } })
-  const files = machine(on, { [KEY_FILE]: JSON.stringify({ bindings: [{ context: 'Chat', bindings: OURS }] }), '/home/me/.claude/settings.json': before })
+  const files = machine(on, { [KEY_FILE]: JSON.stringify({ bindings: ALL }), '/home/me/.claude/settings.json': before })
   await start($)
 
   const ran = await $.command.run({ ...COMMAND, command: 'setup' })

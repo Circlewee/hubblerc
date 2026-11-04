@@ -13,34 +13,50 @@ import { canRelaunch } from './relaunch'
  * file it changes kept as `.bak` first). The fullscreen layout and the advice are only told.
  */
 
-/** The keys hubblerc binds in the Chat context, with what each is for. */
-export const KEYS: readonly { key: string; action: string; label: string }[] = [
-  { key: 'ctrl+x ctrl+e', action: 'app:cycleDiffBase', label: 'effort 슬라이더' },
-  { key: 'ctrl+x ctrl+p', action: 'command:panel', label: '사이드바 열기/닫기' },
+/**
+ * The keys hubblerc binds, each in its context, with what each is for. A chord's second key held with
+ * Ctrl: a bare letter is caught by a Korean input method composing it (`ctrl+x e` was, so the effort
+ * key became `ctrl+x ctrl+e`; the engine's `ctrl+x x` to close a pane was too, 2026-11-05, so
+ * `ctrl+x ctrl+x` closes one beside it, in a pane and in a pane's field).
+ */
+export const KEYS: readonly { context: string; key: string; action: string; label: string }[] = [
+  { context: 'Chat', key: 'ctrl+x ctrl+e', action: 'app:cycleDiffBase', label: 'effort 슬라이더' },
+  { context: 'Chat', key: 'ctrl+x ctrl+p', action: 'command:panel', label: '사이드바 열기/닫기' },
+  { context: 'Pane', key: 'ctrl+x ctrl+x', action: 'pane:close', label: '패널 닫기' },
+  { context: 'PaneField', key: 'ctrl+x ctrl+x', action: 'pane:close', label: '패널 입력칸에서 닫기' },
 ]
 
-/** One key's state in a keybindings file: bound to ours, missing, or bound to something else. */
-export type KeyState = { key: string; label: string; state: 'ok' | 'missing' | 'conflict'; current?: string }
+/**
+ * One key's state in a keybindings file: bound to ours, missing, or bound to something else. `id`
+ * names it with its context (`Pane ctrl+x ctrl+x`): one key may be ours in two contexts.
+ */
+export type KeyState = { id: string; context: string; key: string; label: string; state: 'ok' | 'missing' | 'conflict'; current?: string }
+
+/** A key's name with its context, as `KeyState.id` and `/setup`'s list of what it added carry it. */
+export function keyId(context: string, key: string): string {
+  return `${context} ${key}`
+}
 
 type Keybindings = { bindings?: { context?: string; bindings?: Record<string, unknown> }[]; [field: string]: unknown }
 
 /** Each of our keys as the file has it; a file that is absent or not JSON has none. */
 export function keyStates(text: string | undefined): KeyState[] {
-  const chat = chatBindings(parse(text))
+  const file = parse(text)
 
-  return KEYS.map(({ key, action, label }) => {
-    const current = chat[key]
-    if (current === undefined) return { key, label, state: 'missing' as const }
-    if (current === action) return { key, label, state: 'ok' as const }
+  return KEYS.map(({ context, key, action, label }) => {
+    const base = { id: keyId(context, key), context, key, label }
+    const current = contextBindings(file, context)[key]
+    if (current === undefined) return { ...base, state: 'missing' as const }
+    if (current === action) return { ...base, state: 'ok' as const }
 
-    return { key, label, state: 'conflict' as const, current: String(current) }
+    return { ...base, state: 'conflict' as const, current: String(current) }
   })
 }
 
 /**
- * The file's text with our missing keys added to its Chat context (made when there is none), and
- * nothing else changed; a key bound to something else is left as it is. Null when nothing is
- * missing, or the file is there but not JSON (it is not ours to rewrite).
+ * The file's text with our missing keys added, each to its context's block (made at the end when
+ * there is none), and nothing else changed; a key bound to something else is left as it is. Null when
+ * nothing is missing, or the file is there but not JSON (it is not ours to rewrite).
  */
 export function withKeys(text: string | undefined): string | null {
   const file = text === undefined || text.trim() === '' ? {} : parse(text)
@@ -49,14 +65,15 @@ export function withKeys(text: string | undefined): string | null {
   if (missing.length === 0) return null
 
   const bindings = Array.isArray(file.bindings) ? [...file.bindings] : []
-  let index = bindings.findIndex(block => block?.context === 'Chat')
-  if (index === -1) {
-    bindings.push({ context: 'Chat', bindings: {} })
-    index = bindings.length - 1
+  for (const { context, key, id } of missing) {
+    let index = bindings.findIndex(block => block?.context === context)
+    if (index === -1) {
+      bindings.push({ context, bindings: {} })
+      index = bindings.length - 1
+    }
+    const block = bindings[index]
+    bindings[index] = { ...block, context, bindings: { ...(block?.bindings ?? {}), [key]: KEYS.find(entry => keyId(entry.context, entry.key) === id)?.action } }
   }
-  const chat = { ...(bindings[index]?.bindings ?? {}) }
-  for (const { key } of missing) chat[key] = KEYS.find(entry => entry.key === key)?.action
-  bindings[index] = { ...bindings[index], context: 'Chat', bindings: chat }
 
   const base =
     text === undefined || text.trim() === ''
@@ -77,12 +94,13 @@ function parse(text: string | undefined): Keybindings | null {
   }
 }
 
-function chatBindings(file: Keybindings | null): Record<string, unknown> {
+/** Every binding the file gives a context, its blocks for it merged in order. */
+function contextBindings(file: Keybindings | null, context: string): Record<string, unknown> {
   const blocks = Array.isArray(file?.bindings) ? file.bindings : []
-  const chat: Record<string, unknown> = {}
-  for (const block of blocks) if (block?.context === 'Chat') Object.assign(chat, block.bindings ?? {})
+  const merged: Record<string, unknown> = {}
+  for (const block of blocks) if (block?.context === context) Object.assign(merged, block.bindings ?? {})
 
-  return chat
+  return merged
 }
 
 /** The marketplace hubblerc is installed from, as `/plugin marketplace add Circlewee/hubblerc` declares it. */
@@ -260,12 +278,12 @@ export function setupReport(
   const keyParts = state.keys.map(key => {
     const name = `${key.key}(${key.label})`
     if (key.state === 'ok') return name
-    if (added.includes(key.key)) return `${name} 방금 추가함`
+    if (added.includes(key.id)) return `${name} 방금 추가함`
     if (key.state === 'conflict') return `${name} 이미 \`${key.current}\`에 묶여 있어 그대로 둠`
 
     return `${name} 없음`
   })
-  const isEveryKeySet = state.keys.every(key => key.state === 'ok' || added.includes(key.key))
+  const isEveryKeySet = state.keys.every(key => key.state === 'ok' || added.includes(key.id))
   lines.push(`${isEveryKeySet ? '✓' : '✗'} 키: ${keyParts.join(', ')}`)
   if (state.keys.some(key => key.state === 'conflict')) lines.push(`  다른 동작에 묶인 키는 \`${keyFile}\`에서 직접 바꾸세요`)
   if (state.isKeyFileBroken) lines.push(`✗ \`${keyFile}\`가 JSON이 아니라 키를 읽거나 더할 수 없습니다. 파일을 고친 뒤 다시 \`/setup\``)
@@ -398,7 +416,7 @@ export async function runSetup($: EngineInterface): Promise<string> {
       await $.fs.write(backup, text)
     }
     await $.fs.write(path, next)
-    added = state.keys.filter(key => key.state === 'missing').map(key => key.key)
+    added = state.keys.filter(key => key.state === 'missing').map(key => key.id)
   }
 
   let autoUpdate: AutoUpdateChange = null
