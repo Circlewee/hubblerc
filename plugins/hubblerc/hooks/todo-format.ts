@@ -37,8 +37,12 @@ export const TODO_PAGE_SIZE = 12
 
 export const STATUSES: readonly UserTodoStatus[] = ['pending', 'in_progress', 'done', 'on_hold']
 
-/** The sign a status is drawn with. */
-export const STATUS_MARK: Record<UserTodoStatus, string> = { pending: '○', in_progress: '◐', done: '✓', on_hold: '—' }
+/**
+ * The sign a status is drawn with (the person's pick, 2026-11-04): emoji drawn as emoji with no
+ * variation selector, two cells each. An emoji keeps its own colours, so neither dim nor a theme
+ * colour reaches it: a dim item dims its text alone.
+ */
+export const STATUS_MARK: Record<UserTodoStatus, string> = { pending: '📌', in_progress: '⏳', done: '✅', on_hold: '💤' }
 
 /** In progress first, then waiting, on hold, done; within a status the order they were written in. */
 const STATUS_ORDER: Record<UserTodoStatus, number> = { in_progress: 0, pending: 1, on_hold: 2, done: 3 }
@@ -246,7 +250,7 @@ export function todoToolList(items: readonly UserTodo[], now: TurnRef): string {
   return [`The user's to-do list for this project (${items.length} items). ${here}`, ...rows].join('\n')
 }
 
-/** How many cells a row's tail takes: ` #14`, ` ↗`, ` ✕`. */
+/** How many cells a row's tail takes: ` #14`, then a space and ↗, a space and ✕ (the spaces outside the buttons). */
 export function rowTailCells(item: UserTodo): number {
   return (showsTurn(item) ? cellWidth(` #${item.turn}`) : 0) + (item.status === 'pending' ? 2 : 0) + 2
 }

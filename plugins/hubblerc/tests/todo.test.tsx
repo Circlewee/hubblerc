@@ -19,6 +19,7 @@ import {
   todoToolList,
 } from '../hooks/todo-format'
 import type { TodoRecord, UserTodo } from '../hooks/todo-format'
+import { cellWidth } from '../hooks/band-format'
 import { NOW, standInForEngine, start } from './engine'
 
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const
@@ -146,7 +147,7 @@ test('the lists say each item, the model\'s with ids and the answers it was writ
     item(3, 'in_progress', { createdTurn: 12, createdSession: 'now', turn: 14, turnSession: 'now' }),
     item(4, 'on_hold'),
   ]
-  expect(todoListText(list)).toBe(['할 일: 진행 1 · 대기 1 · 보류 1 · 완료 1', '◐ 일 3  #14', '○ 일 2', '— 일 4', '✓ 일 1  #9'].join('\n'))
+  expect(todoListText(list)).toBe(['할 일: 진행 1 · 대기 1 · 보류 1 · 완료 1', '⏳ 일 3  #14', '📌 일 2', '💤 일 4', '✅ 일 1  #9'].join('\n'))
   expect(todoListText([])).toMatch(/없습니다/)
 
   const text = todoToolList(list, { turn: 15, session: 'now' })
@@ -166,8 +167,8 @@ test('/todo writes to the project with the answer it was written during; alone i
 
   expect(await todo($, '  로그 정리하기  ')).toBe('할 일에 적었습니다: 로그 정리하기')
   expect(items(stored)).toEqual([{ id: 1, text: '로그 정리하기', status: 'pending', createdAt: NOW, createdTurn: 2, createdSession: 'session-1' }])
-  expect(await todo($, '')).toBe('할 일: 대기 1\n○ 로그 정리하기')
-  expect(await todo($, '   ')).toBe('할 일: 대기 1\n○ 로그 정리하기')
+  expect(await todo($, '')).toBe('할 일: 대기 1\n📌 로그 정리하기')
+  expect(await todo($, '   ')).toBe('할 일: 대기 1\n📌 로그 정리하기')
 })
 
 test('/todo writes onto what the store holds now: another session\'s item written meanwhile stays', async ($, on) => {
@@ -248,9 +249,9 @@ test('the last box has tabs: the contents, or the to-dos, the shown one bold and
   expect(await ui.find({ key: 'turn-t1' })).toBeUndefined()
   // In progress, waiting, done; the answer number only on what is taken up or done.
   expect(await rowKeys(ui)).toEqual(['todo-2', 'todo-1', 'todo-3'])
-  expect((await ui.find({ key: 'todo-2' }))?.text).toBe('◐ 일 2 #3 ✕')
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('○ 일 1 ↗ ✕')
-  expect((await ui.find({ key: 'todo-3' }))?.text).toBe('✓ 일 3 #2 ✕')
+  expect((await ui.find({ key: 'todo-2' }))?.text).toBe('⏳ 일 2 #3 ✕')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('📌 일 1 ↗ ✕')
+  expect((await ui.find({ key: 'todo-3' }))?.text).toBe('✅ 일 3 #2 ✕')
   expect((await ui.find({ key: 'todo-clear-done' }))?.text).toBe('완료 1개 지우기')
   expect((await ui.find({ key: 'todo-input' }))?.type).toBe('Input')
   await ui.unmount()
@@ -276,7 +277,7 @@ test('a press on the sign cycles the status, ✕ deletes, "완료 N개 지우기
   expect(items(stored).find(one => one.id === 1)).toMatchObject({ status: 'in_progress' })
   // A press sets no answer number.
   expect(items(stored).find(one => one.id === 1)?.turn).toBeUndefined()
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('◐ 일 1 ✕')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 일 1 ✕')
   for (const status of ['done', 'on_hold', 'pending']) {
     await ui.press({ key: 'todo-status-1' })
     expect(items(stored).find(one => one.id === 1)?.status).toBe(status)
@@ -314,7 +315,7 @@ test('↗ offers a waiting item in the prompt box; sent as offered, that answer 
   // Sent as offered, spaces around aside: in progress, and this answer's number.
   await $.turn.start({ text: '  인증 버그 고치기\n', turnId: 't2' })
   expect(items(stored).find(one => one.id === 1)).toMatchObject({ status: 'in_progress', turn: 2, turnSession: 'session-1' })
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('◐ 인증 버그 고치기 #2 ✕')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 인증 버그 고치기 #2 ✕')
   await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't2', durationMs: 1000 })
 
   // Edited before it was sent: the offer is forgotten, and a later question of the same text takes nothing.
@@ -370,7 +371,10 @@ test("another session's change shows as an answer starts; past twelve, or in a s
   await short.unmount()
 })
 
-test('a surface with no field draws the tab without one; a folded box unfolds on a press of a tab', async ($, on) => {
+// The field is drawn only where `$.ui.resolve` hands an `Input` (the mobile table had none). The
+// 2.1.318 kit hands every surface the whole table, mobile too, and a test cannot rewrite it (the
+// engine raises no `ui.resolve`): the tab is checked on mobile, the field's absence no longer.
+test('the tab draws on mobile; a folded box unfolds on a press of a tab', async ($, on) => {
   standInForEngine(on)
   memoryStore(on, { sidebarFolded: ['contents'], [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
   await start($)
@@ -379,7 +383,6 @@ test('a surface with no field draws the tab without one; a folded box unfolds on
   expect((await ui.find({ key: 'box-contents' }))?.text).toMatch(/^╶── ▸ 목차 0 │ 할 일 1 ─+$/)
   await ui.press({ key: 'tab-todo' })
   expect(await ui.find({ key: 'todo-1' })).toBeDefined()
-  expect(await ui.find({ key: 'todo-input' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -398,4 +401,29 @@ test('a write the store refuses (over its 4 MiB) is said: a toast for the field,
 
   expect((await $.tool.call({ tool: TOOL, action: 'add', text: '적히지 않을 일' })).deny).toMatch(/could not be read or written: .*4 MiB/)
   expect(await todo($, '적히지 않을 일')).toMatch(/^할 일을 다루지 못했습니다: .*4 MiB/)
+})
+
+test('a row: an emoji sign in its own colours, the buttons holding their sign alone, the text cut to the width', async ($, on) => {
+  standInForEngine(on)
+  memoryStore(on, {
+    sidebarTab: 'todo',
+    [KEY]: { items: [item(1, 'pending', { text: '긴 '.repeat(60) }), item(2, 'done', { turn: 4 }), item(3, 'on_hold')], nextId: 4 },
+  })
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  // The space before ↗ and ✕ is outside the button: the focus mark sits on the sign, not beside it.
+  expect((await ui.find({ key: 'todo-send-1' }))?.text).toBe('↗')
+  expect((await ui.find({ key: 'todo-delete-1' }))?.text).toBe('✕')
+  expect((await ui.find({ key: 'todo-status-1' }))?.text).toBe('📌')
+  // An emoji keeps its colours: no dim, no colour on the sign; a done or held item dims its text.
+  for (const sign of ['✅', '💤']) expect((await ui.find({ type: 'Text', text: sign }))?.props).toEqual({})
+  expect((await ui.find({ type: 'Text', text: ' 일 2' }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: ' 일 3' }))?.props.dimColor).toBe(true)
+  // The sign's two cells counted: the row stays within the box's 52, a cell before the tail.
+  const row = (await ui.find({ key: 'todo-1' }))?.text ?? ''
+  expect(row.endsWith('… ↗ ✕')).toBe(true)
+  expect(cellWidth(row)).toBeLessThanOrEqual(52 - 1)
+  expect(cellWidth(row)).toBeGreaterThanOrEqual(52 - 2)
+  await ui.unmount()
 })

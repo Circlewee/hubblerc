@@ -782,13 +782,15 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const shownTodos = userTodos.slice(0, todosShown(userTodos.length, contentsRoom, doneCount, hasField))
     const todoRow = (item: UserTodo) => {
       const isDim = item.status === 'done' || item.status === 'on_hold'
-      // The sign, a space, the text; then a cell at least before the tail.
-      const room = inner - 2 - rowTailCells(item) - 1
+      const mark = STATUS_MARK[item.status]
+      // The sign (an emoji, two cells), a space, the text; then a cell at least before the tail.
+      const room = inner - cellWidth(`${mark} `) - rowTailCells(item) - 1
 
+      // A button holds its sign alone, the space before it outside: the focus mark sits on the sign.
       return (
         <Box key={`todo-${item.id}`} justifyContent="space-between">
           <Box>
-            {/* A press moves it on: waiting, in progress, done, on hold, waiting. */}
+            {/* A press moves it on: waiting, in progress, done, on hold, waiting. An emoji keeps its colours: no dim, no theme colour. */}
             <Button
               key={`todo-status-${item.id}`}
               plain
@@ -796,12 +798,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
                 void cycleTodo($, item.id)
               }}
             >
-              <Text {...(item.status === 'in_progress' ? { color: THEME_COLORS.running } : isDim ? { dimColor: true } : {})}>{STATUS_MARK[item.status]}</Text>
+              <Text>{mark}</Text>
             </Button>
             <Text {...(isDim ? { dimColor: true } : {})}>{` ${clipCells(oneLine(item.text), room)}`}</Text>
           </Box>
           <Box>
             {showsTurn(item) ? <Text dimColor>{` #${item.turn}`}</Text> : null}
+            {item.status === 'pending' ? <Text> </Text> : null}
             {item.status === 'pending' ? (
               <Button
                 key={`todo-send-${item.id}`}
@@ -810,9 +813,10 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
                   void offerTodo($, item)
                 }}
               >
-                <Text color={THEME_COLORS.effort}> ↗</Text>
+                <Text color={THEME_COLORS.effort}>↗</Text>
               </Button>
             ) : null}
+            <Text> </Text>
             <Button
               key={`todo-delete-${item.id}`}
               plain
@@ -820,7 +824,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
                 void deleteTodo($, item.id)
               }}
             >
-              <Text dimColor> ✕</Text>
+              <Text dimColor>✕</Text>
             </Button>
           </Box>
         </Box>

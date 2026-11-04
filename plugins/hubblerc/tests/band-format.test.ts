@@ -50,6 +50,21 @@ test('Korean takes two cells a character', () => {
   expect(cellWidth('대기 중')).toBe(7)
 })
 
+test('an emoji drawn as emoji takes two cells; one drawn as text, a variation selector and a joiner do not', () => {
+  // The to-do signs, and others drawn as emoji with no selector.
+  expect(['📌', '⏳', '💤', '✅'].map(cellWidth)).toEqual([2, 2, 2, 2])
+  expect(['⌚', '⏩', '⏰', '⚡', '⚪', '❌', '⬛', '⭐', '🤖', '🫠'].map(cellWidth)).toEqual([2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
+  expect(cellWidth('📌 일 1')).toBe(7)
+  // Drawn as text by default: the band's and the sidebar's own signs stay one cell.
+  expect(['⚠', '✓', '✕', '↗', '◐', '▸', '━', '╌', '↻'].map(cellWidth)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1])
+  // Selectors and the joiner take nothing of their own.
+  expect(cellWidth('\uFE0F')).toBe(0)
+  expect(cellWidth('\uFE0E')).toBe(0)
+  expect(cellWidth('✅\uFE0F')).toBe(2)
+  // A joined sequence counts each part (a terminal may draw it as one glyph): none is used here.
+  expect(cellWidth('👩\u200D💻')).toBe(4)
+})
+
 test('line 1 drops 7d, then the project name, then the bars, to fit a narrow band', () => {
   const input = {
     model: 'claude-opus-5-5',
