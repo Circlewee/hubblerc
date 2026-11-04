@@ -10,6 +10,7 @@ import {
   nextStatus,
   parseTodoRecord,
   removeItem,
+  rowTailCells,
   setItemStatus,
   sortTodos,
   todoListText,
@@ -249,9 +250,9 @@ test('the last box has tabs: the contents, or the to-dos, the shown one bold and
   expect(await ui.find({ key: 'turn-t1' })).toBeUndefined()
   // In progress, waiting, done; the answer number only on what is taken up or done.
   expect(await rowKeys(ui)).toEqual(['todo-2', 'todo-1', 'todo-3'])
-  expect((await ui.find({ key: 'todo-2' }))?.text).toBe('⏳ 일 2 #3 ✕')
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('📌 일 1 ↗ ✕')
-  expect((await ui.find({ key: 'todo-3' }))?.text).toBe('✅ 일 3 #2 ✕')
+  expect((await ui.find({ key: 'todo-2' }))?.text).toBe('⏳ 일 2 #3 ✕ ')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('📌 일 1 ↗  ✕ ')
+  expect((await ui.find({ key: 'todo-3' }))?.text).toBe('✅ 일 3 #2 ✕ ')
   expect((await ui.find({ key: 'todo-clear-done' }))?.text).toBe('완료 1개 지우기')
   expect((await ui.find({ key: 'todo-input' }))?.type).toBe('Input')
   await ui.unmount()
@@ -277,7 +278,7 @@ test('a press on the sign cycles the status, ✕ deletes, "완료 N개 지우기
   expect(items(stored).find(one => one.id === 1)).toMatchObject({ status: 'in_progress' })
   // A press sets no answer number.
   expect(items(stored).find(one => one.id === 1)?.turn).toBeUndefined()
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 일 1 ✕')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 일 1 ✕ ')
   for (const status of ['done', 'on_hold', 'pending']) {
     await ui.press({ key: 'todo-status-1' })
     expect(items(stored).find(one => one.id === 1)?.status).toBe(status)
@@ -315,7 +316,7 @@ test('↗ offers a waiting item in the prompt box; sent as offered, that answer 
   // Sent as offered, spaces around aside: in progress, and this answer's number.
   await $.turn.start({ text: '  인증 버그 고치기\n', turnId: 't2' })
   expect(items(stored).find(one => one.id === 1)).toMatchObject({ status: 'in_progress', turn: 2, turnSession: 'session-1' })
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 인증 버그 고치기 #2 ✕')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 인증 버그 고치기 #2 ✕ ')
   await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't2', durationMs: 1000 })
 
   // Edited before it was sent: the offer is forgotten, and a later question of the same text takes nothing.
@@ -403,7 +404,7 @@ test('a write the store refuses (over its 4 MiB) is said: a toast for the field,
   expect(await todo($, '적히지 않을 일')).toMatch(/^할 일을 다루지 못했습니다: .*4 MiB/)
 })
 
-test('a row: an emoji sign in its own colours, the buttons holding their sign alone, the text cut to the width', async ($, on) => {
+test('a row: an emoji sign in its own colours, ↗ and ✕ three cells each, the text cut to the width', async ($, on) => {
   standInForEngine(on)
   memoryStore(on, {
     sidebarTab: 'todo',
@@ -412,9 +413,9 @@ test('a row: an emoji sign in its own colours, the buttons holding their sign al
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  // The space before ↗ and ✕ is outside the button: the focus mark sits on the sign, not beside it.
-  expect((await ui.find({ key: 'todo-send-1' }))?.text).toBe('↗')
-  expect((await ui.find({ key: 'todo-delete-1' }))?.text).toBe('✕')
+  // A space each side inside the button: three cells to press, the sign in the middle of the focus mark.
+  expect((await ui.find({ key: 'todo-send-1' }))?.text).toBe(' ↗ ')
+  expect((await ui.find({ key: 'todo-delete-1' }))?.text).toBe(' ✕ ')
   expect((await ui.find({ key: 'todo-status-1' }))?.text).toBe('📌')
   // An emoji keeps its colours: no dim, no colour on the sign; a done or held item dims its text.
   for (const sign of ['✅', '💤']) expect((await ui.find({ type: 'Text', text: sign }))?.props).toEqual({})
@@ -422,7 +423,9 @@ test('a row: an emoji sign in its own colours, the buttons holding their sign al
   expect((await ui.find({ type: 'Text', text: ' 일 3' }))?.props.dimColor).toBe(true)
   // The sign's two cells counted: the row stays within the box's 52, a cell before the tail.
   const row = (await ui.find({ key: 'todo-1' }))?.text ?? ''
-  expect(row.endsWith('… ↗ ✕')).toBe(true)
+  expect(row.endsWith('… ↗  ✕ ')).toBe(true)
+  // The tail as the width is counted: ` #N`, then ` ↗ ` and ` ✕ `.
+  expect([item(1, 'pending'), item(2, 'in_progress', { turn: 3 }), item(3, 'done', { turn: 12 }), item(4, 'on_hold', { turn: 5 })].map(rowTailCells)).toEqual([6, 6, 7, 3])
   expect(cellWidth(row)).toBeLessThanOrEqual(52 - 1)
   expect(cellWidth(row)).toBeGreaterThanOrEqual(52 - 2)
   await ui.unmount()

@@ -786,7 +786,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       // The sign (an emoji, two cells), a space, the text; then a cell at least before the tail.
       const room = inner - cellWidth(`${mark} `) - rowTailCells(item) - 1
 
-      // A button holds its sign alone, the space before it outside: the focus mark sits on the sign.
+      // ↗ and ✕ hold a space each side, three cells to press, the sign in the middle of the focus mark.
       return (
         <Box key={`todo-${item.id}`} justifyContent="space-between">
           <Box>
@@ -804,7 +804,6 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
           </Box>
           <Box>
             {showsTurn(item) ? <Text dimColor>{` #${item.turn}`}</Text> : null}
-            {item.status === 'pending' ? <Text> </Text> : null}
             {item.status === 'pending' ? (
               <Button
                 key={`todo-send-${item.id}`}
@@ -813,10 +812,9 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
                   void offerTodo($, item)
                 }}
               >
-                <Text color={THEME_COLORS.effort}>↗</Text>
+                <Text color={THEME_COLORS.effort}> ↗ </Text>
               </Button>
             ) : null}
-            <Text> </Text>
             <Button
               key={`todo-delete-${item.id}`}
               plain
@@ -824,7 +822,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
                 void deleteTodo($, item.id)
               }}
             >
-              <Text dimColor>✕</Text>
+              <Text dimColor> ✕ </Text>
             </Button>
           </Box>
         </Box>

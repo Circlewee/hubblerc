@@ -250,7 +250,7 @@ export function todoToolList(items: readonly UserTodo[], now: TurnRef): string {
   return [`The user's to-do list for this project (${items.length} items). ${here}`, ...rows].join('\n')
 }
 
-/** How many cells a row's tail takes: ` #14`, then a space and ↗, a space and ✕ (the spaces outside the buttons). */
+/** How many cells a row's tail takes: ` #14`, then the buttons ` ↗ ` and ` ✕ `, three cells each. */
 export function rowTailCells(item: UserTodo): number {
-  return (showsTurn(item) ? cellWidth(` #${item.turn}`) : 0) + (item.status === 'pending' ? 2 : 0) + 2
+  return (showsTurn(item) ? cellWidth(` #${item.turn}`) : 0) + (item.status === 'pending' ? 3 : 0) + 3
 }
