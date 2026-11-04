@@ -171,6 +171,16 @@ export type GitInfo = {
   ignored?: string[]
 }
 
+/** What the sidebar's status box shows of decisions (`hooks/decide/`): this machine's totals, read from `$.store`. */
+export type DecideStatus = {
+  /** Decisions made today (local date). */
+  todayCount: number
+  /** What the budget period's decisions cost, in dollars. */
+  periodUsd: number
+  /** The period's budget, from the options. */
+  budgetUsd: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     hubblerc: {
@@ -233,6 +243,8 @@ declare module 'claude-code' {
        * module, read from `$.store`, too big for state the sidebar reads every second.
        */
       userTodoVersion: number
+      /** Decisions' spend for the sidebar's line; null while no API key is set (no line). */
+      decideStatus: DecideStatus | null
     }
   }
 }

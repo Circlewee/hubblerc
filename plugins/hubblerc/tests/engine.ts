@@ -50,14 +50,46 @@ export type StandIn = {
   /** Whether the prompt box takes a suggestion now (empty, no answer running), and every text offered. */
   isSuggestionShown: boolean
   suggestions: string[]
+  /**
+   * The Messages API (`https://api.anthropic.com/v1/messages`): what it answers a request, by the
+   * request's body; every request made, with its headers; and how long each takes on the mocked clock.
+   */
+  anthropic: (body: Record<string, unknown>) => { status: number; body: unknown }
+  anthropicCalls: { headers: Record<string, string>; body: Record<string, unknown> }[]
+  anthropicDelayMs: number
+  /** Files the plugin appended lines to (`tee -a`) and reads back in pieces (`tail -c | head -c`), by path. */
+  files: Record<string, string>
+  /** Paths `$.fs.exists` finds, besides the files above. */
+  existing: string[]
 }
+
+/** A Messages API reply holding `text` as its one text block. */
+export function messageReply(text: string, extra: Record<string, unknown> = {}): { status: number; body: unknown } {
+  return {
+    status: 200,
+    body: {
+      id: 'msg_1',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-haiku-5-5',
+      content: [{ type: 'text', text }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 300, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      ...extra,
+    },
+  }
+}
+
+/** The bytes of a text as UTF-8, and back: how the stand-in cuts a file the way `tail -c` and `head -c` do. */
+const encoder = new TextEncoder()
+const decoder = new TextDecoder()
 
 /**
  * Nothing sits beneath the plugin: these hooks stand for the engine and what it reports. A pane
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [] }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [] }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -100,13 +132,49 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
 
     return { value: agents as never }
   })
-  on('http.fetch', () => {
+  on('http.fetch', async (_, e) => {
+    if (e.url === 'https://api.anthropic.com/v1/messages') {
+      const body = JSON.parse(e.init?.body ?? '{}') as Record<string, unknown>
+      standIn.anthropicCalls.push({ headers: { ...(e.init?.headers ?? {}) }, body })
+      if (standIn.anthropicDelayMs > 0) await standIn.clock.sleep(standIn.anthropicDelayMs)
+      const answer = standIn.anthropic(body)
+
+      return { value: { status: answer.status, ok: answer.status >= 200 && answer.status < 300, headers: {}, text: JSON.stringify(answer.body) } }
+    }
     standIn.fetches += 1
 
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: '@anthropic-ai/claude-code', version: standIn.latestVersion }) } }
   })
   on('session.version', () => ({ value: { version: '2.1.310', base: '2.1.310' } }))
+  on('fs.exists', (_, e) => ({ value: standIn.existing.includes(e.path) || standIn.files[e.path] !== undefined || Object.keys(standIn.files).some(path => path.startsWith(`${e.path}/`)) }))
   on('process.run', (_, e) => {
+    const done = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // The decision log: appended to, made with its folder, read back in pieces; the machine's name; a zip.
+    if (e.argv[0] === '/usr/bin/tee' && e.argv[1] === '-a') {
+      const path = e.argv[2] ?? ''
+      standIn.files[path] = (standIn.files[path] ?? '') + (e.init?.stdin ?? '')
+
+      return done(e.init?.stdin ?? '')
+    }
+    if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('mkdir -p')) {
+      const path = e.argv[5] ?? ''
+      standIn.files[path] = standIn.files[path] ?? ''
+
+      return done('')
+    }
+    if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('| head -c')) {
+      standIn.ran.push([...e.argv])
+      const bytes = encoder.encode(standIn.files[e.argv[5] ?? ''] ?? '')
+      const from = Number(e.argv[4]) - 1
+
+      return done(decoder.decode(bytes.slice(from, from + Number(e.argv[6]))))
+    }
+    if (e.argv[0] === '/usr/sbin/scutil') return done('Test Mac\n')
+    if (e.argv[0] === '/usr/bin/zip') {
+      standIn.ran.push([...e.argv, `cwd=${e.init?.cwd ?? ''}`])
+
+      return done('')
+    }
     // The status hubblerc polls must never take the index lock a person's commit needs.
     if (e.argv.includes('status')) standIn.gitStatusArgs.push([...e.argv])
     const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -177,6 +245,8 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     // A command that removes is refused, as a person might: a failed call.
     if (e.tool === 'Bash' && String((e as { command?: unknown }).command).startsWith('rm')) return { deny: 'refused' }
     if (e.tool === 'Write') return { result: { type: 'create', filePath: e.file_path, content: e.content, structuredPatch: [] } as never }
+    // A command that exits non-zero, as the Bash tool reports it: an error.
+    if (e.tool === 'Bash' && String((e as { command?: unknown }).command).startsWith('false')) return { isError: true as const, result: 'Exit code 1', text: 'Exit code 1' }
 
     return { result: {} as never }
   })

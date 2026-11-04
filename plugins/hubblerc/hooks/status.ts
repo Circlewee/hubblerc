@@ -7,6 +7,7 @@ import { bashPurpose } from './bash-purpose'
 import { addFiveHourPoint } from './forecast'
 import { isSidebarShown } from './pane'
 import { refreshTodos } from './todo'
+import { refreshDecideStatus } from './decide/decide'
 
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
 const todos = atom({ plugin: 'hubblerc', key: 'todos' } as const, [])
@@ -87,6 +88,8 @@ export async function startStatus($: EngineInterface): Promise<void> {
           await refreshSessionName($).catch(() => undefined)
           // Another session's to-dos (the same project) show within the half minute.
           await refreshTodos($).catch(() => undefined)
+          // Another session's decisions, and a new day's count, show within the half minute.
+          await refreshDecideStatus($).catch(() => undefined)
         }
       }
       if (isSlow || hasAgents || isRunning || isAnswering) await update($, tick, () => now)

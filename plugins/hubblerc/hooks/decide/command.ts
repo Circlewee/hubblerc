@@ -1,0 +1,151 @@
+import type { EngineInterface, On } from 'claude-code'
+
+import { BASH_TASK } from './bash-fail'
+import { dollars } from './cost'
+import { currentOptions, currentSpend, decide, hasApiKey, logFolder, NO_KEY_TEXT, readLogPieces } from './decide'
+import { METHOD_VERSION } from './method'
+import { calibrationLines, calibrationOf, predicatePairs, readLog, taskCounts } from './record'
+import type { LoggedDecision } from './record'
+
+/** At session.start: `/decide`, a temporary name till the feature has one. */
+export async function registerDecideCommand($: EngineInterface): Promise<void> {
+  await $.command.register({
+    name: 'decide',
+    description: '판정(Haiku로 확률 판정): stats [task] 기록 통계 · export 기록 zip · test <글> 시험 판정 (hubblerc, 임시 이름)',
+    argumentHint: 'stats [task] | export | test <글>',
+    immediate: true,
+  })
+}
+
+export function answerDecideCommand(on: On): void {
+  on('command.run', { command: 'decide' }, async ($, e) => ({
+    text: await runDecideCommand($, e.args).catch((error: unknown) => `판정 명령을 마치지 못했습니다: ${String(error)}`),
+  }))
+}
+
+export async function runDecideCommand($: EngineInterface, args: string): Promise<string> {
+  const [word = '', ...rest] = args.trim().split(/\s+/)
+  const tail = args.trim().slice(word.length).trim()
+  if (word === 'stats') return statsText($, rest[0])
+  if (word === 'export') return exportLog($)
+  if (word === 'test') return testDecision($, tail)
+
+  return usageText($)
+}
+
+async function usageText($: EngineInterface): Promise<string> {
+  const folder = await logFolder($).catch(() => '(알 수 없음)')
+
+  return [
+    '/decide stats [task]  판정 기록 통계: task별 건수·정답 수, 비용, bash-fail의 보정(Brier·ECE·정확도)',
+    '/decide export        기록 폴더를 zip으로 묶기',
+    '/decide test <글>     그 글이 참일 확률을 판정 하나로(키 확인용, 크레딧이 듭니다)',
+    `API 키: ${hasApiKey() ? '설정됨' : '없음'} · 기록 폴더: ${folder}`,
+  ].join('\n')
+}
+
+/** Every machine's log in the folder, read into decisions by id. */
+async function readAllLogs($: EngineInterface): Promise<{ folder: string; files: number; decisions: Map<string, LoggedDecision> }> {
+  const folder = await logFolder($)
+  const decisions = new Map<string, LoggedDecision>()
+  if (!(await $.fs.exists(folder).catch(() => false))) return { folder, files: 0, decisions }
+  const entries = await $.fs.list(folder)
+  const files = entries.filter(entry => entry.kind === 'file' && entry.name.endsWith('.jsonl'))
+  for (const file of files) await readLogPieces($, `${folder}/${file.name}`, piece => readLog(piece, decisions))
+
+  return { folder, files: files.length, decisions }
+}
+
+/**
+ * `/decide stats [task]`: decisions and outcomes by task (every machine's log in the folder), this
+ * machine's spend against its limits, and a predicate task's calibration (bash-fail unless named),
+ * with thinking off and on apart.
+ */
+async function statsText($: EngineInterface, task: string | undefined): Promise<string> {
+  const { folder, files, decisions } = await readAllLogs($)
+  const all = [...decisions.values()]
+  const counts = taskCounts(all).filter(entry => task === undefined || entry.task === task)
+  const lines = [`판정 기록: ${folder} (파일 ${files}개)`]
+  if (counts.length === 0) {
+    lines.push(task === undefined ? '  기록된 판정이 없습니다.' : `  ${task} 판정이 없습니다.`)
+  } else {
+    lines.push('task별 판정 건수 (정답 붙은 수)')
+    const width = Math.max(...counts.map(entry => entry.task.length))
+    for (const entry of counts) lines.push(`  ${entry.task.padEnd(width)}  ${String(entry.count).padStart(6)}건 (${entry.withOutcome})`)
+  }
+
+  const options = currentOptions()
+  const spend = await currentSpend($)
+  lines.push(
+    `비용(이 기기): 오늘 ${spend.dayCount}건 $${spend.dayUsd.toFixed(2)} / 폭주 방지 상한 ${dollars(options.dailyCapUsd)} · 이번 주기(${spend.period}부터) ${spend.periodCount}건 $${spend.periodUsd.toFixed(2)} / 예산 ${dollars(options.budgetUsd)}`,
+  )
+
+  const target = task ?? BASH_TASK
+  const current = (decision: LoggedDecision) => decision.methodVersion === METHOD_VERSION
+  const pairs = predicatePairs(all, target, current)
+  const older = predicatePairs(all, target, decision => !current(decision)).length
+  lines.push('', `${target} 보정 (판정 방식 v${METHOD_VERSION}${older > 0 ? `, 다른 버전 ${older}건 제외` : ''})`)
+  lines.push(...calibrationLines('  전체', calibrationOf(pairs)))
+  for (const [label, thinking] of [
+    ['thinking 끔', false],
+    ['thinking low', true],
+  ] as const) {
+    const part = calibrationOf(predicatePairs(all, target, decision => current(decision) && decision.thinking === thinking))
+    lines.push(calibrationLines(`  ${label}`, part)[0] ?? '')
+  }
+
+  return lines.join('\n')
+}
+
+/** `/decide export`: the log folder in a zip, in Downloads (else the home folder). */
+async function exportLog($: EngineInterface): Promise<string> {
+  const folder = await logFolder($)
+  if (!(await $.fs.exists(folder).catch(() => false))) return `판정 기록이 아직 없습니다: ${folder}`
+  const home = (await $.env.get('HOME')) ?? ''
+  const downloads = `${home}/Downloads`
+  const into = (await $.fs.exists(downloads).catch(() => false)) ? downloads : home
+  const out = `${into}/hubblerc-decide-${stamp(await $.clock.now())}.zip`
+  const cut = folder.lastIndexOf('/')
+  const ran = await $.process.run(['/usr/bin/zip', '-r', '-q', '-X', out, folder.slice(cut + 1)], { cwd: cut <= 0 ? '/' : folder.slice(0, cut), timeoutMs: 120_000 })
+  if (ran.exitCode !== 0) return `zip이 실패했습니다(${ran.exitCode}): ${ran.stderr.trim()}`
+
+  return `판정 기록을 묶었습니다: ${out}`
+}
+
+/** `/decide test <글>`: one predicate, whether the text is true, decided and shown call by call. */
+async function testDecision($: EngineInterface, text: string): Promise<string> {
+  if (!hasApiKey()) return NO_KEY_TEXT
+  if (text === '') return '판정할 글을 적어 주세요: /decide test <글>'
+  const result = await decide($, {
+    task: 'test',
+    input: text,
+    questions: [{ type: 'predicate', name: 'true', instructions: 'Is the statement in the input true?' }],
+  })
+  if ('skipped' in result) return result.reason
+  const answer = result.answers[0]
+  const head =
+    answer?.type === 'predicate'
+      ? `참일 확률 ${answer.probability.toFixed(2)} (${answer.value ? '참' : '거짓'})`
+      : answer?.type === 'refusal'
+        ? '모든 호출이 거절했습니다'
+        : '답 없음'
+  const calls = result.raw.map(call => (call.distributions !== undefined ? (call.distributions[0]?.[0] ?? 0).toFixed(2) : call.refused === true ? '거절' : `실패(${call.error ?? ''})`))
+  const seconds = (result.latencyMs / 1000).toFixed(1)
+
+  return [
+    `판정: ${head} · 호출 ${result.samples}/${result.raw.length} · ${seconds}초 · ${result.model}`,
+    `호출별 참일 확률: ${calls.join(' · ')}`,
+    `토큰: 입력 ${result.tokens.input} · 출력 ${result.tokens.output} · 캐시 읽기 ${result.tokens.cacheRead} · 비용 $${result.costUsd.toFixed(5)}`,
+    result.logPath !== undefined ? `기록: ${result.logPath} (${result.id})` : `기록하지 못했습니다: ${result.logError ?? ''}`,
+    'Console의 Billing에서 크레딧이 줄었는지 확인해 보세요.',
+  ].join('\n')
+}
+
+/** `20261104-153012`, local time. */
+function stamp(ms: number): string {
+  const date = new Date(ms)
+  const two = (n: number) => String(n).padStart(2, '0')
+
+  return `${date.getFullYear()}${two(date.getMonth() + 1)}${two(date.getDate())}-${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`
+}
+

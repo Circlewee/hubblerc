@@ -9,6 +9,9 @@ import { answerCommands, registerCommand } from './commands'
 import { startDevice } from './device'
 import { controlEffort, startEffort } from './effort'
 import { closeEffortPicker } from './effort-picker'
+import { noteBashOutcome, predictBashFailure } from './decide/bash-fail'
+import { answerDecideCommand, registerDecideCommand } from './decide/command'
+import { configureDecide, startDecide } from './decide/decide'
 import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
@@ -26,6 +29,7 @@ const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 export const register: Register = (on, options) => {
   const layout = layoutOption(options.layout)
   const autoByDefault = options.autoEffort === true
+  configureDecide(options)
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -35,6 +39,8 @@ export const register: Register = (on, options) => {
     await startEffort($).catch(() => undefined)
     await startSidebar($, layout).catch(() => undefined)
     await startTodos($).catch(() => undefined)
+    await startDecide($).catch(() => undefined)
+    await registerDecideCommand($).catch(() => undefined)
     await startDevice($).catch(() => undefined)
     await startRelaunch($).catch(() => undefined)
     await checkSetup($).catch(() => undefined)
@@ -61,10 +67,13 @@ export const register: Register = (on, options) => {
 
     const startedAt = await $.clock.now()
     const id = await markRunning($, e, startedAt).catch(() => undefined)
+    // Not awaited: the command runs while its failure is predicted; the outcome is paired as it ends.
+    const decision = e.tool === 'Bash' ? predictBashFailure($, e) : undefined
 
     try {
       const ran = await next(e)
       const ms = (await $.clock.now()) - startedAt
+      if (decision !== undefined) void noteBashOutcome($, decision, ran).catch(() => undefined)
       await recordRun($, e, ran, ms).catch(() => undefined)
       await noteCall($, e, ran, startedAt).catch(() => undefined)
 
@@ -131,6 +140,7 @@ export const register: Register = (on, options) => {
   trackPrompts(on)
   answerCommands(on, layout)
   serveTodoTool(on)
+  answerDecideCommand(on)
   controlEffort(on, autoByDefault)
   showBashPurpose(on)
   showToolLines(on)
