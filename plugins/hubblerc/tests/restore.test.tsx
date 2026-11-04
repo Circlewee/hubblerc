@@ -150,7 +150,7 @@ test('a resumed session shows its earlier answers, with no times, and what its s
   await ui.unmount()
 })
 
-test("a press finds the question's row among the rows drawn, and says so when it was not drawn", async ($, on) => {
+test("a press that cannot scroll to the question's row, drawn or not, opens the answer in a pane of its own", async ($, on) => {
   const standIn = standInForEngine(on)
   on('ui.render', { component: 'UserMessage' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -160,13 +160,15 @@ test("a press finds the question's row among the rows drawn, and says so when it
   standIn.sent = SENT
   standIn.messages = ROWS
   await start($)
+  const opens = standIn.opened.length
+  const answerPane = { id: 'hubblerc-answer', title: '#1 답변', columns: 56, closeOnEscape: true, focus: true }
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   await ui.press({ key: 'turn-restored-0' })
-  expect(standIn.toasts).toEqual([{ text: '#1의 질문이 아직 화면에 그려지지 않아 이동할 수 없습니다.' }])
+  expect(standIn.opened.slice(opens)).toEqual([answerPane])
 
-  // The row draws: a press now scrolls to it. The kit draws no conversation to scroll, so the
-  // scroll is refused there; the refusal shows the row was found.
+  // The row draws: a press scrolls to it. The kit draws no conversation to scroll, so the scroll is
+  // refused there, and the answer opens all the same.
   const row = await $.ui.mount({
     plugin: 'hubblerc',
     component: 'UserMessage',
@@ -175,7 +177,8 @@ test("a press finds the question's row among the rows drawn, and says so when it
     props: { text: '인증 버그 고쳐줘', origin: { kind: 'composer' }, isExpanded: false },
   })
   await ui.press({ key: 'turn-restored-0' })
-  expect(standIn.toasts.at(-1)).toEqual({ text: expect.stringContaining('#1(으)로 이동하지 못했습니다') })
+  expect(standIn.opened.slice(opens)).toEqual([answerPane, answerPane])
+  expect(standIn.toasts).toEqual([])
   await row.unmount()
   await ui.unmount()
 })

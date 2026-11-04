@@ -7,7 +7,8 @@ import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
-import { isAppSurface, isSidebarShown, SIDEBAR_COLUMNS, SIDEBAR_ID, SIDEBAR_TITLE } from './pane'
+import { ANSWER_ID, isAppSurface, isSidebarShown, SIDEBAR_COLUMNS, SIDEBAR_ID, SIDEBAR_TITLE } from './pane'
+import { openAnswer } from './answer'
 import { catImageAt } from './cat-images'
 import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } from './pixel-art'
 import { requestRestart } from './relaunch'
@@ -111,7 +112,8 @@ let questionRowCount = 0
 export async function syncSidebar($: EngineInterface, layout: Layout, viewport: RenderViewport | undefined): Promise<boolean> {
   if (layout === 'band') return false
 
-  const pane = (await $.ui.panes()).find(open => open.id === SIDEBAR_ID)
+  const panes = await $.ui.panes()
+  const pane = panes.find(open => open.id === SIDEBAR_ID)
   const canDock = viewport?.isFullscreen === true && viewport.columns >= DOCK_COLUMNS
   // Under auto a narrow terminal ends a close by hand: the next widening brings the sidebar back.
   if (layout === 'auto' && !canDock) isDismissed = false
@@ -127,7 +129,11 @@ export async function syncSidebar($: EngineInterface, layout: Layout, viewport: 
       })
   }
 
-  return pane !== undefined && pane.isPlaced && pane.isShown
+  // An answer's pane in front of the sidebar (a tab beside it) keeps the band aside too: it closes
+  // back to the sidebar.
+  const answer = panes.find(open => open.id === ANSWER_ID)
+
+  return pane !== undefined && pane.isPlaced && (pane.isShown || (answer !== undefined && answer.isPlaced && answer.isShown))
 }
 
 /**
@@ -1024,8 +1030,10 @@ async function jumpTo($: EngineInterface, entry: TocEntry): Promise<void> {
   const drawn = entry.key === undefined ? undefined : questionRows.get(entry.key)?.[entry.occurrence]
   const target =
     entry.target?.block === 'start' ? entry.target : drawn !== undefined ? { requestId: drawn, block: 'start' as const } : entry.target
+  // No row to scroll to, or the scroll refused (the row not drawn, a long session's top out of
+  // reach): the answer opens in a pane of its own instead (2026-11-05).
   if (target === undefined) {
-    $.ui.toast(`#${entry.number}의 질문이 아직 화면에 그려지지 않아 이동할 수 없습니다.`)
+    await openAnswer($, entry)
 
     return
   }
@@ -1033,7 +1041,7 @@ async function jumpTo($: EngineInterface, entry: TocEntry): Promise<void> {
   const moved = await $.ui.scroll({ to: { requestId: target.requestId }, block: target.block }).catch((error: unknown) => ({
     deny: String(error),
   }))
-  if (moved.deny !== undefined) $.ui.toast(`#${entry.number}(으)로 이동하지 못했습니다: ${moved.deny}`)
+  if (moved.deny !== undefined) await openAnswer($, entry)
 }
 
 /** The page numbers the pager offers: up to seven around the page shown, the first and last kept. */

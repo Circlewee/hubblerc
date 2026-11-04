@@ -24,9 +24,13 @@ const REMINDERS = /<system-reminder>[\s\S]*?<\/system-reminder>/g
 
 /** A message as `$.session.messages({ as: "api" })` hands it: the blocks the model was sent. */
 type Block = { type: string; [field: string]: unknown }
-type ApiLike = { role: 'user' | 'assistant'; content: readonly Block[] }
+export type ApiLike = { role: 'user' | 'assistant'; content: readonly Block[] }
 
-type Prompt = { title: string; key?: string }
+/** What a question asks: its label, its key, and its text as written (reminders taken off). */
+type Prompt = { title: string; key?: string; text: string }
+
+/** An answer of the transcript: the message that asked it (its place and prompt), and the assistant's messages after it. */
+export type TranscriptAnswer = { index: number; prompt: Prompt; replies: ApiLike[] }
 
 /**
  * At session.start: a session opened again (--resume, /resume) starts with no record, so its
@@ -94,40 +98,11 @@ export function turnsFromTranscript(sent: readonly ApiLike[], rows: readonly Ses
     sent.flatMap(message => message.content).flatMap(block => (block.type === 'tool_result' && block.is_error === true ? [String(block.tool_use_id)] : [])),
   )
 
-  const result: TurnRecord[] = []
-  let current: TurnRecord | undefined
-  let isAnswered = false
-
-  const close = () => {
-    if (current !== undefined && isAnswered) result.push(current)
-    current = undefined
-    isAnswered = false
-  }
-  const open = (index: number, prompt: Prompt) => {
-    close()
-    current = { id: `restored-${index}`, prompt: prompt.title, startedAt: 0, durationMs: 0, runs: [], restored: true }
-    if (prompt.key !== undefined && prompt.key !== '') current.promptKey = prompt.key
-  }
-
-  sent.forEach((message, index) => {
-    if (message.role === 'user') {
-      if (message.content.some(block => block.type === 'tool_result')) return
-      const prompt = promptOf(message.content.flatMap(block => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])))
-      if (prompt !== undefined) open(index, prompt)
-
-      return
-    }
-
-    if (current === undefined) open(index, { title: '' })
-    const turn = current as TurnRecord
-    for (const block of message.content) {
-      if (block.type === 'text' && typeof block.text === 'string') {
-        const answer = block.text.trim()
-        if (answer !== '' && answer !== NO_RESPONSE) isAnswered = true
-      }
+  return answersOf(sent).map(answer => {
+    const turn: TurnRecord = { id: `restored-${answer.index}`, prompt: answer.prompt.title, startedAt: 0, durationMs: 0, runs: [], restored: true }
+    if (answer.prompt.key !== undefined && answer.prompt.key !== '') turn.promptKey = answer.prompt.key
+    for (const block of answer.replies.flatMap(message => message.content)) {
       if (block.type !== 'tool_use') continue
-      isAnswered = true
-
       const id = String(block.id ?? '')
       const tool = String(block.name ?? '')
       if (isIgnoredTool(tool)) continue
@@ -136,10 +111,63 @@ export function turnsFromTranscript(sent: readonly ApiLike[], rows: readonly Ses
       if (turn.runs.length < MAX_RUNS_PER_TURN) turn.runs.push(runFromUse(use))
       if (tool === 'Agent' && use.agentId !== undefined) turn.agents = [...(turn.agents ?? []), use.agentId]
     }
+
+    return turn
+  })
+}
+
+/**
+ * Where the answers of a transcript part: a user message with something to answer opens one (tool
+ * results, reminders and a local command's rows do not), and what the assistant did until the next
+ * is its replies. A message nobody answered (no text, no tool call) is no answer. The record rebuilt
+ * on a resume and the answer pane (`answer.tsx`) both read the transcript so.
+ *
+ * @param sent the messages as the model was sent them
+ */
+export function answersOf(sent: readonly ApiLike[]): TranscriptAnswer[] {
+  const result: TranscriptAnswer[] = []
+  let current: TranscriptAnswer | undefined
+  let isAnswered = false
+  const close = () => {
+    if (current !== undefined && isAnswered) result.push(current)
+    current = undefined
+    isAnswered = false
+  }
+
+  sent.forEach((message, index) => {
+    if (message.role === 'user') {
+      if (message.content.some(block => block.type === 'tool_result')) return
+      const prompt = promptOf(message.content.flatMap(block => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])))
+      if (prompt !== undefined) {
+        close()
+        current = { index, prompt, replies: [] }
+      }
+
+      return
+    }
+
+    if (current === undefined) current = { index, prompt: { title: '', text: '' }, replies: [] }
+    current.replies.push(message)
+    for (const block of message.content) {
+      if (block.type === 'tool_use') isAnswered = true
+      if (block.type === 'text' && typeof block.text === 'string') {
+        const answer = block.text.trim()
+        if (answer !== '' && answer !== NO_RESPONSE) isAnswered = true
+      }
+    }
   })
   close()
 
   return result
+}
+
+/** An answer's own words: its text blocks, the assistant's "No response requested." left out. */
+export function answerText(answer: TranscriptAnswer): string {
+  return answer.replies
+    .flatMap(message => message.content)
+    .flatMap(block => (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== NO_RESPONSE ? [block.text.trim()] : []))
+    .filter(text => text !== '')
+    .join('\n\n')
 }
 
 /**
@@ -158,12 +186,12 @@ function promptOf(texts: readonly string[]): Prompt | undefined {
       command = commandTitle(text) ?? command
       continue
     }
-    prompt = text.startsWith(COMPACT_PREFIX) ? { title: '(압축 후 이어짐)' } : { title: promptLabel(text), key: promptKey(text) }
+    prompt = text.startsWith(COMPACT_PREFIX) ? { title: '(압축 후 이어짐)', text } : { title: promptLabel(text), key: promptKey(text), text }
   }
 
   if (prompt !== undefined) return prompt
 
-  return command === undefined ? undefined : { title: command, key: promptKey(command) }
+  return command === undefined ? undefined : { title: command, key: promptKey(command), text: command }
 }
 
 /** The command a row names, as typed: `/plugin-authoring make a pane`. */

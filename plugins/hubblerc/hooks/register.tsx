@@ -3,6 +3,7 @@ import type { Register } from 'claude-code'
 
 import { completeTurn, isIgnoredTool, noteFiveHourUsed, noteShellChanges, recordRun, startShellWatch, startTurn, trackLines, trackPrompts } from './activity'
 import { rememberAnswer, startAutoEffort } from './auto-effort'
+import { showAnswer } from './answer'
 import { showBand } from './band'
 import { showBashPurpose } from './bash-purpose'
 import { answerCommands, registerCommand } from './commands'
@@ -154,6 +155,7 @@ export const register: Register = (on, options) => {
   showToolLines(on)
   showBand(on, layout, autoByDefault)
   showSidebar(on, layout, autoByDefault)
+  showAnswer(on)
 
   // The line that closes a turn ("Baked for 2m 13s") gets the turn's activity on the line under it.
   // Under it, not beside it: the engine's line takes the row's free width and squeezes a sibling to the edge.

@@ -11,6 +11,8 @@ export function isAppSurface(surface: string): boolean {
 
 /** The sidebar's pane, by the id it is opened under. */
 export const SIDEBAR_ID = 'hubblerc'
+/** The pane an answer of the contents opens in when its row cannot be scrolled to (`answer.tsx`). */
+export const ANSWER_ID = 'hubblerc-answer'
 export const SIDEBAR_TITLE = 'hubblerc'
 /** The width the dock is asked for; the engine holds it to 24..45% of the terminal. */
 export const SIDEBAR_COLUMNS = 56

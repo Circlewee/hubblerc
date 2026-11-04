@@ -243,6 +243,8 @@ declare module 'claude-code' {
        * module, read from `$.store`, too big for state the sidebar reads every second.
        */
       userTodoVersion: number
+      /** Bumped when the answer pane's answer or its summary changes (`hooks/answer.tsx`); the answer itself is the module's. */
+      answerVersion: number
       /** Decisions' spend for the sidebar's line; null while no API key is set (no line). */
       likelyStatus: LikelyStatus | null
     }
