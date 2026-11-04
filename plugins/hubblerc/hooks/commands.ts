@@ -7,6 +7,7 @@ import { runSetup } from './setup'
 import { toggleSidebar } from './sidebar'
 import type { Layout } from './sidebar'
 import { activityTable } from './summary'
+import { runTodoCommand } from './todo'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
@@ -14,8 +15,9 @@ const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
 const usage = atom({ plugin: 'hubblerc', key: 'usage' } as const, null)
 
 /**
- * At session.start: `/activity`, every recorded answer of the session with its summary, and
- * `/panel`, which opens or closes the sidebar (~/.claude/keybindings.json binds ctrl+x ctrl+p to it).
+ * At session.start: `/activity`, every recorded answer of the session with its summary,
+ * `/panel`, which opens or closes the sidebar (~/.claude/keybindings.json binds ctrl+x ctrl+p to it),
+ * and `/todo`, the person's own to-dos, mid-answer too.
  */
 export async function registerCommand($: EngineInterface): Promise<void> {
   await $.command.register({
@@ -39,6 +41,12 @@ export async function registerCommand($: EngineInterface): Promise<void> {
     immediate: true,
   })
   await $.command.register({
+    name: 'todo',
+    description: '이 프로젝트의 할 일에 적기. 내용 없이 실행하면 목록 (hubblerc)',
+    argumentHint: '[내용]',
+    immediate: true,
+  })
+  await $.command.register({
     name: 'relaunch',
     description: '진행 중인 작업이 끝나면 Claude Code를 다시 띄워 같은 세션을 이어서 연다. 새 버전이 설치돼 있으면 그 버전으로. 다시 실행하면 취소 (hubblerc)',
     immediate: true,
@@ -52,6 +60,7 @@ export function answerCommands(on: On, layout: Layout): void {
   }))
   on('command.run', { command: 'setup' }, async $ => ({ text: await runSetup($).catch((error: unknown) => `hubblerc 설정 점검 실패: ${String(error)}`) }))
   on('command.run', { command: 'relaunch' }, async $ => ({ text: await requestRestart($) }))
+  on('command.run', { command: 'todo' }, async ($, e) => ({ text: await runTodoCommand($, e.args).catch((error: unknown) => `할 일을 다루지 못했습니다: ${String(error)}`) }))
   on('command.run', { command: 'panel' }, async ($, e) => {
     const text = await toggleSidebar($, layout, e.presentation)
 

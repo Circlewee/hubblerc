@@ -1,6 +1,6 @@
 import { mock } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
-import type { On, SessionMessage, UiPane } from 'claude-code'
+import type { CommandSpec, On, SessionMessage, UiPane } from 'claude-code'
 
 export const NOW = Date.parse('2026-10-25T09:00:00Z')
 
@@ -41,6 +41,15 @@ export type StandIn = {
   agentListCalls: number
   /** How many reads of the machine (`sysctl`, `sw_vers`) fail before they answer. */
   failMachineReads: number
+  /** What `$.session.root()` answers: the project the to-dos are kept for. */
+  root: string
+  /** Every slash command the plugin registered. */
+  commands: CommandSpec[]
+  /** Every tool the plugin registered for the model. */
+  tools: { name: string; description: string; inputSchema: Record<string, unknown> }[]
+  /** Whether the prompt box takes a suggestion now (empty, no answer running), and every text offered. */
+  isSuggestionShown: boolean
+  suggestions: string[]
 }
 
 /**
@@ -48,13 +57,28 @@ export type StandIn = {
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0 }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [] }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('command.register', (_, e) => ({ value: { command: e.name } as never }))
+  on('command.register', (_, e) => {
+    standIn.commands.push({ ...e })
+
+    return { value: { command: e.name } as never }
+  })
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.cwd', () => ({ value: '/repo/hubblerc' }))
   on('session.id', () => ({ value: standIn.sessionId }))
+  on('session.root', () => ({ value: standIn.root }))
+  on('tool.register', (_, e) => {
+    standIn.tools.push({ name: e.name, description: e.description, inputSchema: e.inputSchema })
+
+    return { value: { tool: `mcp__hubblerc__${e.name}` } }
+  })
+  on('prompt.suggest', (_, e) => {
+    standIn.suggestions.push(e.text)
+
+    return { isShown: standIn.isSuggestionShown }
+  })
   on('session.messages', (_, e) => {
     if (e.agentId === undefined) return { value: e.as === 'api' ? (standIn.sent as never) : standIn.messages }
 

@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { CommandPresentation, EngineInterface, On, RenderViewport, Timer } from 'claude-code'
+import type { CommandPresentation, ElementConstructor, EngineInterface, InputProps, On, RenderViewport, Timer } from 'claude-code'
 
 import { activityParts, cellWidth, requestSegments, statusParts, textStyle, THEME_COLORS } from './band-format'
 import type { Segment } from './band-format'
@@ -13,6 +13,9 @@ import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } fr
 import { requestRestart } from './relaunch'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
+import { addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, offerTodo, selectTab, todosForDrawing } from './todo'
+import { oneLine, openCount, rowTailCells, showsTurn, sortTodos, STATUS_MARK, todoRows, todosShown } from './todo-format'
+import type { SidebarTab, UserTodo } from './todo-format'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
@@ -41,6 +44,8 @@ const restartPending = atom({ plugin: 'hubblerc', key: 'restartPending' } as con
 const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
 const sessionId = atom({ plugin: 'hubblerc', key: 'sessionId' } as const, '')
 const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, null)
+const sidebarTab = atom({ plugin: 'hubblerc', key: 'sidebarTab' } as const, 'contents')
+const userTodoVersion = atom({ plugin: 'hubblerc', key: 'userTodoVersion' } as const, 0)
 
 /** The sidebar's boxes, by the id their fold is kept under. */
 export type SectionId = 'device' | 'status' | 'activity' | 'files' | 'contents'
@@ -321,9 +326,15 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
+    const shownTab: SidebarTab = await read($, sidebarTab)
+    // The list is the module's; the version, bumped on each change, redraws.
+    await read($, userTodoVersion)
+    const userTodos = sortTodos(await todosForDrawing($))
 
     const elements = $.ui.resolve(e)
     const { Box, Text, Button, Link } = elements
+    // The field the to-do tab writes with: absent where the surface draws none (mobile).
+    const Input = (elements as { Input?: ElementConstructor<InputProps> }).Input
     // The terminal's picture leaf: absent elsewhere, and given up on where the terminal draws its alt.
     const pictureState = await read($, catPicture)
     const Image = e.surface === 'terminal' && pictureState !== 'blocked' ? (elements as { Image?: typeof elements.Box }).Image : undefined
@@ -351,18 +362,12 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       </Text>
     )
 
-    /**
-     * A box with its title on the top border (`╭── ▾ 상태 ───╮`), the title a press that folds it;
-     * folded, the title alone on a rule as wide as the box (`╶── ▸ 상태 ────`).
-     *
-     * The title is the box's sibling, not its child: a child drawn over the border vanished on
-     * screen (2.1.310), the border painted over it. Laid out `column-reverse`, the box comes first
-     * and is painted first; the title row after it sits above it and, by a margin of -1, on its top
-     * border, painted last.
-     */
-    const box = (id: SectionId, title: string, body: JSX.Element) => {
-      const isFolded = foldedIds.includes(id)
-      const heading = (
+    /** What a box's title draws on its top border, and the cells it takes. */
+    type Heading = { element: JSX.Element; cells: number }
+    /** The arrow and the title, one press that folds the box. */
+    const titleHeading = (id: SectionId, title: string, isFolded: boolean): Heading => ({
+      cells: 3 + cellWidth(title) + 1,
+      element: (
         <Button
           key={`fold-${id}`}
           plain
@@ -374,10 +379,25 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
           <Text bold>{title}</Text>
           <Text> </Text>
         </Button>
-      )
+      ),
+    })
+
+    /**
+     * A box with its title on the top border (`╭── ▾ 상태 ───╮`), the title a press that folds it;
+     * folded, the title alone on a rule as wide as the box (`╶── ▸ 상태 ────`). A box with tabs
+     * draws its own heading.
+     *
+     * The title is the box's sibling, not its child: a child drawn over the border vanished on
+     * screen (2.1.310), the border painted over it. Laid out `column-reverse`, the box comes first
+     * and is painted first; the title row after it sits above it and, by a margin of -1, on its top
+     * border, painted last.
+     */
+    const box = (id: SectionId, title: string | ((isFolded: boolean) => Heading), body: JSX.Element) => {
+      const isFolded = foldedIds.includes(id)
+      const { element: heading, cells } = typeof title === 'string' ? titleHeading(id, title, isFolded) : title(isFolded)
 
       if (isFolded) {
-        const rule = Math.max(0, width - 3 - 3 - cellWidth(title) - 1)
+        const rule = Math.max(0, width - 3 - cells)
 
         return (
           <Box key={`box-${id}`}>
@@ -636,10 +656,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // No rows given (a surface that does not say): nothing is cut.
     const bodyRows = e.props.scroll.bodyRows > 0 ? e.props.scroll.bodyRows : Number.POSITIVE_INFINITY
     const room = bodyRows - above
+    // The last box's share is its shown tab's: the contents' pages, or the to-dos and the field below them.
+    const doneCount = userTodos.filter(item => item.status === 'done').length
+    const hasField = Input !== undefined
     const share = shareRows(
       room,
       isFilesOpen ? fileRows(fileLayout(files, FILE_LIMITS)) : 0,
-      isContentsOpen ? tocRows(all.length, TOC_PAGE_SIZE) : 0,
+      !isContentsOpen ? 0 : shownTab === 'todo' ? todoRows(userTodos.length, doneCount, hasField) : tocRows(all.length, TOC_PAGE_SIZE),
     )
     const limited = fitFileLayout(files, FILE_LIMITS, share.files)
     const isCut = limited.insideHidden > 0 || limited.foldersHidden > 0 || limited.outside.some(group => group.hidden > 0)
@@ -686,9 +709,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             </Box>,
           )
 
-    const contentsBox = box(
-      'contents',
-      pages === 1 ? `목차 ${all.length}` : `목차 #${entries.at(-1)?.number ?? ''}~${entries[0]?.number ?? ''} / ${all.length}`,
+    const contentsBody = (
       <Box flexDirection="column">
         {all.length === 0 ? <Text dimColor>아직 기록된 답변이 없습니다</Text> : null}
         {entries.map(entry => {
@@ -753,8 +774,128 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             )}
           </Box>
         ) : null}
-      </Box>,
+      </Box>
     )
+
+    // The to-dos: in progress, waiting, on hold, done, as many as the rows hold (twelve at most) and
+    // "외 N개"; under them "완료 N개 지우기" and the field that writes one.
+    const shownTodos = userTodos.slice(0, todosShown(userTodos.length, contentsRoom, doneCount, hasField))
+    const todoRow = (item: UserTodo) => {
+      const isDim = item.status === 'done' || item.status === 'on_hold'
+      // The sign, a space, the text; then a cell at least before the tail.
+      const room = inner - 2 - rowTailCells(item) - 1
+
+      return (
+        <Box key={`todo-${item.id}`} justifyContent="space-between">
+          <Box>
+            {/* A press moves it on: waiting, in progress, done, on hold, waiting. */}
+            <Button
+              key={`todo-status-${item.id}`}
+              plain
+              onPress={() => {
+                void cycleTodo($, item.id)
+              }}
+            >
+              <Text {...(item.status === 'in_progress' ? { color: THEME_COLORS.running } : isDim ? { dimColor: true } : {})}>{STATUS_MARK[item.status]}</Text>
+            </Button>
+            <Text {...(isDim ? { dimColor: true } : {})}>{` ${clipCells(oneLine(item.text), room)}`}</Text>
+          </Box>
+          <Box>
+            {showsTurn(item) ? <Text dimColor>{` #${item.turn}`}</Text> : null}
+            {item.status === 'pending' ? (
+              <Button
+                key={`todo-send-${item.id}`}
+                plain
+                onPress={() => {
+                  void offerTodo($, item)
+                }}
+              >
+                <Text color={THEME_COLORS.effort}> ↗</Text>
+              </Button>
+            ) : null}
+            <Button
+              key={`todo-delete-${item.id}`}
+              plain
+              onPress={() => {
+                void deleteTodo($, item.id)
+              }}
+            >
+              <Text dimColor> ✕</Text>
+            </Button>
+          </Box>
+        </Box>
+      )
+    }
+    const todoBody = (
+      <Box flexDirection="column">
+        {userTodos.length === 0 ? <Text dimColor>적어 둔 할 일이 없습니다</Text> : null}
+        {shownTodos.map(todoRow)}
+        {userTodos.length > shownTodos.length ? (
+          <Text key="todo-more" dimColor>
+            {`외 ${userTodos.length - shownTodos.length}개`}
+          </Text>
+        ) : null}
+        {doneCount > 0 ? (
+          <Button
+            key="todo-clear-done"
+            plain
+            onPress={() => {
+              void clearDoneTodos($)
+            }}
+          >
+            <Text dimColor>{`완료 ${doneCount}개 지우기`}</Text>
+          </Button>
+        ) : null}
+        {/* Enter writes it; the engine empties the field after. */}
+        {Input !== undefined ? (
+          <Input
+            key="todo-input"
+            placeholder="할 일 적기"
+            submitLabel="추가"
+            onSubmit={value => {
+              void addTodoFromField($, value)
+            }}
+          />
+        ) : null}
+      </Box>
+    )
+
+    // The contents and the to-dos share the last box, its title the tabs: `╭── ▾ 목차 12 │ 할 일 3 ──`.
+    // The arrow folds the box; a tab's name shows that tab (and unfolds a folded box), the shown one bold.
+    const contentsLabel = shownTab === 'contents' && pages > 1 ? `목차 #${entries.at(-1)?.number ?? ''}~${entries[0]?.number ?? ''} / ${all.length}` : `목차 ${all.length}`
+    const todoLabel = `할 일 ${openCount(userTodos)}`
+    const tabButton = (tab: SidebarTab, label: string, isFolded: boolean) => (
+      <Button
+        key={`tab-${tab}`}
+        plain
+        onPress={() => {
+          void selectTab($, tab).then(() => (isFolded ? toggleFold($, 'contents') : undefined))
+        }}
+      >
+        <Text {...(tab === shownTab ? { bold: true } : { dimColor: true })}>{label}</Text>
+      </Button>
+    )
+    const tabsHeading = (isFolded: boolean) => ({
+      cells: 3 + cellWidth(contentsLabel) + 3 + cellWidth(todoLabel) + 1,
+      element: (
+        <Box key="tabs-contents">
+          <Button
+            key="fold-contents"
+            plain
+            onPress={() => {
+              void toggleFold($, 'contents')
+            }}
+          >
+            <Text dimColor>{isFolded ? ' ▸ ' : ' ▾ '}</Text>
+          </Button>
+          {tabButton('contents', contentsLabel, isFolded)}
+          <Text dimColor> │ </Text>
+          {tabButton('todo', todoLabel, isFolded)}
+          <Text> </Text>
+        </Box>
+      ),
+    })
+    const contentsBox = box('contents', tabsHeading, shownTab === 'todo' ? todoBody : contentsBody)
 
     return (
       <Box flexDirection="column">

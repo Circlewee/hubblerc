@@ -15,6 +15,7 @@ import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
 import { gitWatchPaths, markRunning, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
+import { serveTodoTool, startTodos, startTodoTurn } from './todo'
 import { showToolLines } from './tool-lines'
 
 // The validator reads state sources per file, so each file that reads `turns` declares it.
@@ -33,6 +34,7 @@ export const register: Register = (on, options) => {
     await startStatus($).catch(() => undefined)
     await startEffort($).catch(() => undefined)
     await startSidebar($, layout).catch(() => undefined)
+    await startTodos($).catch(() => undefined)
     await startDevice($).catch(() => undefined)
     await startRelaunch($).catch(() => undefined)
     await checkSetup($).catch(() => undefined)
@@ -42,6 +44,8 @@ export const register: Register = (on, options) => {
 
   on('turn.start', async ($, e, next) => {
     await startTurn($, e).catch(() => undefined)
+    // After the turn's record opened: an item offered by its ↗ and sent as offered takes this answer's number.
+    if (e.agentId === undefined) await startTodoTurn($, e.text).catch(() => undefined)
     if (e.agentId === undefined) await closeEffortPicker($).catch(() => undefined)
     // Not awaited: the repository is read while the model starts its answer, before any tool runs;
     // the status too, so what changed while idle (an edit in an editor) shows as the question goes.
@@ -126,6 +130,7 @@ export const register: Register = (on, options) => {
   trackLines(on)
   trackPrompts(on)
   answerCommands(on, layout)
+  serveTodoTool(on)
   controlEffort(on, autoByDefault)
   showBashPurpose(on)
   showToolLines(on)

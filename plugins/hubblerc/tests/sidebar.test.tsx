@@ -342,7 +342,9 @@ test('each part of the sidebar is a box, its title drawn over the top border aft
   expect((await ui.find({ key: 'title-status' }))?.text).toBe('╭── ▾ 상태 ')
   expect((await ui.find({ key: 'fold-activity' }))?.text).toBe(' ▾ 작업 ')
   expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ 파일 ')
-  expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▾ 목차 2 ')
+  // The last box's title is its tabs: the arrow folds it, each name shows its tab.
+  expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▾ ')
+  expect((await ui.find({ key: 'title-contents' }))?.text).toBe('╭── ▾ 목차 2 │ 할 일 0 ')
   await ui.unmount()
 })
 
@@ -444,7 +446,8 @@ test('a box folded in an earlier session starts folded', async ($, on) => {
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▸ 목차 0 ')
+  expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▸ ')
+  expect((await ui.find({ key: 'tab-contents' }))?.text).toBe('목차 0')
   expect(await ui.find({ type: 'Text', text: /아직 기록된 답변/ })).toBeUndefined()
   expect((await ui.find({ key: 'box-status' }))?.props.borderStyle).toBe('round')
   await ui.unmount()

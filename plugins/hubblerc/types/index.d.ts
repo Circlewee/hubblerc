@@ -226,6 +226,13 @@ declare module 'claude-code' {
       restartPending: boolean
       /** The session's name as `/rename` set it (its transcript's last `custom-title` row); null when it has none. */
       sessionName: string | null
+      /** The tab the sidebar's last box shows: the contents or the person's to-dos; kept across sessions in `$.store`. */
+      sidebarTab: 'contents' | 'todo'
+      /**
+       * Bumped when the person's to-do list changes (`hooks/todo.ts`): the list itself is kept in the
+       * module, read from `$.store`, too big for state the sidebar reads every second.
+       */
+      userTodoVersion: number
     }
   }
 }

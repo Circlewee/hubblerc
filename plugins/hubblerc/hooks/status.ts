@@ -6,6 +6,7 @@ import { applyTaskUpdate, parseGitStatus, todosFromTodoWrite } from './band-form
 import { bashPurpose } from './bash-purpose'
 import { addFiveHourPoint } from './forecast'
 import { isSidebarShown } from './pane'
+import { refreshTodos } from './todo'
 
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
 const todos = atom({ plugin: 'hubblerc', key: 'todos' } as const, [])
@@ -45,7 +46,7 @@ type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
  *
  * The timer works every second while something runs (an answer, a call, a subagent) and every
  * fifth second otherwise; every 30 seconds it reads usage, the model and git again, and the
- * session's name while the sidebar shows. Git is read besides when a call that may change files
+ * session's name and the to-dos while the sidebar shows. Git is read besides when a call that may change files
  * ends, as a question goes out, and when `.git` changes (`gitWatchPaths`).
  */
 export async function startStatus($: EngineInterface): Promise<void> {
@@ -82,7 +83,11 @@ export async function startStatus($: EngineInterface): Promise<void> {
       if (isSlow) {
         lastSlow = now
         await refreshStatus($).catch(() => undefined)
-        if (await isSidebarShown($).catch(() => false)) await refreshSessionName($).catch(() => undefined)
+        if (await isSidebarShown($).catch(() => false)) {
+          await refreshSessionName($).catch(() => undefined)
+          // Another session's to-dos (the same project) show within the half minute.
+          await refreshTodos($).catch(() => undefined)
+        }
       }
       if (isSlow || hasAgents || isRunning || isAnswering) await update($, tick, () => now)
     })().catch(() => undefined)
