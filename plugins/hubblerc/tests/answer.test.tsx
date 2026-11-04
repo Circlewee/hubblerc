@@ -176,3 +176,29 @@ test('the band stays aside while the answer pane stands in front of the sidebar,
   expect(await band.find({ type: 'Text', text: /^Opus/ })).toBeDefined()
   await band.unmount()
 })
+
+test('" ✕ 닫기 " at the top right closes the pane as Esc does, on the terminal and in the app', async ($, on) => {
+  const standIn = standInForEngine(on)
+  memoryStore(on)
+  await start($)
+  await twoAnswers($, standIn)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const sidebar = await $.ui.mount({ ...PANE, surface, props: PANE_PROPS })
+    await sidebar.press({ key: 'turn-t1' })
+    expect(standIn.panes.map(pane => pane.id)).toContain('hubblerc-answer')
+    const pane = await $.ui.mount({ ...ANSWER, surface, props: ANSWER_PROPS })
+    // The first row: the question, the button at its right.
+    const head = await pane.find({ key: 'answer-head' })
+    expect(head?.text).toBe('#1 긴 답을 줘 ✕ 닫기 ')
+    expect((await pane.find({ key: 'answer-close' }))?.text).toBe(' ✕ 닫기 ')
+    await pane.press({ key: 'answer-close' })
+    expect(standIn.panes.map(paneOpen => paneOpen.id)).not.toContain('hubblerc-answer')
+    // The answer let go of, as on Esc: drawn again, the pane holds nothing of it.
+    await pane.redraw()
+    expect(await pane.find({ type: 'Text', text: '목차에서 답변을 다시 눌러 주세요.' })).toBeDefined()
+    expect(await pane.find({ key: 'answer-close' })).toBeDefined()
+    await pane.unmount()
+    await sidebar.unmount()
+  }
+})

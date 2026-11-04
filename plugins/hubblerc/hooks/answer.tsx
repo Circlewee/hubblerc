@@ -131,6 +131,23 @@ export async function summarizeAnswer($: EngineInterface): Promise<void> {
   await update($, answerVersion, n => n + 1)
 }
 
+/** The answer let go of, and the band asked to look again whether to stand aside: on any close. */
+async function forgetAnswer($: EngineInterface): Promise<void> {
+  view = null
+  summary = null
+  await update($, tick, n => n + 1)
+}
+
+/**
+ * The pane's own " ✕ 닫기 ", top right: the engine's close mark sits on the frame and went unseen with
+ * the sidebar beside it (2026-11-05). Closed as Esc closes it; the cleanup is done here too, whether
+ * or not this plugin's own `ui.close` hook hears its own close.
+ */
+async function closeAnswer($: EngineInterface): Promise<void> {
+  await $.ui.close({ id: ANSWER_ID }).catch(() => undefined)
+  await forgetAnswer($)
+}
+
 /** The answer pane, and its close: the module lets go of the answer, the band looks again. */
 export function showAnswer(on: On): void {
   on('ui.render', { component: 'Pane', requestId: ANSWER_ID }, async ($, e) => {
@@ -138,13 +155,30 @@ export function showAnswer(on: On): void {
     const elements = $.ui.resolve(e)
     const { Box, Text, Button } = elements
     const Markdown = (elements as { Markdown?: ElementConstructor<MarkdownProps> }).Markdown
+    // The first row: what the pane holds, and " ✕ 닫기 " at its right (the terminal and the app alike).
+    const head = (title: JSX.Element) => (
+      <Box key="answer-head" justifyContent="space-between">
+        <Box flexShrink={1}>{title}</Box>
+        <Box flexShrink={0}>
+          <Button
+            key="answer-close"
+            plain
+            onPress={() => {
+              void closeAnswer($)
+            }}
+          >
+            <Text dimColor> ✕ 닫기 </Text>
+          </Button>
+        </Box>
+      </Box>
+    )
     const shown = view
-    if (shown === null) return <Text dimColor>목차에서 답변을 다시 눌러 주세요.</Text>
+    if (shown === null) return <Box paddingX={1}>{head(<Text dimColor>목차에서 답변을 다시 눌러 주세요.</Text>)}</Box>
     const current = summary !== null && summary.key === summaryKey(shown) ? summary : null
 
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text bold>{`#${shown.number} ${shown.question || '(이어진 답변)'}`}</Text>
+        {head(<Text bold>{`#${shown.number} ${shown.question || '(이어진 답변)'}`}</Text>)}
         {shown.line === '' ? null : <Text dimColor>{shown.line}</Text>}
         {!shown.isFound ? null : current === null ? (
           <Button
@@ -184,12 +218,10 @@ export function showAnswer(on: On): void {
     )
   })
 
+  // Esc, the engine's mark, or our own button: the sidebar back in front, the band looks again.
   on('ui.close', { id: ANSWER_ID }, async ($, e, next) => {
     const closed = await next(e)
-    view = null
-    summary = null
-    // The sidebar back in front: the band looks again whether to stand aside.
-    await update($, tick, n => n + 1)
+    await forgetAnswer($)
 
     return closed
   }).catch(($, e, next) => next(e))
