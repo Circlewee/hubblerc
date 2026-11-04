@@ -13,8 +13,8 @@ import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } fr
 import { requestRestart } from './relaunch'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
-import { addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, offerTodo, selectTab, todosForDrawing } from './todo'
-import { oneLine, openCount, rowTailCells, showsTurn, sortTodos, STATUS_MARK, todoRows, todosShown } from './todo-format'
+import { addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, editFieldKey, editTarget, offerTodo, saveEditFromField, selectTab, startEditTodo, todosForDrawing, undoCount, undoDelete } from './todo'
+import { footerRows, oneLine, openCount, rowTailCells, showsTurn, sortTodos, STATUS_MARK, todoRows, todosShown } from './todo-format'
 import type { SidebarTab, UserTodo } from './todo-format'
 import { statusLine } from './likely/cost'
 
@@ -669,10 +669,14 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // The last box's share is its shown tab's: the contents' pages, or the to-dos and the field below them.
     const doneCount = userTodos.filter(item => item.status === 'done').length
     const hasField = Input !== undefined
+    // "↶ 되돌리기" after a delete, and the item the field edits: the module's, kept outside state.
+    const undoN = undoCount()
+    const edited = hasField ? editTarget(userTodos, e.props.isFocused) : null
+    const todoFooter = footerRows(doneCount, undoN, hasField)
     const share = shareRows(
       room,
       isFilesOpen ? fileRows(fileLayout(files, FILE_LIMITS)) : 0,
-      !isContentsOpen ? 0 : shownTab === 'todo' ? todoRows(userTodos.length, doneCount, hasField) : tocRows(all.length, TOC_PAGE_SIZE),
+      !isContentsOpen ? 0 : shownTab === 'todo' ? todoRows(userTodos.length, todoFooter) : tocRows(all.length, TOC_PAGE_SIZE),
     )
     const limited = fitFileLayout(files, FILE_LIMITS, share.files)
     const isCut = limited.insideHidden > 0 || limited.foldersHidden > 0 || limited.outside.some(group => group.hidden > 0)
@@ -788,13 +792,18 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     )
 
     // The to-dos: in progress, waiting, on hold, done, as many as the rows hold (twelve at most) and
-    // "외 N개"; under them "완료 N개 지우기" and the field that writes one.
-    const shownTodos = userTodos.slice(0, todosShown(userTodos.length, contentsRoom, doneCount, hasField))
+    // "외 N개"; under them "완료 N개 지우기", "↶ 되돌리기" after a delete, and the field that writes one
+    // (or edits the item whose text was pressed, that row marked).
+    const shownTodos = userTodos.slice(0, todosShown(userTodos.length, contentsRoom, todoFooter))
     const todoRow = (item: UserTodo) => {
-      const isDim = item.status === 'done' || item.status === 'on_hold'
+      const isEdited = edited?.id === item.id
+      const isDim = !isEdited && (item.status === 'done' || item.status === 'on_hold')
       const mark = STATUS_MARK[item.status]
       // The sign (an emoji, two cells), a space, the text; then a cell at least before the tail.
       const room = inner - cellWidth(`${mark} `) - rowTailCells(item) - 1
+      const text = (
+        <Text {...(isEdited ? { bold: true, color: THEME_COLORS.effort } : isDim ? { dimColor: true } : {})}>{` ${clipCells(oneLine(item.text), room)}`}</Text>
+      )
 
       // ↗ and ✕ hold a space each side, three cells to press, the sign in the middle of the focus mark.
       return (
@@ -810,7 +819,20 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             >
               <Text>{mark}</Text>
             </Button>
-            <Text {...(isDim ? { dimColor: true } : {})}>{` ${clipCells(oneLine(item.text), room)}`}</Text>
+            {/* A press on the text edits it in the field below; no field (mobile), no press. */}
+            {hasField ? (
+              <Button
+                key={`todo-text-${item.id}`}
+                plain
+                onPress={() => {
+                  void startEditTodo($, item.id)
+                }}
+              >
+                {text}
+              </Button>
+            ) : (
+              text
+            )}
           </Box>
           <Box>
             {showsTurn(item) ? <Text dimColor>{` #${item.turn}`}</Text> : null}
@@ -858,8 +880,31 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             <Text dimColor>{`완료 ${doneCount}개 지우기`}</Text>
           </Button>
         ) : null}
-        {/* Enter writes it; the engine empties the field after. */}
-        {Input !== undefined ? (
+        {undoN > 0 ? (
+          <Button
+            key="todo-undo"
+            plain
+            onPress={() => {
+              void undoDelete($)
+            }}
+          >
+            <Text color={THEME_COLORS.effort}>{`↶ 되돌리기 (${undoN}개)`}</Text>
+          </Button>
+        ) : null}
+        {/* Enter writes it; the engine empties the field after. Editing, a field of its own holds the
+            item's text: Enter saves, empty cancels, and so does the pane letting the keyboard go (Esc). */}
+        {Input === undefined ? null : edited !== null ? (
+          <Input
+            key={editFieldKey(edited.id)}
+            label={`${edited.id}번 수정 `}
+            value={edited.text}
+            placeholder="비우고 Enter면 취소"
+            submitLabel="저장"
+            onSubmit={value => {
+              void saveEditFromField($, edited.id, value)
+            }}
+          />
+        ) : (
           <Input
             key="todo-input"
             placeholder="할 일 적기"
@@ -868,7 +913,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
               void addTodoFromField($, value)
             }}
           />
-        ) : null}
+        )}
       </Box>
     )
 

@@ -5,18 +5,23 @@ import {
   addItem,
   cleanTodoText,
   clearDone,
+  editItem,
   isStatus,
   MAX_TODOS,
   nextStatus,
   oneLine,
   parseTodoRecord,
   removeItem,
+  restoreItems,
   setItemStatus,
+  STATUS_MARK,
   todoListText,
   todoStoreKey,
   todoToolList,
+  trashListText,
 } from './todo-format'
 import type { SidebarTab, TodoRecord, TurnRef, UserTodo, UserTodoStatus } from './todo-format'
+import { SIDEBAR_ID } from './pane'
 import { clipCells } from './sidebar-format'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
@@ -45,10 +50,27 @@ let loaded: { key: string; record: TodoRecord; signature: string } | null = null
  */
 let offered: { id: number; text: string } | null = null
 
+/**
+ * The items the last ✕ or "완료 N개 지우기" moved to the trash, by their project's key: what
+ * "↶ 되돌리기" brings back. Gone on the next change to the list made in this session (a write, a
+ * status, a delete, an edit), on ↗, and with the session. The module's, not state: a press writes it.
+ */
+let undo: { key: string; ids: number[] } | null = null
+
+/**
+ * The item the sidebar's field edits, by its project's key and id; `sawFocus` once a drawing found the
+ * pane holding the keyboard. Esc never reaches a pane's field (it hands the keyboard back), so the
+ * pane losing the keyboard while editing is the cancel: a click elsewhere cancels too. Gone with a
+ * reload or the item.
+ */
+let editing: { key: string; id: number; sawFocus: boolean } | null = null
+
 /** At session.start: the tab chosen in an earlier session, the project's list, and the model's tool. */
 export async function startTodos($: EngineInterface): Promise<void> {
   loaded = null
   offered = null
+  undo = null
+  editing = null
   const tab = await $.store.get(TAB_KEY).catch(() => undefined)
   if (tab === 'contents' || tab === 'todo') await update($, sidebarTab, () => tab)
   await refreshTodos($).catch(() => undefined)
@@ -103,14 +125,24 @@ async function keep($: EngineInterface, key: string, record: TodoRecord): Promis
   await update($, userTodoVersion, n => n + 1)
 }
 
+/** Draws the readers again: what the module keeps beside the list (the undo, the edit) changed. */
+async function redraw($: EngineInterface): Promise<void> {
+  await update($, userTodoVersion, n => n + 1)
+}
+
 /**
  * A change, made on the list as the store holds it now (another session may have written since it
- * was read), then written back. `change` answers null to leave the list as it is.
+ * was read), then written back. `change` answers null to leave the list as it is. Any change takes
+ * the undo away: the one a delete leaves is set after it.
  */
 async function changeTodos($: EngineInterface, change: (record: TodoRecord) => TodoRecord | null): Promise<TodoRecord | null> {
   const key = todoStoreKey(await $.session.root())
   const current = parseTodoRecord(await $.store.get(key))
   const next = change(current)
+  if (undo !== null) {
+    undo = null
+    await redraw($)
+  }
   if (next === null) {
     await keep($, key, current)
 
@@ -171,12 +203,32 @@ export async function addTodoFromField($: EngineInterface, text: string): Promis
   })
 }
 
-/** `/todo 내용` writes an item; `/todo` alone lists them. */
+/**
+ * `/todo 내용` writes an item; `/todo` alone lists them. `/todo 수정 <번호> <내용>`, `/todo 휴지통` and
+ * `/todo 복원 <번호>` only as written so: `/todo 수정 버튼 색` (no number) is an item to write.
+ */
 export async function runTodoCommand($: EngineInterface, args: string): Promise<string> {
-  if (args.trim() === '') {
+  const text = args.trim()
+  if (text === '') {
     await refreshTodos($)
 
     return todoListText(loaded?.record.items ?? [])
+  }
+  const [word = ''] = text.split(/\s/, 1)
+  const rest = text.slice(word.length).trim()
+  const numbered = /^(\d+)(?:\s+([\s\S]*))?$/.exec(rest)
+  if (word === '휴지통' && rest === '') {
+    await refreshTodos($)
+
+    return trashListText(loaded?.record.trash ?? [])
+  }
+  if (word === '복원' && numbered !== null && numbered[2] === undefined) return restoreTodo($, Number(numbered[1]))
+  if (word === '수정' && numbered !== null) {
+    const id = Number(numbered[1])
+    const outcome = await editTodo($, id, numbered[2] ?? '')
+    if ('error' in outcome) return outcome.error === 'empty' ? `새 내용이 없습니다: /todo 수정 ${id} <내용>` : `${id}번 할 일이 없습니다. /todo로 번호를 보세요.`
+
+    return `고쳤습니다: ${id}. ${clipCells(oneLine(outcome.item.text), 60)}${outcome.isClipped ? ' (500자가 넘어 앞부분만)' : ''}`
   }
   const outcome = await addTodo($, args)
   if ('error' in outcome) return outcome.error === 'full' ? FULL_TEXT : '적을 내용이 없습니다.'
@@ -195,13 +247,125 @@ export async function cycleTodo($: EngineInterface, id: number): Promise<void> {
   )
 }
 
+/** ✕: the item to the trash; "↶ 되돌리기" brings it back until the next change. */
 export async function deleteTodo($: EngineInterface, id: number): Promise<void> {
-  await pressed($, () => changeTodos($, record => removeItem(record, id)))
+  await pressed($, async () => {
+    const at = await $.clock.now()
+    if ((await changeTodos($, record => removeItem(record, id, at))) !== null) await leaveUndo($, [id])
+  })
 }
 
-/** "완료 N개 지우기". */
+/** "완료 N개 지우기": the done items to the trash, "↶ 되돌리기" bringing them all back. */
 export async function clearDoneTodos($: EngineInterface): Promise<void> {
-  await pressed($, () => changeTodos($, record => (record.items.some(item => item.status === 'done') ? clearDone(record) : null)))
+  await pressed($, async () => {
+    const at = await $.clock.now()
+    const gone: number[] = []
+    await changeTodos($, record => {
+      gone.push(...record.items.filter(item => item.status === 'done').map(item => item.id))
+
+      return gone.length > 0 ? clearDone(record, at) : null
+    })
+    if (gone.length > 0) await leaveUndo($, gone)
+  })
+}
+
+async function leaveUndo($: EngineInterface, ids: number[]): Promise<void> {
+  undo = { key: todoStoreKey(await $.session.root()), ids }
+  await redraw($)
+}
+
+/** How many items "↶ 되돌리기" brings back for the list drawn; 0: no button. */
+export function undoCount(): number {
+  return undo !== null && loaded !== null && undo.key === loaded.key ? undo.ids.length : 0
+}
+
+/** "↶ 되돌리기": the items of the last delete back from the trash as they were. */
+export async function undoDelete($: EngineInterface): Promise<void> {
+  const pending = undo
+  if (pending === null) return
+  await pressed($, async () => {
+    const back = await changeTodos($, record => restoreItems(record, pending.ids)?.record ?? null)
+    if (back === null) $.ui.toast('되돌릴 항목이 휴지통에 없습니다(다른 세션에서 되살렸거나 목록이 가득 찼습니다).')
+  })
+}
+
+/** A press on an item's text: the field below edits it (filled with the text), the pane's keyboard moved there. */
+export async function startEditTodo($: EngineInterface, id: number): Promise<void> {
+  if (loaded === null) return
+  editing = { key: loaded.key, id, sawFocus: false }
+  await redraw($)
+  await $.ui.focus({ requestId: SIDEBAR_ID, key: editFieldKey(id) }).catch(() => undefined)
+}
+
+/** The edit field's key: a field of its own, so leaving the edit draws the empty one afresh. */
+export function editFieldKey(id: number): string {
+  return `todo-edit-${id}`
+}
+
+/**
+ * While drawing: the item the field edits, or null. The edit ends here, in the module, when its item
+ * is gone, the project changed, or the pane, having held the keyboard, let it go (Esc, a click away).
+ */
+export function editTarget(items: readonly UserTodo[], isFocused: boolean): UserTodo | null {
+  const current = editing
+  const item = current !== null && loaded !== null && current.key === loaded.key ? items.find(other => other.id === current.id) : undefined
+  if (current === null || item === undefined) {
+    editing = null
+
+    return null
+  }
+  if (isFocused) {
+    current.sawFocus = true
+  } else if (current.sawFocus) {
+    editing = null
+
+    return null
+  }
+
+  return item
+}
+
+/** The edit field, on Enter: the text saved (status and answers kept); empty, the edit cancelled. */
+export async function saveEditFromField($: EngineInterface, id: number, value: string): Promise<void> {
+  editing = null
+  if (value.trim() === '') {
+    await redraw($)
+
+    return
+  }
+  await pressed($, async () => {
+    const outcome = await editTodo($, id, value)
+    if ('error' in outcome) $.ui.toast(outcome.error === 'missing' ? '고칠 항목이 목록에 없습니다.' : '내용이 비어 있습니다.')
+    else if (outcome.isClipped) $.ui.toast('500자가 넘어 앞부분만 적었습니다.')
+  })
+  await redraw($)
+}
+
+type EditOutcome = { item: UserTodo; isClipped: boolean } | { error: 'empty' | 'missing' }
+
+/** Item `id`'s text replaced; its status and answers stay. */
+export async function editTodo($: EngineInterface, id: number, text: string): Promise<EditOutcome> {
+  const cleaned = cleanTodoText(text)
+  if (cleaned.text === '') return { error: 'empty' }
+  const changed = await changeTodos($, record => editItem(record, id, cleaned.text))
+  const item = changed?.items.find(other => other.id === id)
+
+  return item === undefined ? { error: 'missing' } : { item, isClipped: cleaned.isClipped }
+}
+
+/** `/todo 복원 <번호>`: a deleted item back as it was. */
+async function restoreTodo($: EngineInterface, id: number): Promise<string> {
+  let reason = ''
+  const changed = await changeTodos($, record => {
+    if (!(record.trash ?? []).some(item => item.id === id)) reason = `휴지통에 ${id}번이 없습니다. /todo 휴지통으로 번호를 보세요.`
+    else if (record.items.length >= MAX_TODOS) reason = FULL_TEXT
+
+    return reason === '' ? (restoreItems(record, [id])?.record ?? null) : null
+  })
+  const item = changed?.items.find(other => other.id === id)
+  if (item === undefined) return reason || `${id}번을 되살리지 못했습니다.`
+
+  return `되살렸습니다: ${id}. ${STATUS_MARK[item.status]} ${clipCells(oneLine(item.text), 60)}`
 }
 
 /**
@@ -209,6 +373,10 @@ export async function clearDoneTodos($: EngineInterface): Promise<void> {
  * only while it is empty and no answer runs; else a toast says so.
  */
 export async function offerTodo($: EngineInterface, item: UserTodo): Promise<void> {
+  if (undo !== null) {
+    undo = null
+    await redraw($)
+  }
   const shown = await $.prompt.suggest({ text: item.text }).catch(() => ({ isShown: false }))
   if (shown.isShown) {
     offered = { id: item.id, text: item.text }

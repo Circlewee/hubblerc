@@ -11,14 +11,15 @@ import { controlEffort, startEffort } from './effort'
 import { closeEffortPicker } from './effort-picker'
 import { noteBashOutcome, predictBashFailure } from './likely/bash-fail'
 import { answerLikelyCommand, registerLikelyCommand } from './likely/command'
-import { configureLikely, startLikely } from './likely/likely'
+import { configureLikely, refreshLikelyStatus, startLikely } from './likely/likely'
 import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
 import { gitWatchPaths, markRunning, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
-import { serveTodoTool, startTodos, startTodoTurn } from './todo'
+import { serveTodoTool, startTodos, startTodoTurn, refreshTodos } from './todo'
+import { isStoreFile, storeWatchPaths } from './store-file'
 import { showToolLines } from './tool-lines'
 
 // The validator reads state sources per file, so each file that reads `turns` declares it.
@@ -98,11 +99,12 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   // The classic SessionStart hands the transcript's path (the session's name is read from it) and
-  // takes the files the engine is to watch: git's own, so a commit made anywhere asks for git.
+  // takes the files the engine is to watch: git's own, so a commit made anywhere asks for git; and
+  // the plugin's store, so another session's to-dos show at once.
   on('classic.SessionStart', async ($, e, next) => {
     noteTranscript(e.transcript_path)
     const result = await next(e)
-    const paths = await gitWatchPaths($, e.cwd).catch(() => [])
+    const paths = [...(await gitWatchPaths($, e.cwd).catch(() => [])), ...(await storeWatchPaths($).catch(() => []))]
     if (paths.length === 0) return result
 
     return { ...result, watchPaths: [...(result.watchPaths ?? []), ...paths] }
@@ -110,6 +112,12 @@ export const register: Register = (on, options) => {
 
   on('classic.FileChanged', async ($, e, next) => {
     if (e.file_path.includes('.git/')) void requestGitRefresh($).catch(() => undefined)
+    // The store changed (this session's writes too): the to-dos and likely's spend read again, drawn
+    // again only where they differ.
+    if (isStoreFile(e.file_path)) {
+      void refreshTodos($).catch(() => undefined)
+      void refreshLikelyStatus($).catch(() => undefined)
+    }
 
     return next(e)
   }).catch(($, e, next) => next(e))

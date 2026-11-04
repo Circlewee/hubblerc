@@ -24,14 +24,23 @@ export type UserTodo = {
   turnSession?: string
 }
 
-/** What one project keeps in the store: its items and the id the next one takes. */
-export type TodoRecord = { items: UserTodo[]; nextId: number }
+/** An item deleted (✕, "완료 N개 지우기"), kept to restore: as it was, its status too, and when it went. */
+export type TrashedTodo = UserTodo & { deletedAt: number }
+
+/**
+ * What one project keeps in the store: its items, the id the next one takes, and the deleted items
+ * (the last `MAX_TRASH`, oldest first; absent while none). One record, so a delete and its trash are
+ * one write.
+ */
+export type TodoRecord = { items: UserTodo[]; nextId: number; trash?: TrashedTodo[] }
 
 /** Which tab the sidebar's last box shows. */
 export type SidebarTab = 'contents' | 'todo'
 
 export const MAX_TODOS = 200
 export const MAX_TODO_CHARS = 500
+/** Deleted items kept per project; past it the oldest go. */
+export const MAX_TRASH = 50
 /** Items the sidebar's tab shows at most; fewer in a pane too short for them. */
 export const TODO_PAGE_SIZE = 12
 
@@ -124,10 +133,20 @@ export function parseTodoRecord(value: unknown): TodoRecord {
     items.push(item)
     if (items.length >= MAX_TODOS) break
   }
-  const highest = items.reduce((max, item) => Math.max(max, item.id), 0)
+  const trash: TrashedTodo[] = []
+  for (const entry of Array.isArray(raw.trash) ? raw.trash : []) {
+    const item = parseItem(entry)
+    if (item === null || seen.has(item.id)) continue
+    seen.add(item.id)
+    const deletedAt = (entry as { deletedAt?: unknown }).deletedAt
+    trash.push({ ...item, deletedAt: typeof deletedAt === 'number' ? deletedAt : 0 })
+  }
+  const highest = [...items, ...trash].reduce((max, item) => Math.max(max, item.id), 0)
   const stated = typeof raw.nextId === 'number' && Number.isInteger(raw.nextId) ? raw.nextId : 1
+  const record: TodoRecord = { items, nextId: Math.max(stated, highest + 1) }
+  if (trash.length > 0) record.trash = trash.slice(-MAX_TRASH)
 
-  return { items, nextId: Math.max(stated, highest + 1) }
+  return record
 }
 
 function parseItem(value: unknown): UserTodo | null {
@@ -187,44 +206,112 @@ export function setItemStatus(record: TodoRecord, id: number, status: UserTodoSt
   }
 }
 
-/** The record without item `id`; null when no item has it. */
-export function removeItem(record: TodoRecord, id: number): TodoRecord | null {
+/** The record with `gone` moved to its trash, deleted at `at`; the trash kept to its last `MAX_TRASH`. */
+function toTrash(record: TodoRecord, gone: readonly UserTodo[], at: number): TodoRecord {
+  const ids = new Set(gone.map(item => item.id))
+  const trash = [...(record.trash ?? []), ...gone.map(item => ({ ...item, deletedAt: at }))].slice(-MAX_TRASH)
+
+  return { ...record, items: record.items.filter(item => !ids.has(item.id)), trash }
+}
+
+/** The record with item `id` moved to the trash; null when no item has it. */
+export function removeItem(record: TodoRecord, id: number, at: number): TodoRecord | null {
+  const item = record.items.find(other => other.id === id)
+
+  return item === undefined ? null : toTrash(record, [item], at)
+}
+
+/** The record with its done items moved to the trash. */
+export function clearDone(record: TodoRecord, at: number): TodoRecord {
+  return toTrash(
+    record,
+    record.items.filter(item => item.status === 'done'),
+    at,
+  )
+}
+
+/**
+ * The record with the trashed items `ids` back in the list as they were (status, answers, id). As
+ * many as `MAX_TODOS` leaves room for, the rest left in the trash; null when none of them is there.
+ */
+export function restoreItems(record: TodoRecord, ids: readonly number[]): { record: TodoRecord; restored: UserTodo[] } | null {
+  const wanted = new Set(ids)
+  const room = MAX_TODOS - record.items.length
+  const restored: UserTodo[] = []
+  for (const trashed of record.trash ?? []) {
+    if (!wanted.has(trashed.id) || restored.length >= room) continue
+    const { deletedAt: _, ...item } = trashed
+    restored.push(item)
+  }
+  if (restored.length === 0) return null
+  const back = new Set(restored.map(item => item.id))
+  const trash = (record.trash ?? []).filter(item => !back.has(item.id))
+  const next: TodoRecord = { items: [...record.items, ...restored], nextId: record.nextId }
+  if (trash.length > 0) next.trash = trash
+
+  return { record: next, restored }
+}
+
+/** The record with item `id`'s text replaced, its status and answers kept; null when no item has it. */
+export function editItem(record: TodoRecord, id: number, text: string): TodoRecord | null {
   if (!record.items.some(item => item.id === id)) return null
 
-  return { ...record, items: record.items.filter(item => item.id !== id) }
+  return { ...record, items: record.items.map(item => (item.id === id ? { ...item, text } : item)) }
 }
 
-/** The record without its done items. */
-export function clearDone(record: TodoRecord): TodoRecord {
-  return { ...record, items: record.items.filter(item => item.status !== 'done') }
+/** The rows under the items: "완료 N개 지우기", "↶ 되돌리기", the field. */
+export function footerRows(done: number, undo: number, hasInput: boolean): number {
+  return (done > 0 ? 1 : 0) + (undo > 0 ? 1 : 0) + (hasInput ? 1 : 0)
 }
 
-/** The rows the tab's body wants: up to `size` items (an empty list's line), "외 N개", "완료 N개 지우기", the input. */
-export function todoRows(count: number, done: number, hasInput: boolean, size = TODO_PAGE_SIZE): number {
+/** The rows the tab's body wants: up to `size` items (an empty list's line), "외 N개", and the footer's rows. */
+export function todoRows(count: number, footer: number, size = TODO_PAGE_SIZE): number {
   const items = count === 0 ? 1 : Math.min(count, size) + (count > size ? 1 : 0)
 
-  return items + (done > 0 ? 1 : 0) + (hasInput ? 1 : 0)
+  return items + footer
 }
 
 /** Items the tab shows in `rows` rows, at most `size`: a row less for "외 N개" when they do not all fit; one at least. */
-export function todosShown(count: number, rows: number, done: number, hasInput: boolean, size = TODO_PAGE_SIZE): number {
-  const room = rows - (done > 0 ? 1 : 0) - (hasInput ? 1 : 0)
+export function todosShown(count: number, rows: number, footer: number, size = TODO_PAGE_SIZE): number {
+  const room = rows - footer
   if (count <= Math.min(size, room)) return count
 
   return Math.min(count, Math.max(1, Math.min(size, room - 1)))
 }
 
-/** `/todo` with nothing after it: the list as text, the way the tab orders it. */
+/** What `/todo` does, under its list. */
+export const TODO_USAGE = '적기 /todo 내용 · 고치기 /todo 수정 <번호> <내용> · 지운 것 /todo 휴지통 · 되살리기 /todo 복원 <번호>'
+
+/**
+ * `/todo` with nothing after it: the list as text, the way the tab orders it, each item by its number
+ * (its id: what `/todo 수정` takes, never reused), then the usage.
+ */
 export function todoListText(items: readonly UserTodo[]): string {
-  if (items.length === 0) return '적어 둔 할 일이 없습니다. `/todo 내용`으로 적습니다.'
+  if (items.length === 0) return `적어 둔 할 일이 없습니다.\n${TODO_USAGE}`
 
   const counts = (['in_progress', 'pending', 'on_hold', 'done'] as const)
     .map(status => [status, items.filter(item => item.status === status).length] as const)
     .filter(([, count]) => count > 0)
     .map(([status, count]) => `${STATUS_LABEL[status]} ${count}`)
-  const rows = sortTodos(items).map(item => `${STATUS_MARK[item.status]} ${oneLine(item.text)}${showsTurn(item) ? `  #${item.turn}` : ''}`)
+  const rows = sortTodos(items).map(item => `${item.id}. ${STATUS_MARK[item.status]} ${oneLine(item.text)}${showsTurn(item) ? `  #${item.turn}` : ''}`)
 
-  return [`할 일: ${counts.join(' · ')}`, ...rows].join('\n')
+  return [`할 일: ${counts.join(' · ')}`, ...rows, TODO_USAGE].join('\n')
+}
+
+/** `/todo 휴지통`: the deleted items, the last deleted first, each by its number, status and when it went. */
+export function trashListText(trash: readonly TrashedTodo[]): string {
+  if (trash.length === 0) return '휴지통이 비어 있습니다.'
+  const rows = [...trash].reverse().map(item => `${item.id}. ${STATUS_MARK[item.status]} ${oneLine(item.text)} · ${clockText(item.deletedAt)} 지움`)
+
+  return [`휴지통 ${trash.length}개 (최근 ${MAX_TRASH}개까지):`, ...rows, '되살리기: /todo 복원 <번호>'].join('\n')
+}
+
+/** `11-04 15:30`, local time. */
+function clockText(ms: number): string {
+  const date = new Date(ms)
+  const two = (n: number) => String(n).padStart(2, '0')
+
+  return `${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`
 }
 
 const STATUS_LABEL: Record<UserTodoStatus, string> = { pending: '대기', in_progress: '진행', done: '완료', on_hold: '보류' }

@@ -13,7 +13,9 @@ import {
   rowTailCells,
   setItemStatus,
   sortTodos,
+  TODO_USAGE,
   todoListText,
+  footerRows,
   todoRows,
   todosShown,
   todoStoreKey,
@@ -124,21 +126,24 @@ test('adding stops at 200; taking up or finishing an item sets the answer, a pre
   expect(setItemStatus(record, 1, 'on_hold', { turn: 7, session: 's1' })?.items[0]?.turn).toBeUndefined()
   expect(setItemStatus(record, 1, 'done')?.items[0]?.turn).toBeUndefined()
   expect(setItemStatus(record, 9, 'done')).toBeNull()
-  expect(removeItem(record, 2)?.items.map(one => one.id)).toEqual([1])
-  expect(removeItem(record, 9)).toBeNull()
-  expect(clearDone(record).items.map(one => one.id)).toEqual([1])
+  expect(removeItem(record, 2, NOW)?.items.map(one => one.id)).toEqual([1])
+  expect(removeItem(record, 9, NOW)).toBeNull()
+  expect(clearDone(record, NOW).items.map(one => one.id)).toEqual([1])
 })
 
 test('the tab shows twelve at most, fewer in fewer rows with a row for "외 N개"', () => {
-  // Items, "완료 N개 지우기", the field.
-  expect(todoRows(3, 1, true)).toBe(5)
-  expect(todoRows(0, 0, true)).toBe(2)
-  expect(todoRows(20, 0, false)).toBe(13)
-  expect(todosShown(3, 10, 1, true)).toBe(3)
-  expect(todosShown(20, 40, 0, true)).toBe(12)
+  // Items, then the footer: "완료 N개 지우기", "↶ 되돌리기", the field.
+  expect(footerRows(1, 0, true)).toBe(2)
+  expect(footerRows(2, 3, true)).toBe(3)
+  expect(footerRows(0, 0, false)).toBe(0)
+  expect(todoRows(3, footerRows(1, 0, true))).toBe(5)
+  expect(todoRows(0, footerRows(0, 0, true))).toBe(2)
+  expect(todoRows(20, footerRows(0, 0, false))).toBe(13)
+  expect(todosShown(3, 10, footerRows(1, 0, true))).toBe(3)
+  expect(todosShown(20, 40, footerRows(0, 0, true))).toBe(12)
   // Six rows less the field and "지우기": four, one of them "외 N개".
-  expect(todosShown(20, 6, 2, true)).toBe(3)
-  expect(todosShown(20, 1, 2, true)).toBe(1)
+  expect(todosShown(20, 6, footerRows(2, 0, true))).toBe(3)
+  expect(todosShown(20, 1, footerRows(2, 0, true))).toBe(1)
 })
 
 test('the lists say each item, the model\'s with ids and the answers it was written and taken up in', () => {
@@ -148,7 +153,7 @@ test('the lists say each item, the model\'s with ids and the answers it was writ
     item(3, 'in_progress', { createdTurn: 12, createdSession: 'now', turn: 14, turnSession: 'now' }),
     item(4, 'on_hold'),
   ]
-  expect(todoListText(list)).toBe(['할 일: 진행 1 · 대기 1 · 보류 1 · 완료 1', '⏳ 일 3  #14', '📌 일 2', '💤 일 4', '✅ 일 1  #9'].join('\n'))
+  expect(todoListText(list)).toBe(['할 일: 진행 1 · 대기 1 · 보류 1 · 완료 1', '3. ⏳ 일 3  #14', '2. 📌 일 2', '4. 💤 일 4', '1. ✅ 일 1  #9', TODO_USAGE].join('\n'))
   expect(todoListText([])).toMatch(/없습니다/)
 
   const text = todoToolList(list, { turn: 15, session: 'now' })
@@ -168,8 +173,8 @@ test('/todo writes to the project with the answer it was written during; alone i
 
   expect(await todo($, '  로그 정리하기  ')).toBe('할 일에 적었습니다: 로그 정리하기')
   expect(items(stored)).toEqual([{ id: 1, text: '로그 정리하기', status: 'pending', createdAt: NOW, createdTurn: 2, createdSession: 'session-1' }])
-  expect(await todo($, '')).toBe('할 일: 대기 1\n📌 로그 정리하기')
-  expect(await todo($, '   ')).toBe('할 일: 대기 1\n📌 로그 정리하기')
+  expect(await todo($, '')).toBe(`할 일: 대기 1\n1. 📌 로그 정리하기\n${TODO_USAGE}`)
+  expect(await todo($, '   ')).toBe(`할 일: 대기 1\n1. 📌 로그 정리하기\n${TODO_USAGE}`)
 })
 
 test('/todo writes onto what the store holds now: another session\'s item written meanwhile stays', async ($, on) => {
@@ -194,7 +199,7 @@ test('/todo is listed, runs mid-answer, and refuses past 200 items', async ($, o
   const stored = memoryStore(on, { [KEY]: { items: Array.from({ length: MAX_TODOS }, (_, i) => item(i + 1, 'pending')), nextId: MAX_TODOS + 1 } })
   await start($)
 
-  expect(standIn.commands.find(command => command.name === 'todo')).toMatchObject({ immediate: true, argumentHint: '[내용]' })
+  expect(standIn.commands.find(command => command.name === 'todo')).toMatchObject({ immediate: true, argumentHint: '[내용 | 수정 <번호> <내용> | 휴지통 | 복원 <번호>]' })
   expect(await todo($, '하나 더')).toMatch(/200개라 더 적을 수 없습니다/)
   expect(items(stored)).toHaveLength(MAX_TODOS)
 })

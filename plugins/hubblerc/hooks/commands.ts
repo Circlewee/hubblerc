@@ -42,8 +42,8 @@ export async function registerCommand($: EngineInterface): Promise<void> {
   })
   await $.command.register({
     name: 'todo',
-    description: '이 프로젝트의 할 일에 적기. 내용 없이 실행하면 목록 (hubblerc)',
-    argumentHint: '[내용]',
+    description: '이 프로젝트의 할 일에 적기. 내용 없이 실행하면 목록, 수정 <번호> <내용>으로 고치기, 휴지통으로 지운 것 보기, 복원 <번호>로 되살리기 (hubblerc)',
+    argumentHint: '[내용 | 수정 <번호> <내용> | 휴지통 | 복원 <번호>]',
     immediate: true,
   })
   await $.command.register({
