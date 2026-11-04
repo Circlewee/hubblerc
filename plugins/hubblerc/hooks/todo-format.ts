@@ -271,12 +271,24 @@ export function todoRows(count: number, footer: number, size = TODO_PAGE_SIZE): 
   return items + footer
 }
 
-/** Items the tab shows in `rows` rows, at most `size`: a row less for "외 N개" when they do not all fit; one at least. */
+/**
+ * Items the tab shows in `rows` rows, at most `size`: a row less for "외 N개" when they do not all fit;
+ * one at least. Never "외 1개": its row shows the one item instead.
+ */
 export function todosShown(count: number, rows: number, footer: number, size = TODO_PAGE_SIZE): number {
   const room = rows - footer
   if (count <= Math.min(size, room)) return count
+  const shown = Math.min(count, Math.max(1, Math.min(size, room - 1)))
 
-  return Math.min(count, Math.max(1, Math.min(size, room - 1)))
+  return count - shown === 1 ? count : shown
+}
+
+/**
+ * The rows the tab keeps however short the pane (the files, expanded, taking the rest): its footer
+ * and up to three items, or the empty list's line.
+ */
+export function todoLeastRows(count: number, footer: number): number {
+  return footer + Math.max(1, Math.min(count, 3))
 }
 
 /** What `/todo` does, under its list. */

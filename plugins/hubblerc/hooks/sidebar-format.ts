@@ -278,13 +278,14 @@ export function tocPageSize(count: number, rows: number, size: number): number {
 /**
  * The rows left to the files and the contents shared out: each all it wants when both fit; else
  * the one wanting under half takes what it wants and the other the rest, or half each. Each keeps
- * `least` (or what it wants, if less) however few rows are left: then the sidebar runs past its height.
+ * `least` (the last box `tocLeast`; or what it wants, if less) however few rows are left: then the
+ * sidebar runs past its height.
  */
-export function shareRows(room: number, filesWant: number, tocWant: number, least = 3): { files: number; toc: number } {
+export function shareRows(room: number, filesWant: number, tocWant: number, least = 3, tocLeast = least): { files: number; toc: number } {
   if (filesWant + tocWant <= room) return { files: filesWant, toc: tocWant }
 
   const half = Math.floor(room / 2)
   const files = Math.max(Math.min(least, filesWant), filesWant <= half ? filesWant : tocWant <= room - half ? room - tocWant : half)
 
-  return { files, toc: Math.max(Math.min(least, tocWant), room - files) }
+  return { files, toc: Math.max(Math.min(tocLeast, tocWant), room - files) }
 }

@@ -14,7 +14,7 @@ import { requestRestart } from './relaunch'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
 import { addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, editFieldKey, editTarget, offerTodo, saveEditFromField, selectTab, startEditTodo, todosForDrawing, undoCount, undoDelete } from './todo'
-import { footerRows, oneLine, openCount, rowTailCells, showsTurn, sortTodos, STATUS_MARK, todoRows, todosShown } from './todo-format'
+import { footerRows, oneLine, openCount, rowTailCells, showsTurn, sortTodos, STATUS_MARK, todoLeastRows, todoRows, todosShown } from './todo-format'
 import type { SidebarTab, UserTodo } from './todo-format'
 import { statusLine } from './likely/cost'
 
@@ -673,16 +673,21 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const undoN = undoCount()
     const edited = hasField ? editTarget(userTodos, e.props.isFocused) : null
     const todoFooter = footerRows(doneCount, undoN, hasField)
+    // However short the pane, the last box keeps three rows of the contents, or the to-dos' footer and
+    // a few of them: three rows once left the to-dos one item and "외 1개" under the files (2026-11-04).
+    const contentsLeast = shownTab === 'todo' ? todoLeastRows(userTodos.length, todoFooter) : 3
     const share = shareRows(
       room,
       isFilesOpen ? fileRows(fileLayout(files, FILE_LIMITS)) : 0,
       !isContentsOpen ? 0 : shownTab === 'todo' ? todoRows(userTodos.length, todoFooter) : tocRows(all.length, TOC_PAGE_SIZE),
+      3,
+      contentsLeast,
     )
     const limited = fitFileLayout(files, FILE_LIMITS, share.files)
     const isCut = limited.insideHidden > 0 || limited.foldersHidden > 0 || limited.outside.some(group => group.hidden > 0)
     const shownFiles = isFilesExpanded ? fileLayout(files, NO_FILE_LIMITS) : limited
     // Every file shown, the contents keep what the files leave, or their least.
-    const contentsRoom = isFilesExpanded && isFilesOpen ? Math.max(Math.min(3, share.toc), room - fileRows(shownFiles, isCut)) : share.toc
+    const contentsRoom = isFilesExpanded && isFilesOpen ? Math.max(Math.min(contentsLeast, share.toc), room - fileRows(shownFiles, isCut)) : share.toc
     const { entries, page, pages } = tocPage(all, pageIndex, tocPageSize(all.length, contentsRoom, TOC_PAGE_SIZE))
     const goTo = (to: number) => {
       void update($, tocPageIndex, () => Math.min(Math.max(0, to), pages - 1))

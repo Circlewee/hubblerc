@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -6,10 +6,13 @@ import {
   addItem,
   cleanTodoText,
   clearDone,
+  editItem,
   MAX_TODOS,
+  MAX_TRASH,
   nextStatus,
   parseTodoRecord,
   removeItem,
+  restoreItems,
   rowTailCells,
   setItemStatus,
   sortTodos,
@@ -17,10 +20,14 @@ import {
   todoListText,
   footerRows,
   todoRows,
+  todoLeastRows,
   todosShown,
   todoStoreKey,
   todoToolList,
+  trashListText,
 } from '../hooks/todo-format'
+import { shareRows } from '../hooks/sidebar-format'
+import { pluginId, sha256Hex, storeFileName } from '../hooks/store-file'
 import type { TodoRecord, UserTodo } from '../hooks/todo-format'
 import { cellWidth } from '../hooks/band-format'
 import { NOW, standInForEngine, start } from './engine'
@@ -434,4 +441,258 @@ test('a row: an emoji sign in its own colours, ↗ and ✕ three cells each, the
   expect(cellWidth(row)).toBeLessThanOrEqual(52 - 1)
   expect(cellWidth(row)).toBeGreaterThanOrEqual(52 - 2)
   await ui.unmount()
+})
+
+// ── Trash, undo, edit ─────────────────────────────────────────────
+
+test('a delete moves items to the trash as they were; restored, they come back so; the trash keeps the last fifty', () => {
+  const record: TodoRecord = { items: [item(1, 'pending'), item(2, 'done', { turn: 4, turnSession: 's' }), item(3, 'done')], nextId: 4 }
+  const one = removeItem(record, 2, NOW + 1)
+  expect(one?.items.map(other => other.id)).toEqual([1, 3])
+  expect(one?.trash).toEqual([{ ...item(2, 'done', { turn: 4, turnSession: 's' }), deletedAt: NOW + 1 }])
+  const both = clearDone(record, NOW + 2)
+  expect(both.items.map(other => other.id)).toEqual([1])
+  expect(both.trash?.map(other => [other.id, other.status, other.deletedAt])).toEqual([
+    [2, 'done', NOW + 2],
+    [3, 'done', NOW + 2],
+  ])
+
+  const back = restoreItems(both, [2, 9])
+  expect(back?.restored).toEqual([item(2, 'done', { turn: 4, turnSession: 's' })])
+  expect(back?.record.items.map(other => other.id)).toEqual([1, 2])
+  expect(back?.record.trash?.map(other => other.id)).toEqual([3])
+  expect(restoreItems(both, [9])).toBeNull()
+  // No room past 200: left in the trash.
+  const full: TodoRecord = { items: Array.from({ length: MAX_TODOS }, (_, i) => item(i + 10, 'pending')), nextId: 300, trash: [{ ...item(5, 'done'), deletedAt: NOW }] }
+  expect(restoreItems(full, [5])).toBeNull()
+
+  // Fifty kept, the oldest gone; read back, ids past the trash's too, an item's id not twice.
+  let many: TodoRecord = { items: Array.from({ length: 60 }, (_, i) => item(i + 1, 'pending')), nextId: 61 }
+  for (let id = 1; id <= 60; id += 1) many = removeItem(many, id, NOW + id) ?? many
+  expect(many.trash?.length).toBe(MAX_TRASH)
+  expect(many.trash?.[0]?.id).toBe(11)
+  const read = parseTodoRecord({ items: [item(1, 'pending')], nextId: 2, trash: [{ ...item(1, 'done'), deletedAt: 5 }, { ...item(70, 'on_hold'), deletedAt: 6 }, { id: 'x' }] })
+  expect(read.trash).toEqual([{ ...item(70, 'on_hold'), deletedAt: 6 }])
+  expect(read.nextId).toBe(71)
+  expect(parseTodoRecord({ items: [], nextId: 1 }).trash).toBeUndefined()
+
+  expect(editItem(record, 2, '고친 일')?.items[1]).toEqual(item(2, 'done', { text: '고친 일', turn: 4, turnSession: 's' }))
+  expect(editItem(record, 9, 'x')).toBeNull()
+})
+
+test('never "외 1개": its row shows the item; the to-do tab keeps its footer and a few items however short the pane', () => {
+  expect(todosShown(2, 3, 2)).toBe(2)
+  expect(todosShown(13, 40, 0)).toBe(13)
+  expect(todosShown(5, 4, 1)).toBe(2)
+  expect(todoLeastRows(2, 2)).toBe(4)
+  expect(todoLeastRows(0, 1)).toBe(2)
+  expect(todoLeastRows(9, 3)).toBe(6)
+  expect(shareRows(10, 40, 4, 3, 4)).toEqual({ files: 6, toc: 4 })
+  expect(shareRows(6, 40, 4, 3, 4)).toEqual({ files: 3, toc: 4 })
+})
+
+test('the trash and /todo list as text, each by its number', () => {
+  const at = new Date(2026, 10, 4, 15, 30).getTime()
+  expect(trashListText([{ ...item(2, 'done'), deletedAt: at }, { ...item(5, 'pending'), deletedAt: at + 60_000 }])).toBe(
+    ['휴지통 2개 (최근 50개까지):', '5. 📌 일 5 · 11-04 15:31 지움', '2. ✅ 일 2 · 11-04 15:30 지움', '되살리기: /todo 복원 <번호>'].join('\n'),
+  )
+  expect(trashListText([])).toBe('휴지통이 비어 있습니다.')
+  expect(todoListText([])).toBe(`적어 둔 할 일이 없습니다.\n${TODO_USAGE}`)
+  expect(TODO_USAGE).toContain('/todo 수정 <번호> <내용>')
+  expect(TODO_USAGE).toContain('/todo 휴지통')
+  expect(TODO_USAGE).toContain('/todo 복원 <번호>')
+})
+
+test('with two items in a tall pane both show, the files expanded beside them or not (2026-11-04: one and "외 1개")', async ($, on) => {
+  const standIn = standInForEngine(on)
+  memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending'), item(2, 'done')], nextId: 3 } })
+  await start($)
+  for (let i = 0; i < 73; i += 1) {
+    await $.turn.start({ text: `질문 ${i}`, turnId: `t${i}` })
+    await $.tool.call({ tool: 'Write', file_path: `/repo/hubblerc/f${i}.ts`, content: 'x\n' })
+    await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: `t${i}`, durationMs: 1000 })
+  }
+  await standIn.clock.settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await rowKeys(ui)).toEqual(['todo-1', 'todo-2'])
+  await ui.press({ key: 'inside-more' })
+  expect(await rowKeys(ui)).toEqual(['todo-1', 'todo-2'])
+  expect(await ui.find({ type: 'Text', text: /^외 \d+개$/ })).toBeUndefined()
+  expect(await ui.find({ key: 'todo-clear-done' })).toBeDefined()
+  await ui.unmount()
+
+  const short = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, scroll: { offset: 0, bodyRows: 30 } } })
+  expect(await rowKeys(short)).toEqual(['todo-1', 'todo-2'])
+  await short.unmount()
+})
+
+test('✕ and "완료 N개 지우기" leave "↶ 되돌리기 (N개)"; it brings them back as they were, and goes with the next change, ↗ or session', async ($, on) => {
+  standInForEngine(on)
+  const stored = memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending'), item(2, 'done', { turn: 3 }), item(3, 'done'), item(4, 'pending')], nextId: 5 } })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await ui.find({ key: 'todo-undo' })).toBeUndefined()
+
+  await ui.press({ key: 'todo-clear-done' })
+  expect(items(stored).map(one => one.id)).toEqual([1, 4])
+  expect((await ui.find({ key: 'todo-undo' }))?.text).toBe('↶ 되돌리기 (2개)')
+  await ui.press({ key: 'todo-undo' })
+  expect(items(stored).map(one => [one.id, one.status, one.turn])).toEqual([
+    [1, 'pending', undefined],
+    [4, 'pending', undefined],
+    [2, 'done', 3],
+    [3, 'done', undefined],
+  ])
+  expect(parseTodoRecord(stored[KEY]).trash).toBeUndefined()
+  expect(await ui.find({ key: 'todo-undo' })).toBeUndefined()
+
+  // The next change takes it away: a status, a write, ↗.
+  await ui.press({ key: 'todo-delete-1' })
+  expect((await ui.find({ key: 'todo-undo' }))?.text).toBe('↶ 되돌리기 (1개)')
+  await ui.press({ key: 'todo-status-4' })
+  expect(await ui.find({ key: 'todo-undo' })).toBeUndefined()
+  await ui.press({ key: 'todo-delete-2' })
+  await ui.input({ key: 'todo-input', text: '새 일' })
+  expect(await ui.find({ key: 'todo-undo' })).toBeUndefined()
+  await ui.press({ key: 'todo-delete-3' })
+  await ui.press({ key: 'todo-send-5' })
+  expect(await ui.find({ key: 'todo-undo' })).toBeUndefined()
+  await ui.unmount()
+
+  // A new session starts without it.
+  await ui.unmount().catch(() => undefined)
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  await again.press({ key: 'todo-delete-5' })
+  expect(await again.find({ key: 'todo-undo' })).toBeDefined()
+  await again.unmount()
+  await start($)
+  const later = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await later.find({ key: 'todo-undo' })).toBeUndefined()
+  await later.unmount()
+})
+
+test('/todo 휴지통 lists what was deleted; /todo 복원 <번호> brings one back; neither takes a word for a number', async ($, on) => {
+  standInForEngine(on)
+  const stored = memoryStore(on, { [KEY]: { items: [item(1, 'pending')], nextId: 3, trash: [{ ...item(2, 'in_progress', { turn: 6 }), deletedAt: NOW }] } })
+  await start($)
+
+  expect(await todo($, '휴지통')).toMatch(/^휴지통 1개 \(최근 50개까지\):\n2\. ⏳ 일 2 · \d\d-\d\d \d\d:\d\d 지움\n되살리기: \/todo 복원 <번호>$/)
+  expect(await todo($, '복원 2')).toBe('되살렸습니다: 2. ⏳ 일 2')
+  expect(items(stored).find(one => one.id === 2)).toMatchObject({ status: 'in_progress', turn: 6 })
+  expect(await todo($, '휴지통')).toBe('휴지통이 비어 있습니다.')
+  expect(await todo($, '복원 2')).toBe('휴지통에 2번이 없습니다. /todo 휴지통으로 번호를 보세요.')
+  // Not a number: an item to write.
+  expect(await todo($, '복원 버튼 만들기')).toBe('할 일에 적었습니다: 복원 버튼 만들기')
+  expect(await todo($, '')).toContain('3. 📌 복원 버튼 만들기')
+})
+
+test('/todo 수정 <번호> <내용> rewrites an item, its status and answer kept; a missing number or text says why', async ($, on) => {
+  standInForEngine(on)
+  const stored = memoryStore(on, { [KEY]: { items: [item(1, 'done', { turn: 4 }), item(2, 'pending')], nextId: 3 } })
+  await start($)
+
+  expect(await todo($, '수정 1   더 나은 말로  ')).toBe('고쳤습니다: 1. 더 나은 말로')
+  expect(items(stored)[0]).toEqual(item(1, 'done', { turn: 4, text: '더 나은 말로' }))
+  expect(await todo($, '수정 9 무엇')).toBe('9번 할 일이 없습니다. /todo로 번호를 보세요.')
+  expect(await todo($, '수정 2')).toBe('새 내용이 없습니다: /todo 수정 2 <내용>')
+  expect(await todo($, `수정 2 ${'가'.repeat(600)}`)).toMatch(/\(500자가 넘어 앞부분만\)$/)
+  expect([...(items(stored)[1]?.text ?? '')]).toHaveLength(500)
+  // No number: an item to write.
+  expect(await todo($, '수정 버튼 색')).toBe('할 일에 적었습니다: 수정 버튼 색')
+})
+
+test('a press on an item\'s text edits it below: Enter saves, empty cancels, the pane letting the keyboard go cancels', async ($, on) => {
+  standInForEngine(on)
+  const stored = memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'in_progress', { turn: 2 }), item(2, 'pending')], nextId: 3 } })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await ui.find({ key: 'todo-input' })).toBeDefined()
+
+  await ui.press({ key: 'todo-text-1' })
+  const field = await ui.find({ key: 'todo-edit-1' })
+  expect(field?.props).toMatchObject({ value: '일 1', label: '1번 수정 ', submitLabel: '저장' })
+  expect(await ui.find({ key: 'todo-input' })).toBeUndefined()
+  // The row edited stands out.
+  expect((await ui.find({ type: 'Text', text: ' 일 1' }))?.props).toMatchObject({ bold: true })
+  // The rows the tab takes do not change: the field is the same row.
+  expect(await rowKeys(ui)).toEqual(['todo-1', 'todo-2'])
+
+  await ui.input({ key: 'todo-edit-1', text: '고친 일 1' })
+  expect(items(stored)[0]).toEqual(item(1, 'in_progress', { turn: 2, text: '고친 일 1' }))
+  expect(await ui.find({ key: 'todo-edit-1' })).toBeUndefined()
+  expect(await ui.find({ key: 'todo-input' })).toBeDefined()
+
+  // Empty: cancelled, nothing written.
+  await ui.press({ key: 'todo-text-2' })
+  await ui.input({ key: 'todo-edit-2', text: '   ' })
+  expect(items(stored)[1]?.text).toBe('일 2')
+  expect(await ui.find({ key: 'todo-edit-2' })).toBeUndefined()
+
+  // Esc hands the keyboard back: the pane, having held it, drawn without it cancels.
+  await ui.press({ key: 'todo-text-2' })
+  await ui.redraw({ ...PANE_PROPS, isFocused: true })
+  expect(await ui.find({ key: 'todo-edit-2' })).toBeDefined()
+  await ui.redraw({ ...PANE_PROPS, isFocused: false })
+  expect(await ui.find({ key: 'todo-edit-2' })).toBeUndefined()
+  expect(await ui.find({ key: 'todo-input' })).toBeDefined()
+  expect(items(stored)[1]?.text).toBe('일 2')
+
+  // An edit whose item is deleted ends.
+  await ui.press({ key: 'todo-text-2' })
+  await ui.press({ key: 'todo-delete-2' })
+  expect(await ui.find({ key: 'todo-edit-2' })).toBeUndefined()
+  await ui.unmount()
+})
+
+// ── The store watched ─────────────────────────────────────────────
+
+test('SHA-256 as the engine names a plugin\'s store file by its id', () => {
+  expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+  expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+  expect(sha256Hex('a'.repeat(1000))).toBe('41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3')
+  // The files on the Mac it was found on (2026-11-04).
+  expect(storeFileName('hubblerc@inline')).toBe('hubblerc_inline-c039cadca8b5.json')
+  expect(storeFileName('hubblerc@hubblerc')).toBe('hubblerc_hubblerc-3be9b6e2c135.json')
+  expect(pluginId('hubblerc', '/Users/me/.claude/plugins/cache/hubblerc/hubblerc/0.10.0')).toBe('hubblerc@hubblerc')
+  expect(pluginId('hubblerc', '/Users/me/vault/project/hubblerc/plugins/hubblerc')).toBe('hubblerc@inline')
+})
+
+test('the store file is watched; another session\'s change to it shows at once, no answer needed', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const stored = memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
+  mock.env(on, { HOME: '/home/me' })
+  const file = '/home/me/.claude/plugins/store/hubblerc_inline-c039cadca8b5.json'
+  standIn.existing.push(file)
+  on('classic.SessionStart', () => ({}))
+  on('classic.FileChanged', () => ({}))
+  await start($)
+
+  const started = await $.classic.SessionStart({ source: 'startup', cwd: '/repo/hubblerc', transcript_path: '/home/me/.claude/projects/x/session-1.jsonl' } as never)
+  expect((started as { watchPaths?: string[] }).watchPaths).toEqual(['/repo/hubblerc/.git/HEAD', '/repo/hubblerc/.git/index', '/repo/hubblerc/.git/logs/HEAD', file])
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 1')
+  stored[KEY] = { items: [item(1, 'pending'), item(2, 'pending')], nextId: 3 }
+  // Another file changing reads nothing.
+  await $.classic.FileChanged({ file_path: '/home/me/other.json', event: 'change' } as never)
+  await standIn.clock.settle()
+  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 1')
+  await $.classic.FileChanged({ file_path: file, event: 'change' } as never)
+  await standIn.clock.settle()
+  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 2')
+  await ui.unmount()
+})
+
+test('where the named store file is not there, the plugin\'s files in the store folder are watched', async ($, on) => {
+  standInForEngine(on)
+  memoryStore(on, {})
+  mock.env(on, { HOME: '/home/me' })
+  on('fs.list', (_, e) => ({
+    value: ['hubblerc_local-0123456789ab.json', 'other_market-0123456789ab.json', 'hubblerc_notes.txt'].map(name => ({ name, kind: 'file' as const, size: 2, mtimeMs: 0, isLink: false })),
+  }))
+  on('classic.SessionStart', () => ({}))
+  await start($)
+  const started = await $.classic.SessionStart({ source: 'startup', cwd: '/repo/hubblerc', transcript_path: '/home/me/.claude/projects/x/session-1.jsonl' } as never)
+  expect((started as { watchPaths?: string[] }).watchPaths?.slice(3)).toEqual(['/home/me/.claude/plugins/store/hubblerc_local-0123456789ab.json'])
 })
