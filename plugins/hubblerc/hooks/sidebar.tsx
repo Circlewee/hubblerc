@@ -897,7 +897,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
             item's text: Enter saves, empty cancels, and so does the pane letting the keyboard go (Esc). */}
         {Input === undefined ? null : edited !== null ? (
           <Input
-            key={editFieldKey(edited.id)}
+            key={editFieldKey()}
             label={`${edited.id}번 수정 `}
             value={edited.text}
             placeholder="비우고 Enter면 취소"

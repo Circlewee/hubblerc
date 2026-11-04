@@ -58,12 +58,14 @@ let offered: { id: number; text: string } | null = null
 let undo: { key: string; ids: number[] } | null = null
 
 /**
- * The item the sidebar's field edits, by its project's key and id; `sawFocus` once a drawing found the
- * pane holding the keyboard. Esc never reaches a pane's field (it hands the keyboard back), so the
- * pane losing the keyboard while editing is the cancel: a click elsewhere cancels too. Gone with a
- * reload or the item.
+ * The item the sidebar's field edits, by its project's key and id, and the key of the field this edit
+ * draws; `sawFocus` once a drawing found the pane holding the keyboard. Esc never reaches a pane's
+ * field (it hands the keyboard back), so the pane losing the keyboard while editing is the cancel: a
+ * click elsewhere cancels too. Gone with a reload or the item.
  */
-let editing: { key: string; id: number; sawFocus: boolean } | null = null
+let editing: { key: string; id: number; field: string; sawFocus: boolean } | null = null
+/** Edits started since the module loaded: with the time, what makes each edit's field key new. */
+let edits = 0
 
 /** At session.start: the tab chosen in an earlier session, the project's list, and the model's tool. */
 export async function startTodos($: EngineInterface): Promise<void> {
@@ -304,11 +306,14 @@ let focusMiss: { at: number; reason: string } | null = null
  * meanwhile: it ends on the pane losing the keyboard only once it held it (`editTarget`).
  */
 export async function startEditTodo($: EngineInterface, id: number): Promise<void> {
-  if (loaded === null) return
-  editing = { key: loaded.key, id, sawFocus: false }
+  const key = loaded?.key
+  if (key === undefined) return
+  edits += 1
+  const field = `todo-edit-${id}-${(await $.clock.now()).toString(36)}-${edits}`
+  editing = { key, id, field, sawFocus: false }
   await redraw($)
   const held = await askSidebarKeyboard($).catch(() => undefined)
-  const moved = await $.ui.focus({ requestId: SIDEBAR_ID, key: editFieldKey(id) }).catch((error: unknown) => ({ deny: String(error) }))
+  const moved = await $.ui.focus({ requestId: SIDEBAR_ID, key: field }).catch((error: unknown) => ({ deny: String(error) }))
   if (moved.deny === undefined) {
     focusMiss = null
 
@@ -327,9 +332,14 @@ function focusMissLine(): string {
   return `\n(디버그) 수정 칸으로 키보드를 옮기지 못함 ${two(date.getHours())}:${two(date.getMinutes())}: ${focusMiss.reason}`
 }
 
-/** The edit field's key: a field of its own, so leaving the edit draws the empty one afresh. */
-export function editFieldKey(id: number): string {
-  return `todo-edit-${id}`
+/**
+ * The key of the field the current edit draws ('' while none): a field of its own, so leaving the
+ * edit draws the empty one afresh, and new to each edit. The engine keeps what a field holds by its
+ * key, and a field Enter emptied came back empty over its `value` when the same item was edited again
+ * under the same key (2026-11-05, on screen); a key it has not seen takes the `value`.
+ */
+export function editFieldKey(): string {
+  return editing?.field ?? ''
 }
 
 /**

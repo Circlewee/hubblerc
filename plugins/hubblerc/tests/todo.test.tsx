@@ -61,6 +61,11 @@ function memoryStore(on: On, entries: Record<string, unknown> = {}): Record<stri
 
 const items = (stored: Record<string, unknown>) => parseTodoRecord(stored[KEY]).items
 
+/** The field an edit of item `id` draws: its key is new to each edit (`todo-edit-<id>-…`). */
+async function editField(ui: { findAll: (query: { type: string }) => Promise<{ key: string | undefined; props: Record<string, unknown> }[]> }, id: number) {
+  return (await ui.findAll({ type: 'Input' })).find(found => found.key?.startsWith(`todo-edit-${id}-`) === true)
+}
+
 /** The keys of the to-do rows drawn, top to bottom. */
 async function rowKeys(ui: { findAll: (query: { type: string }) => Promise<{ key: string | undefined }[]> }): Promise<string[]> {
   return (await ui.findAll({ type: 'Box' })).map(found => found.key ?? '').filter(key => /^todo-\d+$/.test(key))
@@ -610,7 +615,7 @@ test('a press on an item\'s text edits it below: Enter saves, empty cancels, the
   expect(await ui.find({ key: 'todo-input' })).toBeDefined()
 
   await ui.press({ key: 'todo-text-1' })
-  const field = await ui.find({ key: 'todo-edit-1' })
+  const field = await editField(ui, 1)
   expect(field?.props).toMatchObject({ value: '일 1', label: '1번 수정 ', submitLabel: '저장' })
   expect(await ui.find({ key: 'todo-input' })).toBeUndefined()
   // The row edited stands out.
@@ -618,30 +623,30 @@ test('a press on an item\'s text edits it below: Enter saves, empty cancels, the
   // The rows the tab takes do not change: the field is the same row.
   expect(await rowKeys(ui)).toEqual(['todo-1', 'todo-2'])
 
-  await ui.input({ key: 'todo-edit-1', text: '고친 일 1' })
+  await ui.input({ key: (await editField(ui, 1))?.key ?? '', text: '고친 일 1' })
   expect(items(stored)[0]).toEqual(item(1, 'in_progress', { turn: 2, text: '고친 일 1' }))
-  expect(await ui.find({ key: 'todo-edit-1' })).toBeUndefined()
+  expect(await editField(ui, 1)).toBeUndefined()
   expect(await ui.find({ key: 'todo-input' })).toBeDefined()
 
   // Empty: cancelled, nothing written.
   await ui.press({ key: 'todo-text-2' })
-  await ui.input({ key: 'todo-edit-2', text: '   ' })
+  await ui.input({ key: (await editField(ui, 2))?.key ?? '', text: '   ' })
   expect(items(stored)[1]?.text).toBe('일 2')
-  expect(await ui.find({ key: 'todo-edit-2' })).toBeUndefined()
+  expect(await editField(ui, 2)).toBeUndefined()
 
   // Esc hands the keyboard back: the pane, having held it, drawn without it cancels.
   await ui.press({ key: 'todo-text-2' })
   await ui.redraw({ ...PANE_PROPS, isFocused: true })
-  expect(await ui.find({ key: 'todo-edit-2' })).toBeDefined()
+  expect(await editField(ui, 2)).toBeDefined()
   await ui.redraw({ ...PANE_PROPS, isFocused: false })
-  expect(await ui.find({ key: 'todo-edit-2' })).toBeUndefined()
+  expect(await editField(ui, 2)).toBeUndefined()
   expect(await ui.find({ key: 'todo-input' })).toBeDefined()
   expect(items(stored)[1]?.text).toBe('일 2')
 
   // An edit whose item is deleted ends.
   await ui.press({ key: 'todo-text-2' })
   await ui.press({ key: 'todo-delete-2' })
-  expect(await ui.find({ key: 'todo-edit-2' })).toBeUndefined()
+  expect(await editField(ui, 2)).toBeUndefined()
   await ui.unmount()
 })
 
@@ -722,7 +727,7 @@ test('a press on an item\'s text asks the keyboard for the pane (same title and 
   expect(standIn.panes).toEqual([{ ...SIDEBAR_PANE, isFocused: true }])
   // The pane got the keyboard: a failure here could only be the move's own.
   expect(await lastLine($)).not.toContain('패널이 키보드를 받지 못함')
-  expect(await ui.find({ key: 'todo-edit-1' })).toBeDefined()
+  expect(await editField(ui, 1)).toBeDefined()
   await ui.unmount()
 })
 
@@ -736,7 +741,7 @@ test('a pane that holds the keyboard already is not opened again', async ($, on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, isFocused: true } })
   await ui.press({ key: 'todo-text-1' })
   expect(standIn.opened.length).toBe(opensAtStart)
-  expect(await ui.find({ key: 'todo-edit-1' })).toBeDefined()
+  expect(await editField(ui, 1)).toBeDefined()
   await ui.unmount()
 })
 
@@ -752,11 +757,42 @@ test('the keyboard refused (text in the prompt box): the edit stays open, unfocu
   expect(standIn.opened.at(-1)).toEqual({ id: 'hubblerc', title: 'hubblerc', columns: 56, focus: true })
   // Drawn without the keyboard it never held: not a cancel.
   await ui.redraw(PANE_PROPS)
-  expect(await ui.find({ key: 'todo-edit-1' })).toBeDefined()
+  expect(await editField(ui, 1)).toBeDefined()
   expect(await lastLine($)).toMatch(/^\(디버그\) 수정 칸으로 키보드를 옮기지 못함 \d\d:\d\d: .+ \(패널이 키보드를 받지 못함: .*\)$/)
   // A second press, on the field: the person's own, the pane takes the keyboard; leaving it then cancels.
   await ui.redraw({ ...PANE_PROPS, isFocused: true })
   await ui.redraw(PANE_PROPS)
-  expect(await ui.find({ key: 'todo-edit-1' })).toBeUndefined()
+  expect(await editField(ui, 1)).toBeUndefined()
+  await ui.unmount()
+})
+
+test('editing an item again after saving it draws a field new to the engine, filled with the saved text', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const stored = memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+
+  await ui.press({ key: 'todo-text-1' })
+  const first = await editField(ui, 1)
+  expect(first?.props.value).toBe('일 1')
+  await ui.input({ key: first?.key ?? '', text: '고친 일' })
+  expect(items(stored)[0]?.text).toBe('고친 일')
+
+  // The same item again, the clock not moved: another key all the same, and the saved text in it.
+  await ui.press({ key: 'todo-text-1' })
+  const second = await editField(ui, 1)
+  expect(second?.key).not.toBe(first?.key)
+  expect(second?.props.value).toBe('고친 일')
+  // Empty Enter cancels; the next edit is a new field too.
+  await ui.input({ key: second?.key ?? '', text: '' })
+  await standIn.clock.advance(1000)
+  await ui.press({ key: 'todo-text-1' })
+  const third = await editField(ui, 1)
+  expect([first?.key, second?.key]).not.toContain(third?.key)
+  expect(third?.props.value).toBe('고친 일')
+  // The field that writes a new item keeps its one key: it draws no value to lose.
+  expect((await ui.findAll({ type: 'Input' })).map(found => found.key)).toEqual([third?.key])
+  await ui.input({ key: third?.key ?? '', text: '' })
+  expect((await ui.findAll({ type: 'Input' })).map(found => found.key)).toEqual(['todo-input'])
   await ui.unmount()
 })
