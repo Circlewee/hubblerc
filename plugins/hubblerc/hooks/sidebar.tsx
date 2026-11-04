@@ -7,7 +7,7 @@ import { promptKey } from './activity'
 import { EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
-import { isSidebarShown, SIDEBAR_ID } from './pane'
+import { isSidebarShown, SIDEBAR_COLUMNS, SIDEBAR_ID, SIDEBAR_TITLE } from './pane'
 import { catImageAt } from './cat-images'
 import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } from './pixel-art'
 import { requestRestart } from './relaunch'
@@ -57,9 +57,6 @@ const FOLDED_KEY = 'sidebarFolded'
 const BOX_FRAME = 4
 
 export { SIDEBAR_ID }
-const SIDEBAR_TITLE = 'hubblerc'
-/** The width the dock is asked for; the engine holds it to 24..45% of the terminal. */
-const SIDEBAR_COLUMNS = 56
 /**
  * Twelve files in all at most; each folder outside the repository shows two, three folders at most;
  * the repository six at least. A pane too short for them shows fewer (`fitFileLayout`).

@@ -696,3 +696,67 @@ test('where the named store file is not there, the plugin\'s files in the store 
   const started = await $.classic.SessionStart({ source: 'startup', cwd: '/repo/hubblerc', transcript_path: '/home/me/.claude/projects/x/session-1.jsonl' } as never)
   expect((started as { watchPaths?: string[] }).watchPaths?.slice(3)).toEqual(['/home/me/.claude/plugins/store/hubblerc_local-0123456789ab.json'])
 })
+
+// ── The keyboard to the edit field in one press ───────────────────
+// The 2.1.318 kit does not hand `$.ui.focus` to a test's hook ("no implementation for ui.focus", the
+// hook never called): the move itself cannot be stood in. What is checked: the open asking the
+// keyboard, its arguments and when it is made, and what `/todo` says when the move fails.
+
+const SIDEBAR_PANE = { id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true }
+
+/** The last line `/todo` writes. */
+async function lastLine($: Engine): Promise<string> {
+  return (await todo($, ''))?.split('\n').at(-1) ?? ''
+}
+
+test('a press on an item\'s text asks the keyboard for the pane (same title and width, nothing else) before moving it to the field', async ($, on) => {
+  const standIn = standInForEngine(on)
+  memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
+  await start($)
+  standIn.panes = [{ ...SIDEBAR_PANE }]
+  const opensAtStart = standIn.opened.length
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  await ui.press({ key: 'todo-text-1' })
+  expect(standIn.opened.slice(opensAtStart)).toEqual([{ id: 'hubblerc', title: 'hubblerc', columns: 56, focus: true }])
+  expect(standIn.panes).toEqual([{ ...SIDEBAR_PANE, isFocused: true }])
+  // The pane got the keyboard: a failure here could only be the move's own.
+  expect(await lastLine($)).not.toContain('패널이 키보드를 받지 못함')
+  expect(await ui.find({ key: 'todo-edit-1' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a pane that holds the keyboard already is not opened again', async ($, on) => {
+  const standIn = standInForEngine(on)
+  memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
+  await start($)
+  standIn.panes = [{ ...SIDEBAR_PANE, isFocused: true }]
+  const opensAtStart = standIn.opened.length
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, isFocused: true } })
+  await ui.press({ key: 'todo-text-1' })
+  expect(standIn.opened.length).toBe(opensAtStart)
+  expect(await ui.find({ key: 'todo-edit-1' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the keyboard refused (text in the prompt box): the edit stays open, unfocused, and /todo says why at its end', async ($, on) => {
+  const standIn = standInForEngine(on)
+  memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
+  standIn.grantsFocus = false
+  await start($)
+  standIn.panes = [{ ...SIDEBAR_PANE }]
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  await ui.press({ key: 'todo-text-1' })
+  expect(standIn.opened.at(-1)).toEqual({ id: 'hubblerc', title: 'hubblerc', columns: 56, focus: true })
+  // Drawn without the keyboard it never held: not a cancel.
+  await ui.redraw(PANE_PROPS)
+  expect(await ui.find({ key: 'todo-edit-1' })).toBeDefined()
+  expect(await lastLine($)).toMatch(/^\(디버그\) 수정 칸으로 키보드를 옮기지 못함 \d\d:\d\d: .+ \(패널이 키보드를 받지 못함: .*\)$/)
+  // A second press, on the field: the person's own, the pane takes the keyboard; leaving it then cancels.
+  await ui.redraw({ ...PANE_PROPS, isFocused: true })
+  await ui.redraw(PANE_PROPS)
+  expect(await ui.find({ key: 'todo-edit-1' })).toBeUndefined()
+  await ui.unmount()
+})

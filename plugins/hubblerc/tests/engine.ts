@@ -61,6 +61,8 @@ export type StandIn = {
   files: Record<string, string>
   /** Paths `$.fs.exists` finds, besides the files above. */
   existing: string[]
+  /** Whether an open asking `focus` gives the pane the keyboard (the prompt's composer empty); false: refused. */
+  grantsFocus: boolean
   /** The key the keychain holds under `hubblerc-likely` (null: no such item), and how many times it was read. */
   keychain: string | null
   keychainReads: number
@@ -92,7 +94,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0 }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -233,6 +235,7 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     if (!standIn.panes.some(pane => pane.id === e.id)) {
       standIn.panes.push({ id: e.id, title: e.title ?? e.id, isShown: placeOnOpen, isFocused: false, isPlaced: placeOnOpen })
     }
+    if (e.focus === true && standIn.grantsFocus) standIn.panes = standIn.panes.map(pane => (pane.id === e.id ? { ...pane, isFocused: true } : pane))
 
     return { value: placeOnOpen ? { isPlaced: true as const } : { isPlaced: false as const, reason: 'under 144 columns' } }
   })
