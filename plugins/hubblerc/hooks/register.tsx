@@ -2,6 +2,7 @@ import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import { completeTurn, isIgnoredTool, noteFiveHourUsed, noteShellChanges, recordRun, startShellWatch, startTurn, trackLines, trackPrompts } from './activity'
+import { addAsideRule } from './aside-rule'
 import { rememberAnswer, startAutoEffort } from './auto-effort'
 import { effortWord, noteEffortChange, noteTurnDone, resetEffortRecord } from './effort-record'
 import { showAnswer } from './answer'
@@ -157,6 +158,7 @@ export const register: Register = (on, options) => {
   answerLikelyCommand(on)
   controlEffort(on, autoByDefault)
   showBashPurpose(on)
+  addAsideRule(on)
   showToolLines(on)
   showBand(on, layout, autoByDefault)
   showSidebar(on, layout, autoByDefault)
