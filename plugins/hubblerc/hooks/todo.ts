@@ -5,6 +5,7 @@ import {
   addItem,
   cleanTodoText,
   clearDone,
+  draftInsertText,
   editItem,
   isStatus,
   MAX_TODOS,
@@ -45,10 +46,12 @@ const TOOL_DESCRIPTION =
 let loaded: { key: string; record: TodoRecord; signature: string } | null = null
 
 /**
- * The last item offered in the prompt box by its ↗, till the next question: sent as offered, it is
- * taken up by that answer; sent otherwise, the offer is forgotten.
+ * The last item ↗ put in the prompt box, till the next main-loop question, and how. `isInDraft`
+ * false: as the box's dim suggestion, taken up by a question of its text alone. True: put into the
+ * person's draft at the cursor, taken up by a question that holds its text. Sent otherwise (the item
+ * erased or edited), the offer is forgotten.
  */
-let offered: { id: number; text: string } | null = null
+let offered: { id: number; text: string; isInDraft: boolean } | null = null
 
 /**
  * The items the last ✕ or "완료 N개 지우기" moved to the trash, by their project's key: what
@@ -409,8 +412,12 @@ async function restoreTodo($: EngineInterface, id: number): Promise<string> {
 }
 
 /**
- * ↗ on a waiting item: offered as the prompt box's dim suggestion, Tab to take. The box takes it
- * only while it is empty and no answer runs; else a toast says so.
+ * ↗ on a waiting item: offered as the prompt box's dim suggestion, Tab to take, which the box shows
+ * only while it is empty and no answer runs. Else (text in the box, an answer running) the text goes
+ * into the draft at the cursor, a space put between it and a word on either side (`draftInsertText`).
+ * A question sent while an answer runs waits in the queue, taken to come as the next turn.start (not
+ * yet seen on screen), and is matched there. Refused there too (a dialog holds the keys, no box), a
+ * toast says so.
  */
 export async function offerTodo($: EngineInterface, item: UserTodo): Promise<void> {
   if (undo !== null) {
@@ -419,27 +426,43 @@ export async function offerTodo($: EngineInterface, item: UserTodo): Promise<voi
   }
   const shown = await $.prompt.suggest({ text: item.text }).catch(() => ({ isShown: false }))
   if (shown.isShown) {
-    offered = { id: item.id, text: item.text }
+    offered = { id: item.id, text: item.text, isInDraft: false }
 
     return
   }
-  $.ui.toast('입력창이 비어 있고 답변이 진행 중이 아닐 때만 입력창에 넣을 수 있습니다.')
+  // The engine's read never rejects; a box it cannot read is taken as empty (nothing to space from).
+  const box = await $.prompt.read().catch(() => ({ text: '', cursor: 0 }))
+  const filled = await $.prompt.fill({ text: draftInsertText(box, item.text), mode: 'insert' }).catch(() => ({ isFilled: false }))
+  if (filled.isFilled) {
+    offered = { id: item.id, text: item.text, isInDraft: true }
+
+    return
+  }
+  $.ui.toast('입력창에 넣지 못했습니다. 대화상자가 열려 있으면 닫고 다시 누르세요.')
 }
 
 /**
  * At a main-loop turn's start, after its record opened: the list read again, and an item offered by
- * its ↗ and sent as offered is taken up by this answer (in progress, its number).
+ * its ↗ and sent is taken up by this answer (in progress, its number). Sent is, for a suggestion, a
+ * question of its text alone (spaces around aside); for a draft it went into, a question holding it.
  */
 export async function startTodoTurn($: EngineInterface, text: string): Promise<void> {
   const pending = offered
   offered = null
-  if (pending === null || text.trim() !== pending.text.trim()) {
+  if (pending === null || !isOfferSent(pending, text)) {
     await refreshTodos($)
 
     return
   }
   const taken = await currentTurn($)
   await changeTodos($, record => setItemStatus(record, pending.id, 'in_progress', taken))
+}
+
+/** Whether the question sent carries the offer as it was put in: alone as a suggestion, anywhere in a draft. */
+function isOfferSent(offer: { text: string; isInDraft: boolean }, question: string): boolean {
+  const wanted = offer.text.trim()
+
+  return offer.isInDraft ? question.includes(wanted) : question.trim() === wanted
 }
 
 /** A press on a tab: kept for the next session, and the list read again. */

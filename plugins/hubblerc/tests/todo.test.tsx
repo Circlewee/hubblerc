@@ -6,6 +6,7 @@ import {
   addItem,
   cleanTodoText,
   clearDone,
+  draftInsertText,
   editItem,
   MAX_TODOS,
   MAX_TRASH,
@@ -353,16 +354,83 @@ test('↗ offers a waiting item in the prompt box; sent as offered, that answer 
   await ui.unmount()
 })
 
-test('↗ while the prompt box cannot take it says why, and nothing is taken up', async ($, on) => {
+test('↗ with text in the prompt box or an answer running puts the item in at the cursor; a question holding it takes it up', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const stored = memoryStore(on, {
+    sidebarTab: 'todo',
+    [KEY]: { items: [item(1, 'pending', { text: '인증 버그 고치기' }), item(2, 'pending', { text: '문서 정리' }), item(3, 'pending', { text: '로그 줄이기' })], nextId: 4 },
+  })
+  await start($)
+  await answer($, '첫 질문', 't1')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+
+  // Text in the box: no suggestion, so in at the cursor, a space on each side a word touches.
+  standIn.isSuggestionShown = false
+  standIn.promptBox = { text: '먼저하고 커밋해 줘', cursor: 2 }
+  await ui.press({ key: 'todo-send-1' })
+  expect(standIn.suggestions).toEqual(['인증 버그 고치기'])
+  expect(standIn.fills).toEqual([{ text: ' 인증 버그 고치기 ', mode: 'insert' }])
+  expect(standIn.promptBox).toEqual({ text: '먼저 인증 버그 고치기 하고 커밋해 줘', cursor: 13 })
+  expect(standIn.toasts).toEqual([])
+  await $.turn.start({ text: '먼저 인증 버그 고치기 하고 커밋해 줘', turnId: 't2' })
+  expect(items(stored).find(one => one.id === 1)).toMatchObject({ status: 'in_progress', turn: 2, turnSession: 'session-1' })
+
+  // While that answer runs, into the empty box as it is; sent, the question waits in the queue and
+  // comes as the next turn.start. A subagent's start meanwhile is not the person's question.
+  standIn.promptBox = { text: '', cursor: 0 }
+  await ui.press({ key: 'todo-send-2' })
+  expect(standIn.fills.at(-1)).toEqual({ text: '문서 정리', mode: 'insert' })
+  await $.turn.start({ text: '문서 정리', turnId: 'a1', agentId: 'ag-1' })
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't2', durationMs: 1000 })
+  expect(items(stored).find(one => one.id === 2)?.status).toBe('pending')
+  await $.turn.start({ text: '그리고 문서 정리도', turnId: 't3' })
+  expect(items(stored).find(one => one.id === 2)).toMatchObject({ status: 'in_progress', turn: 3 })
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't3', durationMs: 1000 })
+
+  // Erased or edited before it was sent: the offer is forgotten, and a later question of its text takes nothing.
+  standIn.promptBox = { text: '이것도 ', cursor: 4 }
+  await ui.press({ key: 'todo-send-3' })
+  expect(standIn.promptBox.text).toBe('이것도 로그 줄이기')
+  await $.turn.start({ text: '이것도 로그 줄여 줘', turnId: 't4' })
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't4', durationMs: 1000 })
+  await $.turn.start({ text: '로그 줄이기', turnId: 't5' })
+  expect(items(stored).find(one => one.id === 3)?.status).toBe('pending')
+  await ui.unmount()
+})
+
+test('↗ into a draft: a space between the item and a word on either side of the cursor, none in an empty box', () => {
+  const text = '인증 버그 고치기'
+  expect(draftInsertText({ text: '', cursor: 0 }, text)).toBe(text)
+  // At the end: after a word, a space before it; after a space or a line break, none.
+  expect(draftInsertText({ text: '이것도', cursor: 3 }, text)).toBe(` ${text}`)
+  expect(draftInsertText({ text: '이것도 ', cursor: 4 }, text)).toBe(text)
+  expect(draftInsertText({ text: '이것도\n', cursor: 4 }, text)).toBe(text)
+  // At the start, before a word: a space after it.
+  expect(draftInsertText({ text: '해 줘', cursor: 0 }, text)).toBe(`${text} `)
+  // In a word's middle: one on each side; between two spaces, none.
+  expect(draftInsertText({ text: '먼저하고', cursor: 2 }, text)).toBe(` ${text} `)
+  expect(draftInsertText({ text: '먼저  하고', cursor: 3 }, text)).toBe(text)
+  // An emoji (two UTF-16 units) before the cursor is a word; a cursor past the end stands at it.
+  expect(draftInsertText({ text: '👍', cursor: 2 }, text)).toBe(` ${text}`)
+  expect(draftInsertText({ text: '끝', cursor: 9 }, text)).toBe(` ${text}`)
+  // An item of several lines goes in as written.
+  expect(draftInsertText({ text: '', cursor: 0 }, '첫 줄\n둘째 줄')).toBe('첫 줄\n둘째 줄')
+})
+
+test('↗ the prompt box takes neither way (a dialog holds the keys): a toast says so, and nothing is taken up', async ($, on) => {
   const standIn = standInForEngine(on)
   const stored = memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
   standIn.isSuggestionShown = false
+  standIn.isFillTaken = false
+  standIn.promptBox = { text: '쓰던 글', cursor: 4 }
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   await ui.press({ key: 'todo-send-1' })
-  expect(standIn.toasts.at(-1)).toMatchObject({ text: expect.stringMatching(/입력창이 비어 있고/) })
-  await $.turn.start({ text: '일 1', turnId: 't1' })
+  expect(standIn.fills).toEqual([{ text: ' 일 1', mode: 'insert' }])
+  expect(standIn.promptBox).toEqual({ text: '쓰던 글', cursor: 4 })
+  expect(standIn.toasts.at(-1)).toMatchObject({ text: '입력창에 넣지 못했습니다. 대화상자가 열려 있으면 닫고 다시 누르세요.' })
+  await $.turn.start({ text: '쓰던 글 일 1', turnId: 't1' })
   expect(items(stored)[0]?.status).toBe('pending')
   await ui.unmount()
 })

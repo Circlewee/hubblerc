@@ -1,6 +1,6 @@
 import { mock } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
-import type { CommandSpec, On, SessionMessage, UiPane } from 'claude-code'
+import type { CommandSpec, On, PromptFillMode, SessionMessage, UiPane } from 'claude-code'
 
 export const NOW = Date.parse('2026-10-25T09:00:00Z')
 
@@ -52,6 +52,13 @@ export type StandIn = {
   isSuggestionShown: boolean
   suggestions: string[]
   /**
+   * The prompt box `$.prompt.read()` answers (the draft, the cursor in UTF-16 units), which a fill
+   * changes; whether a fill lands (false: refused, as under a dialog); and every fill asked.
+   */
+  promptBox: { text: string; cursor: number }
+  isFillTaken: boolean
+  fills: { text: string; mode: PromptFillMode }[]
+  /**
    * The Messages API (`https://api.anthropic.com/v1/messages`): what it answers a request, by the
    * request's body; every request made, with its headers; and how long each takes on the mocked clock.
    */
@@ -95,7 +102,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -116,6 +123,19 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     standIn.suggestions.push(e.text)
 
     return { isShown: standIn.isSuggestionShown }
+  })
+  on('prompt.read', () => ({ value: { ...standIn.promptBox } }))
+  // As the box writes a fill: over the draft, after it, or in at the cursor, the cursor moved past it.
+  on('prompt.fill', (_, e) => {
+    standIn.fills.push({ text: e.text, mode: e.mode })
+    if (!standIn.isFillTaken) return { isFilled: false, refusal: 'dialog' as const }
+    const box = standIn.promptBox
+    const at = Math.min(Math.max(box.cursor, 0), box.text.length)
+    if (e.mode === 'insert') standIn.promptBox = { text: box.text.slice(0, at) + e.text + box.text.slice(at), cursor: at + e.text.length }
+    else if (e.mode === 'append') standIn.promptBox = { text: box.text + e.text, cursor: box.text.length + e.text.length }
+    else standIn.promptBox = { text: e.text, cursor: e.text.length }
+
+    return { isFilled: true }
   })
   on('session.messages', (_, e) => {
     if (e.agentId === undefined) return { value: e.as === 'api' ? (standIn.sent as never) : standIn.messages }

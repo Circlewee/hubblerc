@@ -97,6 +97,19 @@ export function cleanTodoText(text: string): { text: string; isClipped: boolean 
 }
 
 /**
+ * What ↗ puts in at the prompt box's cursor among a draft: the item's text, as written (its lines
+ * kept), with a space before it when the character before the cursor is not whitespace and one after
+ * it likewise, so it never sticks to a word. An empty box takes the text alone.
+ */
+export function draftInsertText(box: { text: string; cursor: number }, text: string): string {
+  const at = Math.min(Math.max(box.cursor, 0), box.text.length)
+  const isWord = (char: string) => char !== '' && !/\s/.test(char)
+  const before = at > 0 ? box.text.slice(at - 1, at) : ''
+
+  return `${isWord(before) ? ' ' : ''}${text}${isWord(box.text.slice(at, at + 1)) ? ' ' : ''}`
+}
+
+/**
  * The store key of a project's to-dos: a hash of its root and the root's end, so a long path never
  * passes the store's 256 characters and the key still says whose it is.
  */
