@@ -18,7 +18,7 @@ import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
-import { gitWatchPaths, markRunning, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
+import { gitWatchPaths, markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
 import { serveTodoTool, startTodos, startTodoTurn, refreshTodos } from './todo'
 import { isStoreFile, storeWatchPaths } from './store-file'
@@ -54,6 +54,7 @@ export const register: Register = (on, options) => {
 
   on('turn.start', async ($, e, next) => {
     await startTurn($, e).catch(() => undefined)
+    if (e.agentId === undefined) noteAnswering(true)
     // After the turn's record opened: an item offered by its ↗ and sent as offered takes this answer's number.
     if (e.agentId === undefined) await startTodoTurn($, e.text).catch(() => undefined)
     if (e.agentId === undefined) await closeEffortPicker($).catch(() => undefined)
@@ -90,6 +91,7 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     // Before next: the duration must be on the turn when the engine appends its closing row.
     await completeTurn($, e).catch(() => undefined)
+    if (e.agentId === undefined) noteAnswering(false)
     rememberAnswer(e)
     const done = await next(e)
     if (e.agentId === undefined) {

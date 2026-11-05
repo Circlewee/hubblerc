@@ -20,6 +20,61 @@ test('idle, the timer reads the subagents every fifth second; while an answer ru
   expect(standIn.agentListCalls - busyFrom).toBe(10)
 })
 
+test('idle, a question that starts puts the timer to each second at once, not at the next fifth second', async ($, on) => {
+  const standIn = standInForEngine(on)
+  await start($)
+  await standIn.clock.advance(2000)
+
+  const from = standIn.agentListCalls
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await standIn.clock.advance(1000)
+  expect(standIn.agentListCalls - from).toBe(1)
+})
+
+test('once the answer ends, the timer goes back to every fifth second', async ($, on) => {
+  const standIn = standInForEngine(on)
+  await start($)
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await standIn.clock.advance(3000)
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 3000 })
+
+  // The tick a second on finds nothing running and goes back to five: it and the one five on.
+  const from = standIn.agentListCalls
+  await standIn.clock.advance(10_000)
+  expect(standIn.agentListCalls - from).toBe(2)
+})
+
+test('idle, a call that starts puts the timer to each second at once; ended, back to every fifth second', async ($, on) => {
+  const standIn = standInForEngine(on)
+  await start($)
+  await standIn.clock.advance(2000)
+
+  // The stand-in's call ends at once: the tick a second on finds nothing running.
+  const from = standIn.agentListCalls
+  await $.tool.call({ tool: 'Read', file_path: '/repo/hubblerc/a.ts' })
+  await standIn.clock.advance(1000)
+  expect(standIn.agentListCalls - from).toBe(1)
+  await standIn.clock.advance(10_000)
+  expect(standIn.agentListCalls - from).toBe(3)
+})
+
+test('idle, the timer reads the running calls every fifth second and the answers not at all', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const reads: Record<string, number> = {}
+  on('state.get', ($, e, next) => {
+    reads[e.key] = (reads[e.key] ?? 0) + 1
+
+    return next(e)
+  })
+  await start($)
+  // Past the restore's one retry at two seconds, which reads the answers once.
+  await standIn.clock.advance(5000)
+  const before = { ...reads }
+  await standIn.clock.advance(60_000)
+  expect((reads.running ?? 0) - (before.running ?? 0)).toBe(12)
+  expect((reads.turns ?? 0) - (before.turns ?? 0)).toBe(0)
+})
+
 test('idle, git is not polled: only the 30-second refresh reads it', async ($, on) => {
   const standIn = standInForEngine(on)
   await start($)

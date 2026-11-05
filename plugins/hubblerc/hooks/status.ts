@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, SessionUsage, ToolCallResult } from 'claude-code'
+import type { EngineInterface, SessionUsage, Timer, ToolCallResult } from 'claude-code'
 
 import type { AgentSeen, RunningCall, UsageSnapshot } from '../types'
 import { applyTaskUpdate, parseGitStatus, todosFromTodoWrite } from './band-format'
@@ -25,8 +25,8 @@ const ultracode = atom({ plugin: 'hubblerc', key: 'ultracode' } as const, false)
 
 /** While something runs, elapsed times redraw every second. */
 const TICK_MS = 1000
-/** Idle, the timer does its work every this many ticks: enough to see a subagent start in the background. */
-const IDLE_TICKS = 5
+/** Idle, the timer wakes this often: enough to see a subagent start in the background. */
+const IDLE_TICK_MS = 5000
 /** Usage, git and the model are read again this often even when idle (reset countdowns move). */
 const SLOW_REFRESH_MS = 30_000
 /** Git is read at most this often when a tool, a turn or a change in `.git` asks for it. */
@@ -42,59 +42,85 @@ const MAX_RUNNING = 50
 type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
 
 /**
+ * A main-loop answer is running: set as a question starts and cleared as its answer ends
+ * (register.tsx), so the timer reads no transcript-sized state each second.
+ */
+let isAnswering = false
+/** The status timer and its interval; `wakeStatus` puts it back to each second. Set by startStatus. */
+let statusTimer: Timer | null = null
+let statusTimerMs = 0
+let wakeStatus: (() => void) | null = null
+
+/**
  * At session.start (a reload included): forget the calls the previous copy was watching, read
  * everything once, and start the timer that keeps elapsed times and countdowns moving.
  *
- * The timer works every second while something runs (an answer, a call, a subagent) and every
- * fifth second otherwise; every 30 seconds it reads usage, the model and git again, and the
- * session's name and the to-dos while the sidebar shows. Git is read besides when a call that may change files
- * ends, as a question goes out, and when `.git` changes (`gitWatchPaths`).
+ * The timer wakes every second while something runs (an answer, a call, a subagent) and every
+ * fifth second otherwise; a question or a call that starts puts it back to each second at once.
+ * Every 30 seconds it reads usage, the model and git again, and the session's name and the to-dos
+ * while the sidebar shows. Git is read besides when a call that may change files ends, as a
+ * question goes out, and when `.git` changes (`gitWatchPaths`).
  */
 export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
+  // The last answer still open (a reload while it ran): read once here, then kept by noteAnswering.
+  isAnswering = await read($, turns)
+    .then(list => list.at(-1)?.durationMs === null)
+    .catch(() => false)
   await refreshStatus($)
   await refreshSessionName($, true).catch(() => undefined)
   await startUltracode($).catch(() => undefined)
 
   let lastSlow = await $.clock.now()
-  let idleTicks = 0
-  let hadAgents = false
-  $.clock.every(TICK_MS, () => {
-    void (async () => {
-      const now = await $.clock.now()
-      // Each read on its own: one failing must not keep the redraw back, or countdowns and
-      // uptime stand still (a "1분 전" that never moved was seen on screen).
-      const isRunning = await read($, running)
-        .then(list => list.length > 0)
-        .catch(() => false)
-      // An answer running counts too: the sidebar's cat moves while it streams.
-      const isAnswering = await read($, turns)
-        .then(list => list.at(-1)?.durationMs === null)
-        .catch(() => false)
-      const isSlow = now - lastSlow >= SLOW_REFRESH_MS
-      // Idle, four ticks in five end here: nothing moves on screen to redraw.
-      if (!isRunning && !isAnswering && !hadAgents && !isSlow && idleTicks < IDLE_TICKS - 1) {
-        idleTicks += 1
+  // How many times the timer was woken: a tick whose reads came before a wake keeps each second.
+  let wakes = 0
+  const tickOnce = async () => {
+    const wakesBefore = wakes
+    const now = await $.clock.now()
+    // Each read on its own: one failing must not keep the redraw back, or countdowns and
+    // uptime stand still (a "1분 전" that never moved was seen on screen).
+    const isRunning = await read($, running)
+      .then(list => list.length > 0)
+      .catch(() => false)
+    const isSlow = now - lastSlow >= SLOW_REFRESH_MS
+    const hasAgents = await refreshAgents($).catch(() => false)
+    if (isSlow) {
+      lastSlow = now
+      await refreshStatus($).catch(() => undefined)
+      if (await isSidebarShown($).catch(() => false)) {
+        await refreshSessionName($).catch(() => undefined)
+        // Another session's to-dos (the same project) show within the half minute.
+        await refreshTodos($).catch(() => undefined)
+        // Another session's decisions, and a new day's count, show within the half minute.
+        await refreshLikelyStatus($).catch(() => undefined)
+      }
+    }
+    // An answer running counts too: the sidebar's cat moves while it streams.
+    const isBusy = isRunning || isAnswering || hasAgents
+    if (isSlow || isBusy) await update($, tick, () => now)
+    pace(isBusy || wakes !== wakesBefore ? TICK_MS : IDLE_TICK_MS)
+  }
+  const pace = (ms: number) => {
+    if (statusTimer !== null && statusTimerMs === ms) return
+    statusTimer?.cancel()
+    statusTimerMs = ms
+    statusTimer = $.clock.every(ms, () => {
+      void tickOnce().catch(() => undefined)
+    })
+  }
+  wakeStatus = () => {
+    wakes += 1
+    pace(TICK_MS)
+  }
+  statusTimer?.cancel()
+  statusTimer = null
+  pace(isAnswering ? TICK_MS : IDLE_TICK_MS)
+}
 
-        return
-      }
-      idleTicks = 0
-      const hasAgents = await refreshAgents($).catch(() => false)
-      hadAgents = hasAgents
-      if (isSlow) {
-        lastSlow = now
-        await refreshStatus($).catch(() => undefined)
-        if (await isSidebarShown($).catch(() => false)) {
-          await refreshSessionName($).catch(() => undefined)
-          // Another session's to-dos (the same project) show within the half minute.
-          await refreshTodos($).catch(() => undefined)
-          // Another session's decisions, and a new day's count, show within the half minute.
-          await refreshLikelyStatus($).catch(() => undefined)
-        }
-      }
-      if (isSlow || hasAgents || isRunning || isAnswering) await update($, tick, () => now)
-    })().catch(() => undefined)
-  })
+/** As a main-loop question starts or its answer ends (register.tsx): starting, the timer goes to each second at once. */
+export function noteAnswering(isRunning: boolean): void {
+  isAnswering = isRunning
+  if (isRunning) wakeStatus?.()
 }
 
 /** Before a tool call runs: it shows on line 2. Answers the id `unmarkRunning` takes. */
@@ -109,6 +135,7 @@ export async function markRunning($: EngineInterface, e: CallInput, startedAt: n
     ...(e.agentId === undefined ? {} : { agentId: e.agentId }),
   }
   await update($, running, list => [...list, call].slice(-MAX_RUNNING))
+  wakeStatus?.()
 
   return id
 }
