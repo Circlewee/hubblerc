@@ -1,7 +1,7 @@
 import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { completeTurn, isIgnoredTool, noteFiveHourUsed, noteShellChanges, recordRun, startShellWatch, startTurn, trackLines, trackPrompts } from './activity'
+import { completeTurn, isIgnoredTool, noteFiveHourUsed, noteMainTurn, noteShellChanges, recordRun, startTurn, trackLines, trackPrompts, watchShellBefore } from './activity'
 import { rememberAnswer, startAutoEffort } from './auto-effort'
 import { effortWord, noteEffortChange, noteTurnDone, resetEffortRecord } from './effort-record'
 import { showAnswer } from './answer'
@@ -55,12 +55,12 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     await startTurn($, e).catch(() => undefined)
     if (e.agentId === undefined) noteAnswering(true)
+    if (e.agentId === undefined) noteMainTurn(e.turnId, true)
     // After the turn's record opened: an item offered by its ↗ and sent as offered takes this answer's number.
     if (e.agentId === undefined) await startTodoTurn($, e.text).catch(() => undefined)
     if (e.agentId === undefined) await closeEffortPicker($).catch(() => undefined)
-    // Not awaited: the repository is read while the model starts its answer, before any tool runs;
-    // the status too, so what changed while idle (an edit in an editor) shows as the question goes.
-    if (e.agentId === undefined) void startShellWatch($, e.turnId).catch(() => undefined)
+    // Not awaited: the status is read while the model starts its answer, so what changed while idle
+    // (an edit in an editor) shows as the question goes.
     if (e.agentId === undefined) void requestGitRefresh($).catch(() => undefined)
     await startAutoEffort($, e, autoByDefault).catch(() => undefined)
 
@@ -70,6 +70,8 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     if (isIgnoredTool(String(e.tool))) return next(e)
 
+    // A call that may change files unseen waits for the running answer's first snapshot (once).
+    await watchShellBefore($, String(e.tool)).catch(() => undefined)
     const startedAt = await $.clock.now()
     const id = await markRunning($, e, startedAt).catch(() => undefined)
     // Not awaited: the command runs while its failure is predicted; the outcome is paired as it ends.
@@ -92,6 +94,7 @@ export const register: Register = (on, options) => {
     // Before next: the duration must be on the turn when the engine appends its closing row.
     await completeTurn($, e).catch(() => undefined)
     if (e.agentId === undefined) noteAnswering(false)
+    if (e.agentId === undefined) noteMainTurn(e.turnId, false)
     rememberAnswer(e)
     const done = await next(e)
     if (e.agentId === undefined) {

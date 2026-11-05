@@ -2,12 +2,14 @@ import type { EngineInterface } from 'claude-code'
 
 /**
  * Files an answer changed with no Edit or Write: through Bash (`sed`, a script, `git`), which the
- * tool calls do not tell. Inside a git repository only: as an answer starts, the working tree's
- * lines added and removed against the commit it stands on, and the untracked files; as it
- * completes, the same against that same commit (a commit made meanwhile changes nothing). A file
- * whose counts moved, or a new untracked one, was changed during the answer.
+ * tool calls do not tell. Inside a git repository only: just before the answer's first call that
+ * may change files unseen (activity.ts), the working tree's lines added and removed against the
+ * commit it stands on, and the untracked files; as it completes, the same against that same commit
+ * (a commit made meanwhile changes nothing). A file whose counts moved, or a new untracked one, was
+ * changed during the answer.
  *
- * Whoever changed it: a change made in an editor during the answer counts too.
+ * Whoever changed it: a change made in an editor after that first call counts too; one saved
+ * before it does not.
  */
 export type GitSnapshot = {
   /** The repository's top folder, absolute. */

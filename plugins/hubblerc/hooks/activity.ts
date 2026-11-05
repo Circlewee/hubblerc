@@ -100,16 +100,51 @@ export async function completeTurn($: EngineInterface, e: TurnCompleteInput): Pr
 }
 
 /**
- * The repository as each running answer started, by its id: what `noteShellChanges` compares
- * against. Module state: a reload in between loses it, and that answer's shell changes go uncounted.
+ * The repository as each running answer stood just before its first call that may change files
+ * unseen, by its id (null: outside a repository): what `noteShellChanges` compares against. An
+ * answer with no such call has none and runs no git. Module state: a reload in between loses it,
+ * and that answer's shell changes go uncounted.
  */
-const snapshots = new Map<string, GitSnapshot>()
+const snapshots = new Map<string, GitSnapshot | null>()
+/** A snapshot being taken, by its answer's id: calls that arrive together wait on the one. */
+const takingSnapshots = new Map<string, Promise<void>>()
+/** The main-loop answer running now; null between answers, when a call takes no snapshot. */
+let mainTurnId: string | null = null
 
-/** At a main-loop turn's start: the repository's state, taken before any tool runs. */
-export async function startShellWatch($: EngineInterface, turnId: string): Promise<void> {
-  const snapshot = await snapshotGit($, await $.session.cwd())
-  if (snapshot === null) return
-  snapshots.set(turnId, snapshot)
+/** As a main-loop question starts or its answer ends (register.tsx). */
+export function noteMainTurn(turnId: string, isRunning: boolean): void {
+  if (isRunning) mainTurnId = turnId
+  else if (mainTurnId === turnId) mainTurnId = null
+}
+
+/**
+ * The calls that may change files the record does not name: the shell, a notebook, another
+ * server's tool. Not Edit, Write or MultiEdit (their calls name the file), not this plugin's
+ * to-dos, not the engine's or the desktop app's own.
+ */
+export function mayChangeFilesUnseen(tool: string): boolean {
+  if (tool === 'Bash' || tool === 'NotebookEdit') return true
+
+  return tool.startsWith('mcp__') && !tool.startsWith('mcp__hubblerc__') && !isIgnoredTool(tool)
+}
+
+/**
+ * Before a call runs, from whichever loop: if it may change files unseen and a main-loop answer
+ * runs, that answer's snapshot, taken once and waited for, so the call's changes come after it.
+ */
+export async function watchShellBefore($: EngineInterface, tool: string): Promise<void> {
+  const turnId = mainTurnId
+  if (turnId === null || snapshots.has(turnId) || !mayChangeFilesUnseen(tool)) return
+  let taking = takingSnapshots.get(turnId)
+  if (taking === undefined) {
+    taking = takeSnapshot($, turnId).finally(() => takingSnapshots.delete(turnId))
+    takingSnapshots.set(turnId, taking)
+  }
+  await taking
+}
+
+async function takeSnapshot($: EngineInterface, turnId: string): Promise<void> {
+  snapshots.set(turnId, await snapshotGit($, await $.session.cwd()))
   // Turns that never completed (an abort the engine did not report) are not kept forever.
   if (snapshots.size > 5) snapshots.delete(snapshots.keys().next().value ?? '')
 }
@@ -117,12 +152,13 @@ export async function startShellWatch($: EngineInterface, turnId: string): Promi
 /**
  * After a turn completed: the files it changed with no Edit or Write, found by git, join its runs
  * (`isShellChange`), so the closing line and the sidebar's files count them too. A file an Edit or
- * Write of the turn already recorded is left to that record.
+ * Write of the turn already recorded is left to that record. No snapshot, no git.
  */
 export async function noteShellChanges($: EngineInterface, turnId: string): Promise<void> {
+  await takingSnapshots.get(turnId)?.catch(() => undefined)
   const before = snapshots.get(turnId)
   snapshots.delete(turnId)
-  if (before === undefined) return
+  if (before === undefined || before === null) return
   const after = await snapshotGit($, before.root, before.base)
   if (after === null || after.root !== before.root) return
   const changes = await countShellChanges($, before, after)
