@@ -8,6 +8,8 @@ export type StandIn = {
   clock: MockClock
   /** The panes open now, as `$.ui.panes()` answers; a test may change them. */
   panes: UiPane[]
+  /** How many times the plugin asked for the panes. */
+  paneReads: number
   /** Every `$.ui.open` the plugin made, in order. */
   opened: unknown[]
   /** What `$.session.id()` answers. */
@@ -102,7 +104,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -250,7 +252,11 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
 
     return { value: undefined as never }
   })
-  on('ui.panes', () => ({ value: [...standIn.panes] }))
+  on('ui.panes', () => {
+    standIn.paneReads += 1
+
+    return { value: [...standIn.panes] }
+  })
   on('ui.open', (_, e) => {
     standIn.opened.push(e)
     if (!standIn.panes.some(pane => pane.id === e.id)) {

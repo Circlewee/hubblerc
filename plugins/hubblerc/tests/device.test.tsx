@@ -120,6 +120,41 @@ test('a picture that stands still is sent again every two seconds while the side
   await ui.unmount()
 })
 
+test('once the sidebar is closed, the picture tick stops asking for the panes till it is drawn again', async ($, on) => {
+  const standIn = standInForEngine(on)
+  let blits = 0
+  on('ui.blit', () => {
+    blits += 1
+
+    return { value: {} }
+  })
+  await start($)
+  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  await standIn.clock.advance(11_000)
+  expect(blits).toBeGreaterThan(0)
+
+  // Closed: one tick finds it hidden and forgets the picture; the ticks after it read no panes.
+  standIn.panes = []
+  await ui.unmount()
+  await standIn.clock.advance(4_000)
+  const readsAfterClose = standIn.paneReads
+  const blitsAfterClose = blits
+  await standIn.clock.advance(60_000)
+  // Two half-minute timers (device's resources, status's slow refresh) still ask once each, four
+  // in the minute; a picture tick still asking would add thirty.
+  expect(standIn.paneReads - readsAfterClose).toBeLessThanOrEqual(4)
+  expect(blits).toBe(blitsAfterClose)
+
+  // Drawn again: sent again as before.
+  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  await standIn.clock.advance(6_000)
+  expect(blits).toBeGreaterThan(blitsAfterClose)
+  await again.unmount()
+})
+
 test('a sidebar first drawn after the probe stopped is still asked about', async ($, on) => {
   const standIn = standInForEngine(on)
   let blits = 0

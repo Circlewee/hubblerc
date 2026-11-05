@@ -261,6 +261,8 @@ let lastSeenPicture: string | null = null
  * drawing with an unchanged source sends nothing, so an idle cat is never sent again; a terminal
  * that lost it (Orca, back from another tab) shows nothing till it changes. A blit
  * always sends. While the cat moves, each new frame is sent anyway and this does nothing.
+ * Once the sidebar is closed or hidden the picture is forgotten, so the ticks after it end at once
+ * instead of asking for the panes every two seconds; the sidebar's next drawing records it again.
  */
 async function refreshPicture($: EngineInterface): Promise<void> {
   const drawn = drawnPicture
@@ -274,7 +276,13 @@ async function refreshPicture($: EngineInterface): Promise<void> {
 
     return
   }
-  if (state !== 'shown' || drawn.source.png !== seen || !(await isSidebarShown($))) return
+  if (state !== 'shown' || drawn.source.png !== seen) return
+  if (!(await isSidebarShown($))) {
+    if (drawnPicture === drawn) drawnPicture = null
+    lastSeenPicture = null
+
+    return
+  }
   await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn })
 }
 
