@@ -340,3 +340,31 @@ function round(value: number): number {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
+
+/** How far the calls of a decision part on a question: the largest less the smallest of their values, and their standard deviation. */
+export type Spread = { name: string; range: number; sd: number }
+
+/**
+ * Each question's spread over the calls that answered: a predicate's chance of yes, a choice's or a
+ * score's chance of the option the decision chose (the likeliest on average). What the robustness of
+ * a decision is measured by: the calls show the same question in other orders, symbols and wordings.
+ */
+export function spreadOf(questions: readonly Question[], samples: readonly number[][][]): Spread[] {
+  return questions.flatMap((question, i) => {
+    const each = samples.map(sample => sample[i]).filter((distribution): distribution is number[] => distribution !== undefined)
+    if (each.length === 0) return []
+    const average = mean(each)
+    const top = question.type === 'predicate' ? 0 : average.reduce((best, value, k) => (value > (average[best] ?? -1) ? k : best), 0)
+
+    return [{ name: question.name, ...spreadOfValues(each.map(distribution => distribution[top] ?? 0)) }]
+  })
+}
+
+/** The largest less the smallest of some values, and their standard deviation, to four places. */
+export function spreadOfValues(values: readonly number[]): { range: number; sd: number } {
+  if (values.length === 0) return { range: 0, sd: 0 }
+  const average = values.reduce((total, value) => total + value, 0) / values.length
+  const variance = values.reduce((total, value) => total + (value - average) ** 2, 0) / values.length
+
+  return { range: round(Math.max(...values) - Math.min(...values)), sd: round(Math.sqrt(variance)) }
+}

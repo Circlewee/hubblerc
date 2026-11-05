@@ -20,8 +20,9 @@ import {
   shuffledOrder,
   toDistribution,
 } from '../hooks/likely/method'
+import { spreadOf, spreadOfValues } from '../hooks/likely/method'
 import type { Question } from '../hooks/likely/method'
-import { calibrationOf, maskSecrets, predicatePairs, readLog, safeFileName, taskCounts, utf8Length } from '../hooks/likely/record'
+import { calibrationOf, maskSecrets, predicatePairs, readLog, robustnessLines, safeFileName, spreadBins, taskCounts, utf8Length, variantSummary } from '../hooks/likely/record'
 import { messageReply, NOW, standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
 
@@ -670,4 +671,99 @@ test('a log past the 3 MiB a read takes at once is read in pieces of whole lines
   expect(stats).toContain('전체: 700건')
   const pieces = standIn.ran.filter(argv => argv[0] === '/bin/sh' && argv[2]?.includes('| head -c'))
   expect(pieces.length).toBe(2)
+})
+
+// ── Robustness: how far the calls part ───────────────────────────
+
+test('a decision\'s spread: its calls\' largest less smallest value and their deviation, a choice\'s on the option it chose', () => {
+  expect(spreadOfValues([0.2, 0.4, 0.3, 0.3, 0.3])).toEqual({ range: 0.2, sd: 0.0632 })
+  expect(spreadOfValues([0.5])).toEqual({ range: 0, sd: 0 })
+  expect(spreadOfValues([])).toEqual({ range: 0, sd: 0 })
+  const spread = spreadOf(
+    [RIPE, FRUIT],
+    [
+      [[0.6], [0.2, 0.5, 0.3]],
+      [[0.8], [0.2, 0.3, 0.5]],
+      [[0.7], [0.2, 0.6, 0.2]],
+    ],
+  )
+  // Banana is the likeliest on average (0.467): its chances 0.5, 0.3, 0.6.
+  expect(spread).toEqual([
+    { name: 'ripe', range: 0.2, sd: 0.0816 },
+    { name: 'fruit', range: 0.3, sd: 0.1247 },
+  ])
+})
+
+test('/likely shows the spread of its calls; the log keeps it', WITH_KEY, async ($, on) => {
+  const standIn = standInForEngine(on)
+  machine(on, standIn)
+  const truths = [0.2, 0.4, 0.3, 0.3, 0.3]
+  let n = 0
+  standIn.anthropic = body => {
+    n += 1
+
+    return knowingModel({ predicate: truths[n - 1] ?? 0.3 })(body)
+  }
+  await start($)
+  const shown = await likelyCommand($, '이 명령은 실패할까: ls /없는경로')
+  expect(shown).toContain('퍼짐(호출 5개): 최대−최소 0.20 · 표준편차 0.06')
+  expect(lines(standIn)[0]?.spread).toEqual([{ name: 'yes', range: 0.2, sd: 0.0632 }])
+})
+
+/** A decision line as the log keeps it, its calls showing the predicate as given (negated on odd calls). */
+function loggedDecision(id: string, values: number[], symbols: string[], extra: Record<string, unknown> = {}): string {
+  const calls = values.map((p, i) => ({ layout: { symbols: symbols[i] ?? 'A', questions: [{ order: [0], negated: i % 2 === 1 }] }, distributions: [[p]], latencyMs: 0, tokens: {} }))
+  const probability = values.reduce((total, value) => total + value, 0) / values.length
+
+  return JSON.stringify({ type: 'decision', id, task: BASH_TASK, methodVersion: METHOD_VERSION, thinking: false, costUsd: 0, answers: [{ type: 'predicate', name: 'fails', probability, value: probability >= 0.5 }], calls, ...extra })
+}
+
+test('the stats split decisions by spread, and show how the way a call asks moves its answer', () => {
+  const text = [
+    loggedDecision('d1', [0.1, 0.1, 0.1, 0.1, 0.1], ['A', 'a', '1', 'A', 'a']),
+    JSON.stringify({ type: 'outcome', id: 'd1', outcome: false }),
+    loggedDecision('d2', [0.6, 0.8, 0.6, 0.8, 0.6], ['A', 'A', 'A', 'A', 'A']),
+    JSON.stringify({ type: 'outcome', id: 'd2', outcome: true }),
+    loggedDecision('d3', [0.2, 0.8, 0.2, 0.8, 0.2], ['1', '1', '1', '1', '1']),
+    JSON.stringify({ type: 'outcome', id: 'd3', outcome: true }),
+    // No outcome: counted in the variants, not in the bins.
+    loggedDecision('d4', [0.5, 0.5, 0.5], ['a', 'a', 'a']),
+  ].join('\n')
+  const decisions = readLog(text)
+  expect(decisions.get('d2')).toMatchObject({ spread: 0.2, calls: [{ negated: false, symbols: 'A', p: 0.6 }, { negated: true, symbols: 'A', p: 0.8 }, expect.anything(), expect.anything(), expect.anything()] })
+
+  const bins = spreadBins(decisions.values(), BASH_TASK)
+  expect(bins.map(bin => [bin.label, bin.count])).toEqual([
+    ['<0.1', 1],
+    ['0.1~0.3', 1],
+    ['≥0.3', 1],
+  ])
+  // d3 averaged 0.44 (wrong at 0.5), d1 and d2 right.
+  expect(bins.map(bin => bin.accuracy)).toEqual([1, 1, 0])
+
+  const variants = variantSummary(decisions.values(), BASH_TASK)
+  // Asked as "no" less asked as "yes": d1 0, d2 +0.2, d3 +0.6, d4 0.
+  expect(variants.negated.count).toBe(4)
+  expect(near(variants.negated.signed, 6)).toBe(near(0.8 / 4, 6))
+  expect(Object.keys(variants.symbols).sort()).toEqual(['1', 'A', 'a'])
+  expect(variants.symbols.a?.count).toBe(5)
+
+  const shown = robustnessLines(bins, variants).join('\n')
+  expect(shown).toContain('퍼짐(호출 값의 최대−최소)별, 정답 붙은 판정')
+  expect(shown).toContain('  ≥0.3          1     0.0%   ')
+  expect(shown).toContain('뒤집어 물은 호출 − 그대로 물은 호출: 평균 +0.200, 절댓값 평균 0.200 (판정 4건)')
+  expect(shown).toContain('기호별(그 호출 값 − 판정 평균):')
+})
+
+test('/likely stats ends with the robustness figures of bash-fail', WITH_KEY, async ($, on) => {
+  const standIn = standInForEngine(on)
+  machine(on, standIn)
+  standIn.anthropic = knowingModel({ predicate: 0.8 })
+  await start($)
+  await bash($, 'false')
+  await standIn.clock.settle()
+  const stats = await likelyCommand($, 'stats')
+  expect(stats).toContain('퍼짐(호출 값의 최대−최소)별, 정답 붙은 판정')
+  expect(stats).toMatch(/  <0\.1 +1 +100\.0%/)
+  expect(stats).toContain('뒤집어 물은 호출 − 그대로 물은 호출: 평균 +0.000')
 })

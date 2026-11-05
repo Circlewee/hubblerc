@@ -4,10 +4,11 @@ import type { EngineInterface, PluginOptions } from 'claude-code'
 import type { LikelyStatus } from '../../types'
 import { addSpend, addTokens, costOf, dollars, limitReached, NO_TOKENS, spendAt, tokensOf } from './cost'
 import type { Limits, Spend, Tokens } from './cost'
-import { combine, distributionsOf, invalidQuestions, layoutCall, MAX_SAMPLES, METHOD_VERSION, readReply, requestBody, seededRandom, seedOf } from './method'
-import type { Answer, Question, Reply } from './method'
-import { maskSecrets, MAX_INPUT_CHARS, safeFileName, utf8Length } from './record'
+import { combine, distributionsOf, invalidQuestions, layoutCall, MAX_SAMPLES, METHOD_VERSION, readReply, requestBody, seededRandom, seedOf, spreadOf } from './method'
+import type { Answer, Question, Reply, Spread } from './method'
+import { maskSecrets, MAX_INPUT_CHARS, utf8Length } from './record'
 import type { CallLog, DecisionLine, OutcomeLine } from './record'
+import { appendLogLine, defaultLogFolder, homeFolder, logFileIn, resetLogs } from '../jsonl-log'
 
 const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)
 
@@ -94,19 +95,15 @@ export function currentOptions(): Readonly<LikelyOptions> {
   return options
 }
 
-/** The log's folder and this machine's file, found once a session. */
-let logFile: { dir: string; path: string } | null = null
-/** The folder was made (and the file, private) this session: an append needs no shell. */
-let isLogReady = false
+/** The log's folder, found once a session. */
+let folder: string | null = null
 /** The machine's totals are read, changed and written one change at a time within the session. */
 let spendQueue: Promise<unknown> = Promise.resolve()
-/** Lines are appended one at a time. */
-let writeQueue: Promise<unknown> = Promise.resolve()
 
 /** At session.start: the key from the keychain where the options have none, and what the sidebar shows of the spend. */
 export async function startLikely($: EngineInterface): Promise<void> {
-  logFile = null
-  isLogReady = false
+  folder = null
+  resetLogs()
   await readKeychainKey($).catch(() => undefined)
   await refreshLikelyStatus($)
 }
@@ -168,6 +165,8 @@ export type LikelyResult = {
   calibrated: false
   /** Calls that answered (refusals left out). */
   samples: number
+  /** How far the answered calls part on each question (`spreadOf`): the robustness of the decision. */
+  spread: Spread[]
   model: string
   latencyMs: number
   costUsd: number
@@ -269,6 +268,7 @@ export async function likely($: EngineInterface, request: LikelyRequest): Promis
   if (!isDecided) throw new Error(`판정 호출 ${samples}개가 모두 실패했습니다: ${raw.find(call => call.error !== undefined)?.error ?? '응답 없음'}`)
 
   const answers = combine(request.questions, answered)
+  const spread = spreadOf(request.questions, answered)
   const line: DecisionLine = {
     type: 'decision',
     id,
@@ -283,13 +283,14 @@ export async function likely($: EngineInterface, request: LikelyRequest): Promis
     questions: request.questions,
     calls: logs,
     answers,
+    spread,
     latencyMs,
     tokens,
     costUsd,
     ...(request.meta === undefined ? {} : { meta: request.meta }),
     outcome: null,
   }
-  const result: LikelyResult = { id, answers, raw, calibrated: false, samples: answered.length, model, latencyMs, costUsd, tokens, methodVersion: METHOD_VERSION }
+  const result: LikelyResult = { id, answers, raw, calibrated: false, samples: answered.length, spread, model, latencyMs, costUsd, tokens, methodVersion: METHOD_VERSION }
   try {
     result.logPath = await appendLine($, JSON.stringify(line))
   } catch (error) {
@@ -341,55 +342,23 @@ export function httpError(status: number, body: unknown): string {
  * `hubblerc/likely` where iCloud Drive is on; else `~/.claude/hubblerc/likely`.
  */
 export async function logFolder($: EngineInterface): Promise<string> {
-  const home = (await $.env.get('HOME')) ?? ''
-  if (options.logDir !== '') return options.logDir.replace(/^~(?=\/|$)/, home).replace(/\/+$/, '')
-  const icloud = `${home}/Library/Mobile Documents/com~apple~CloudDocs`
-  if (await $.fs.exists(icloud).catch(() => false)) return `${icloud}/hubblerc/likely`
+  if (options.logDir !== '') return options.logDir.replace(/^~(?=\/|$)/, await homeFolder($)).replace(/\/+$/, '')
 
-  return `${home}/.claude/hubblerc/likely`
+  return defaultLogFolder($, 'likely')
 }
 
-/** The machine's name (its Sharing name, else its host name), as its log file is named. */
-async function machineName($: EngineInterface): Promise<string> {
-  for (const argv of [['/usr/sbin/scutil', '--get', 'ComputerName'], ['/bin/hostname', '-s']]) {
-    const ran = await $.process.run(argv, { timeoutMs: 3000 }).catch(() => undefined)
-    const name = ran?.exitCode === 0 ? ran.stdout.trim() : ''
-    if (name !== '') return name
-  }
-
-  return 'mac'
-}
-
-/** This machine's log file, found once a session. */
+/** This machine's log file. */
 export async function logPath($: EngineInterface): Promise<{ dir: string; path: string }> {
-  if (logFile !== null) return logFile
-  const dir = await logFolder($)
-  logFile = { dir, path: `${dir}/${safeFileName(await machineName($))}.jsonl` }
+  folder ??= await logFolder($)
 
-  return logFile
+  return { dir: folder, path: await logFileIn($, folder) }
 }
 
-/**
- * A line added at the end of this machine's log (`tee -a`: the file is never written over), after
- * the lines before it. The first of a session makes the folder and the file, readable by the user alone.
- */
-function appendLine($: EngineInterface, line: string): Promise<string> {
-  const work = async () => {
-    const file = await logPath($)
-    if (!isLogReady) {
-      const made = await $.process.run(['/bin/sh', '-c', 'umask 077 && mkdir -p "$1" && touch "$2"', 'sh', file.dir, file.path], { timeoutMs: 10_000 })
-      if (made.exitCode !== 0) throw new Error(made.stderr.trim() || `기록 폴더를 만들지 못했습니다(${made.exitCode})`)
-      isLogReady = true
-    }
-    const ran = await $.process.run(['/usr/bin/tee', '-a', file.path], { stdin: `${line}\n`, timeoutMs: 10_000 })
-    if (ran.exitCode !== 0) throw new Error(ran.stderr.trim() || `기록을 쓰지 못했습니다(${ran.exitCode})`)
+/** A line appended to this machine's log (`jsonl-log.ts`). */
+async function appendLine($: EngineInterface, line: string): Promise<string> {
+  folder ??= await logFolder($)
 
-    return file.path
-  }
-  const run = writeQueue.then(work, work)
-  writeQueue = run.catch(() => undefined)
-
-  return run
+  return appendLogLine($, folder, line)
 }
 
 /** What came true for a logged decision, appended as a line of its own. */

@@ -3,6 +3,7 @@ import type { Register } from 'claude-code'
 
 import { completeTurn, isIgnoredTool, noteFiveHourUsed, noteShellChanges, recordRun, startShellWatch, startTurn, trackLines, trackPrompts } from './activity'
 import { rememberAnswer, startAutoEffort } from './auto-effort'
+import { effortWord, noteEffortChange, noteTurnDone, resetEffortRecord } from './effort-record'
 import { showAnswer } from './answer'
 import { showBand } from './band'
 import { showBashPurpose } from './bash-purpose'
@@ -35,6 +36,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    resetEffortRecord()
     await registerCommand($).catch(() => undefined)
     await restoreTurns($).catch(() => undefined)
     await startStatus($).catch(() => undefined)
@@ -91,6 +93,7 @@ export const register: Register = (on, options) => {
     rememberAnswer(e)
     const done = await next(e)
     if (e.agentId === undefined) {
+      void noteTurnDone($, e.turnId).catch(() => undefined)
       await refreshStatus($).catch(() => undefined)
       await noteFiveHourUsed($, e.turnId).catch(() => undefined)
       await noteShellChanges($, e.turnId).catch(() => undefined)
@@ -135,6 +138,8 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'effort' }, async ($, e, next) => {
     const ran = await next(e)
     noteEffortCommand($)
+    // A level set by hand after an auto pick: a signal on it (the slider's level is not known here).
+    await noteEffortChange($, effortWord(e.args), 'engine').catch(() => undefined)
 
     return ran
   }).catch(($, e, next) => next(e))

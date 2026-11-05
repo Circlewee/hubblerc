@@ -4,7 +4,8 @@
  * Read back for `/likely stats`. Pure: the engine side writes and reads the files.
  */
 import type { Tokens } from './cost'
-import type { Answer, CallLayout, Question } from './method'
+import type { Answer, CallLayout, Question, Spread } from './method'
+import { spreadOfValues } from './method'
 
 /** One call of a decision as logged: how it showed the questions, what it gave back, and what it took. */
 export type CallLog = {
@@ -37,6 +38,8 @@ export type DecisionLine = {
   questions: Question[]
   calls: CallLog[]
   answers: Answer[]
+  /** How far the calls part on each question; absent on lines written before 2026-11-05 (read back from `calls`). */
+  spread?: Spread[]
   latencyMs: number
   tokens: Tokens
   costUsd: number
@@ -102,6 +105,13 @@ export type LoggedDecision = {
   thinking: boolean
   /** The first predicate's chance of yes, when the decision has a predicate answered. */
   probability?: number
+  /**
+   * That predicate's value in each call that answered, with how the call showed it: asked as "no",
+   * under which symbols. What the robustness figures (`spreadBins`, `variantSummary`) are made of.
+   */
+  calls?: { negated: boolean; symbols: string; p: number }[]
+  /** The largest less the smallest of the calls' values (`calls`). */
+  spread?: number
   costUsd: number
   /** undefined: no outcome line yet; null: known to be unknowable. */
   outcome?: boolean | string | null
@@ -132,7 +142,14 @@ export function readLog(text: string, into: Map<string, LoggedDecision> = new Ma
         thinking: row.thinking === true,
         costUsd: typeof row.costUsd === 'number' ? row.costUsd : 0,
       }
-      if (predicate !== undefined) decision.probability = predicate.probability
+      if (predicate !== undefined) {
+        decision.probability = predicate.probability
+        const calls = predicateCalls(row.calls, answers.indexOf(predicate))
+        if (calls.length > 0) {
+          decision.calls = calls
+          decision.spread = spreadOfValues(calls.map(call => call.p)).range
+        }
+      }
       const known = into.get(row.id)
       if (known?.outcome !== undefined) decision.outcome = known.outcome
       into.set(row.id, decision)
@@ -225,6 +242,98 @@ export function calibrationLines(label: string, calibration: Calibration | null)
     if (bin.count === 0) continue
     lines.push(`  ${bin.from.toFixed(1)}~${bin.to.toFixed(1)}  ${String(bin.count).padStart(6)}   ${bin.meanProbability.toFixed(2)}    ${bin.actual.toFixed(2)}`)
   }
+
+  return lines
+}
+
+/** A logged decision's calls that answered question `index` (a predicate): its value in each, and how the call showed it. */
+function predicateCalls(calls: unknown, index: number): { negated: boolean; symbols: string; p: number }[] {
+  if (!Array.isArray(calls) || index < 0) return []
+
+  return calls.flatMap(call => {
+    if (!isRecord(call) || !isRecord(call.layout) || !Array.isArray(call.distributions)) return []
+    const shown = Array.isArray(call.layout.questions) ? call.layout.questions[index] : undefined
+    const p = (call.distributions[index] as unknown[] | undefined)?.[0]
+    if (typeof p !== 'number') return []
+
+    return [{ negated: isRecord(shown) && shown.negated === true, symbols: typeof call.layout.symbols === 'string' ? call.layout.symbols : '', p }]
+  })
+}
+
+/** The spread bins `/likely stats` counts decisions in: under 0.1, 0.1 to 0.3, 0.3 and over. */
+export const SPREAD_BINS: readonly { label: string; from: number; to: number }[] = [
+  { label: '<0.1', from: 0, to: 0.1 },
+  { label: '0.1~0.3', from: 0.1, to: 0.3 },
+  { label: '≥0.3', from: 0.3, to: Number.POSITIVE_INFINITY },
+]
+
+/**
+ * The decisions of a task with an outcome, by how far their calls parted: each bin's count, accuracy
+ * at 0.5 and Brier score. Whether a decision whose calls disagree is the less right one.
+ */
+export function spreadBins(decisions: Iterable<LoggedDecision>, task: string, filter: (decision: LoggedDecision) => boolean = () => true): { label: string; count: number; accuracy: number; brier: number }[] {
+  const kept = [...decisions].filter(decision => decision.task === task && decision.spread !== undefined && decision.probability !== undefined && typeof decision.outcome === 'boolean' && filter(decision))
+
+  return SPREAD_BINS.map(bin => {
+    const pairs = kept.filter(decision => (decision.spread ?? 0) >= bin.from && (decision.spread ?? 0) < bin.to).map(decision => ({ probability: decision.probability ?? 0.5, actual: decision.outcome === true }))
+    const figures = calibrationOf(pairs)
+
+    return { label: bin.label, count: pairs.length, accuracy: figures?.accuracy ?? 0, brier: figures?.brier ?? 0 }
+  })
+}
+
+/**
+ * How the decisions of a task move with how a call shows the question: the calls asked as "no" less
+ * those asked as "yes" (each decision's mean of either, where it has both), signed and absolute; and
+ * each symbol set's calls less their decision's mean. Robustness, as "Calibration Is Not Enough"
+ * (Xia et al. 2026) asks it measured beside calibration.
+ */
+export function variantSummary(
+  decisions: Iterable<LoggedDecision>,
+  task: string,
+  filter: (decision: LoggedDecision) => boolean = () => true,
+): { negated: { count: number; signed: number; absolute: number }; symbols: Record<string, { count: number; deviation: number }> } {
+  const diffs: number[] = []
+  const deviations: Record<string, number[]> = {}
+  for (const decision of decisions) {
+    if (decision.task !== task || decision.calls === undefined || !filter(decision)) continue
+    const average = (values: readonly number[]) => values.reduce((total, value) => total + value, 0) / values.length
+    const asNo = decision.calls.filter(call => call.negated).map(call => call.p)
+    const asYes = decision.calls.filter(call => !call.negated).map(call => call.p)
+    if (asNo.length > 0 && asYes.length > 0) diffs.push(average(asNo) - average(asYes))
+    const all = average(decision.calls.map(call => call.p))
+    for (const call of decision.calls) (deviations[call.symbols] ??= []).push(call.p - all)
+  }
+  const mean = (values: readonly number[]) => (values.length === 0 ? 0 : values.reduce((total, value) => total + value, 0) / values.length)
+
+  return {
+    negated: { count: diffs.length, signed: mean(diffs), absolute: mean(diffs.map(Math.abs)) },
+    symbols: Object.fromEntries(Object.entries(deviations).map(([symbols, values]) => [symbols, { count: values.length, deviation: mean(values) }])),
+  }
+}
+
+/** The lines `/likely stats` writes of robustness: the spread bins, then the variants. */
+export function robustnessLines(bins: ReturnType<typeof spreadBins>, variants: ReturnType<typeof variantSummary>): string[] {
+  // Rounded first: a sum's -0.0000001 reads +0.000, not −0.000.
+  const signed = (value: number) => {
+    const rounded = Math.round(value * 1000) / 1000
+
+    return `${rounded < 0 ? '−' : '+'}${Math.abs(rounded).toFixed(3)}`
+  }
+  const lines = ['퍼짐(호출 값의 최대−최소)별, 정답 붙은 판정', '  퍼짐       건수   정확도    Brier']
+  for (const bin of bins) lines.push(`  ${bin.label.padEnd(8)}  ${String(bin.count).padStart(5)}   ${bin.count === 0 ? '    -' : `${(bin.accuracy * 100).toFixed(1)}%`.padStart(6)}   ${bin.count === 0 ? '    -' : bin.brier.toFixed(3)}`)
+  lines.push('변주별(강건성)')
+  lines.push(
+    variants.negated.count === 0
+      ? '  뒤집어 물은 호출 − 그대로 물은 호출: 둘 다 있는 판정 없음'
+      : `  뒤집어 물은 호출 − 그대로 물은 호출: 평균 ${signed(variants.negated.signed)}, 절댓값 평균 ${variants.negated.absolute.toFixed(3)} (판정 ${variants.negated.count}건)`,
+  )
+  const symbols = Object.entries(variants.symbols)
+  lines.push(
+    symbols.length === 0
+      ? '  기호별: 기록 없음'
+      : `  기호별(그 호출 값 − 판정 평균): ${symbols.map(([set, figure]) => `${set} ${signed(figure.deviation)} (${figure.count})`).join(' · ')}  · 예/아니오 질문엔 기호를 보이지 않아 0 근처가 정상`,
+  )
 
   return lines
 }

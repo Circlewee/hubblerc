@@ -4,7 +4,7 @@ import { BASH_TASK } from './bash-fail'
 import { dollars } from './cost'
 import { currentOptions, currentSpend, hasApiKey, KEY_HOWTO, keySource, likely, logFolder, NO_KEY_TEXT, readKeychainKey, readLogPieces } from './likely'
 import { METHOD_VERSION } from './method'
-import { calibrationLines, calibrationOf, predicatePairs, readLog, taskCounts } from './record'
+import { calibrationLines, calibrationOf, predicatePairs, readLog, robustnessLines, spreadBins, taskCounts, variantSummary } from './record'
 import type { LoggedDecision } from './record'
 
 /** At session.start: `/likely`. */
@@ -101,6 +101,7 @@ async function statsText($: EngineInterface, task: string | undefined): Promise<
     const part = calibrationOf(predicatePairs(all, target, decision => current(decision) && decision.thinking === thinking))
     lines.push(calibrationLines(`  ${label}`, part)[0] ?? '')
   }
+  lines.push('', ...robustnessLines(spreadBins(all, target, current), variantSummary(all, target, current)))
 
   return lines.join('\n')
 }
@@ -145,6 +146,7 @@ async function askOnce($: EngineInterface, text: string): Promise<string> {
   return [
     `likely: ${head} · 호출 ${result.samples}/${result.raw.length} · ${seconds}초 · ${result.model}`,
     `호출별 예일 확률: ${calls.join(' · ')}`,
+    ...result.spread.slice(0, 1).map(spread => `퍼짐(호출 ${result.samples}개): 최대−최소 ${spread.range.toFixed(2)} · 표준편차 ${spread.sd.toFixed(2)}`),
     `토큰: 입력 ${result.tokens.input} · 출력 ${result.tokens.output} · 캐시 읽기 ${result.tokens.cacheRead} · 비용 $${result.costUsd.toFixed(5)}`,
     result.logPath !== undefined ? `기록: ${result.logPath} (${result.id})` : `기록하지 못했습니다: ${result.logError ?? ''}`,
     'Console의 Billing에서 크레딧이 줄었는지 확인해 보세요.',

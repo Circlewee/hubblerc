@@ -18,8 +18,9 @@ export type StandIn = {
   agentMessages: Record<string, SessionMessage[]>
   /** Every toast the plugin showed. */
   toasts: unknown[]
-  /** What the small model answers a completion (null: the call fails), and every request made. */
+  /** What the small model answers a completion (null: the call fails), and every request made; how long it takes on the mocked clock. */
   completion: string | null
+  completionDelayMs: number
   completions: { model: string; system?: unknown; prompt: unknown }[]
   /** The 5-hour window's percent `$.session.usage()` answers; a test may change it. */
   fiveHourPercent: number
@@ -94,7 +95,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -244,8 +245,9 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
 
     return { value: undefined }
   })
-  on('model.complete', (_, e) => {
+  on('model.complete', async (_, e) => {
     standIn.completions.push(e)
+    if (standIn.completionDelayMs > 0) await standIn.clock.sleep(standIn.completionDelayMs)
     const usage = { input_tokens: 120, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
     if (standIn.completion === null) {
       return { value: { isAnswered: false as const, reason: 'api-error' as const, status: 529, error: 'overloaded' as never, usage } }

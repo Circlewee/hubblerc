@@ -3,6 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { EffortLevel } from '../types'
 import { isEffortLevel } from './band-format'
+import { noteEffortChange } from './effort-record'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const effortPicker = atom({ plugin: 'hubblerc', key: 'effortPicker' } as const, null)
@@ -44,6 +45,8 @@ export async function choose($: EngineInterface, level: EffortLevel | 'auto' | n
   await update($, effortOverride, () => (level !== null && level !== 'auto' && isEffortLevel(level) ? level : null))
   await update($, effortAuto, () => level === 'auto')
   await update($, effortPicker, () => null)
+  // A level chosen by hand after a pick: the strongest signal on it.
+  await noteEffortChange($, level ?? 'engine', 'slider').catch(() => undefined)
 }
 
 /** At a main-loop turn's start: a slider left open closes. */

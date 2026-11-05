@@ -3,6 +3,7 @@ import type { EngineInterface, HookStream, On, TurnStepResult } from 'claude-cod
 
 import type { EffortSample, EffortSource } from '../types'
 import { autoLevelFor, isAutoOn } from './auto-effort'
+import { noteFirstRequest } from './effort-record'
 import { addTokens } from './forecast'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
@@ -45,6 +46,8 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
       }
     }
 
+    // Auto's record: whether the first request went out at the pick.
+    if (e.index === 0) void noteFirstRequest($, e.turnId, String(effort), source).catch(() => undefined)
     const result: TurnStepResult = yield* watchPhase($, next(effort === e.effort ? e : { ...e, effort }))
     await logRequest($, { turnId: e.turnId, index: e.index, effort: String(effort), source }, result).catch(() => undefined)
     await $.clock
