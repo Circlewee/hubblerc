@@ -10,8 +10,8 @@ const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)
 /**
  * At session.start: the machine's chip, memory and OS (macOS's `sysctl` and `sw_vers`) and the
  * engine's version, for the sidebar's top box; then every 30 seconds while the sidebar shows, the
- * memory in use and the disk's room left, and the machine's again while one is missing. Each read
- * on its own: one failing leaves its field out, the rest stand.
+ * memory in use (the disk's room left every five minutes), and the machine's again while one is
+ * missing. Each read on its own: one failing leaves its field out, the rest stand.
  *
  * The commands are named by their full paths: `sysctl` lives in `/usr/sbin`, which a PATH Claude
  * Code was started with may lack.
@@ -32,13 +32,14 @@ export async function startDevice($: EngineInterface): Promise<void> {
   info.isDevBuild = !$.plugin.root.includes('/plugins/cache/')
   await update($, device, () => info)
 
+  lastDiskCheck = Number.NEGATIVE_INFINITY
   await readResources($).catch(() => undefined)
   lastInstalledCheck = Number.NEGATIVE_INFINITY
   lastLatestCheck = Number.NEGATIVE_INFINITY
   await checkVersions($).catch(() => undefined)
-  // Again every 30 seconds while the sidebar shows: nothing else draws them. The versions go by the
-  // wall clock, not by a timer of their own: a timer's hour stood still while the Mac slept, so a
-  // version installed in the morning went unseen (2026-10-30).
+  // Again every 30 seconds while the sidebar shows: nothing else draws them. The disk and the
+  // versions go by the wall clock, not by a timer of their own: a timer's hour stood still while the
+  // Mac slept, so a version installed in the morning went unseen (2026-10-30).
   $.clock.every(RESOURCE_MS, () => {
     void (async () => {
       if (!(await isSidebarShown($))) return
@@ -49,6 +50,10 @@ export async function startDevice($: EngineInterface): Promise<void> {
 }
 
 const RESOURCE_MS = 30_000
+/** How often the disk's room is read: it hardly moves in a few minutes. */
+const DISK_CHECK_MS = 5 * 60_000
+/** When the disk was last read, by the wall clock; reset at session.start. */
+let lastDiskCheck = Number.NEGATIVE_INFINITY
 /** How often the versions folder is listed: the auto-update installs there, a restart away. */
 const INSTALLED_CHECK_MS = 5 * 60_000
 /** How often the npm registry is asked for the latest release. */
@@ -75,11 +80,19 @@ async function readMachine($: EngineInterface): Promise<Pick<DeviceInfo, 'chip' 
 }
 
 /**
- * The memory in use (`vm_stat`) and the startup disk's room left (`df`), each a few milliseconds;
- * and the chip, memory and OS again while one of them is missing (a read that failed at the start).
+ * The memory in use (`vm_stat`) and, when five minutes have gone since it was last read, the
+ * startup disk's room left (`df`; between, the last reading stands), each a few milliseconds; and
+ * the chip, memory and OS again while one of them is missing (a read that failed at the start).
  */
 async function readResources($: EngineInterface): Promise<void> {
-  const [vm, df, known] = await Promise.all([output($, ['/usr/bin/vm_stat']), output($, ['/bin/df', '-k', '/']), read($, device)])
+  const now = await $.clock.now()
+  const isDiskDue = now - lastDiskCheck >= DISK_CHECK_MS
+  if (isDiskDue) lastDiskCheck = now
+  const [vm, df, known] = await Promise.all([
+    output($, ['/usr/bin/vm_stat']),
+    isDiskDue ? output($, ['/bin/df', '-k', '/']) : Promise.resolve(''),
+    read($, device),
+  ])
   const isMachineMissing = known?.chip === undefined || known.memoryGb === undefined || known.os === undefined
   const machine = isMachineMissing ? await readMachine($) : {}
   const memoryUsedGb = vm === '' ? undefined : parseVmStat(vm)

@@ -138,3 +138,19 @@ test("memory, disk and the session's name are read again only while the sidebar 
   await standIn.clock.advance(60_000)
   expect(count(standIn.ran, '/usr/bin/vm_stat')).toBe(hidden.vm + 2)
 })
+
+test('while the sidebar shows, memory is read every half minute and the disk every five minutes', async ($, on) => {
+  const standIn = standInForEngine(on)
+  await start($)
+  standIn.panes.push(SIDEBAR)
+
+  // Both read once as the session started; the disk's next reading is due five minutes on.
+  const from = { vm: count(standIn.ran, '/usr/bin/vm_stat'), df: count(standIn.ran, '/bin/df') }
+  expect(from.df).toBe(1)
+  await standIn.clock.advance(270_000)
+  expect(count(standIn.ran, '/usr/bin/vm_stat')).toBe(from.vm + 9)
+  expect(count(standIn.ran, '/bin/df')).toBe(from.df)
+  await standIn.clock.advance(30_000)
+  expect(count(standIn.ran, '/usr/bin/vm_stat')).toBe(from.vm + 10)
+  expect(count(standIn.ran, '/bin/df')).toBe(from.df + 1)
+})
