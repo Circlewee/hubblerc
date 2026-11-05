@@ -391,6 +391,16 @@ async function readRelaunch($: EngineInterface, dir: string | undefined): Promis
   return { scriptPath, zshrcPath, home, facts: { isZsh: (shell ?? '').endsWith('/zsh'), shipped, installed, zshrc, isActive: launched } }
 }
 
+/**
+ * Whether the person's shell has `hubblerc-key` (likely's key in the keychain): the copy under Claude
+ * Code's folder defines it and the startup file sources it. Before `/setup` (or an older copy), no.
+ */
+export async function hasKeyCommand($: EngineInterface): Promise<boolean> {
+  const files = await readRelaunch($, await configDir($))
+
+  return files !== undefined && files.facts.installed?.includes('hubblerc-key()') === true && files.facts.zshrc?.includes(RELAUNCH_MARK) === true
+}
+
 /** At session.start: when a needed thing is missing, one line in the conversation says so. */
 export async function checkSetup($: EngineInterface): Promise<void> {
   const { state } = await readState($)

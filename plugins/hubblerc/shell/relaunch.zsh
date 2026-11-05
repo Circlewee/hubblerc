@@ -1,10 +1,11 @@
-# hubblerc의 셸 설정: Orca에서 그림을 켜는 값, 그리고 Claude Code를 새 버전으로 다시 띄우는 셸 함수.
+# hubblerc의 셸 설정: Orca에서 그림을 켜는 값, Claude Code를 새 버전으로 다시 띄우는 셸 함수,
+# likely(판정)의 API 키를 키체인에 넣고 지우는 `hubblerc-key`.
 # `/setup`이 이 파일을 ~/.claude/hubblerc/relaunch.zsh로 복사하고, ~/.zshrc에 불러오는 줄을 넣는다:
 #   source ~/.claude/hubblerc/relaunch.zsh
 #
 # 아래 번호는 이 파일의 판이다. 내용을 바꾸면 올린다: `/setup`은 설치된 판이 같거나 새로우면 덮어쓰지
 # 않아서, 예전 hubblerc로 도는 다른 세션의 `/setup`이 새 파일을 되돌리지 못한다.
-# hubblerc-shell-version: 1
+# hubblerc-shell-version: 2
 
 # Orca의 터미널은 그림(kitty 유니코드 placeholder)을 그리지만, Claude Code는 Orca를 그림 되는 터미널로
 # 알아보지 못한다. Orca는 자기 에이전트 실행으로 띄운 Claude에만 이 값을 넣어 주므로, 탭에서 직접 띄울
@@ -53,4 +54,55 @@ claude() {
   rm -f "$file"
 
   return $code
+}
+
+# likely(판정)가 쓰는 Anthropic API 키를 macOS 키체인 항목 hubblerc-likely에 넣고(바꾸고), 지우고, 있는지 본다.
+# 키 값은 어디에도 출력하지 않는다: 확인은 항목이 있는지(종료 코드)만, 넣을 때는 security가 가린 입력으로 묻는다.
+#   hubblerc-key         있는지 확인 (status와 같음)
+#   hubblerc-key set     넣기·바꾸기
+#   hubblerc-key delete  지우기 (y/N 확인)
+hubblerc-key() {
+  local service=hubblerc-likely
+  local usage='사용법: hubblerc-key [status|set|delete]  확인 · 넣기·바꾸기 · 지우기'
+  case "${1:-status}" in
+    status)
+      if security find-generic-password -s "$service" >/dev/null 2>&1; then
+        print -r -- "likely API 키: 키체인에 있음 ($service)"
+      else
+        print -r -- "likely API 키: 키체인에 없음 ($service)"
+      fi
+      print -r -- "$usage"
+      ;;
+    set)
+      print -r -- "Max 구독 크레딧이 연결된 Console 조직의 API 키를 넣으세요. 입력은 화면에 보이지 않습니다(두 번 묻습니다)."
+      if security add-generic-password -U -s "$service" -a "$USER" -w; then
+        print -r -- "키체인에 넣었습니다. 키가 없던 Claude Code 세션은 /likely를 한 번 실행하면 읽고, 키가 있던 세션은 새 세션부터 바뀐 키를 씁니다."
+      else
+        print -r -- "키를 넣지 못했습니다." >&2
+        return 1
+      fi
+      ;;
+    delete)
+      if ! security find-generic-password -s "$service" >/dev/null 2>&1; then
+        print -r -- "키체인에 지울 키가 없습니다 ($service)."
+        return 0
+      fi
+      local answer
+      read -r "answer?키체인의 likely API 키($service)를 지울까요? [y/N] "
+      if [[ "$answer" == [yY]* ]]; then
+        if security delete-generic-password -s "$service" >/dev/null 2>&1; then
+          print -r -- "지웠습니다. 열려 있는 Claude Code 세션은 새 세션부터 키 없이 돕니다."
+        else
+          print -r -- "지우지 못했습니다." >&2
+          return 1
+        fi
+      else
+        print -r -- "그대로 둡니다."
+      fi
+      ;;
+    *)
+      print -r -- "$usage" >&2
+      return 2
+      ;;
+  esac
 }

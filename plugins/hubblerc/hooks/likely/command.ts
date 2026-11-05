@@ -2,7 +2,8 @@ import type { EngineInterface, On } from 'claude-code'
 
 import { BASH_TASK } from './bash-fail'
 import { dollars } from './cost'
-import { currentOptions, currentSpend, hasApiKey, KEY_HOWTO, keySource, likely, logFolder, NO_KEY_TEXT, readKeychainKey, readLogPieces } from './likely'
+import { currentOptions, currentSpend, hasApiKey, keyHowto, keyStateText, likely, logFolder, readKeychainKey, readLogPieces } from './likely'
+import { hasKeyCommand } from '../setup'
 import { METHOD_VERSION } from './method'
 import { calibrationLines, calibrationOf, predicatePairs, readLog, robustnessLines, spreadBins, taskCounts, variantSummary } from './record'
 import type { LoggedDecision } from './record'
@@ -41,14 +42,13 @@ export async function runLikelyCommand($: EngineInterface, args: string): Promis
 
 async function usageText($: EngineInterface): Promise<string> {
   const folder = await logFolder($).catch(() => '(알 수 없음)')
-  const source = keySource()
 
   return [
     '/likely <질문이나 글>  예일(참일) 확률을 판정 하나로. 키 확인용, 크레딧이 듭니다. 예) /likely 이 명령은 실패할까: ls /없는경로',
     '/likely stats [task]   판정 기록 통계: task별 건수·정답 수, 비용, bash-fail의 보정(Brier·ECE·정확도)',
     '/likely export         기록 폴더를 zip으로 묶기',
-    `API 키: ${source === 'options' ? '설정에서' : source === 'keychain' ? '키체인에서' : '없음'} · 기록 폴더: ${folder}`,
-    KEY_HOWTO,
+    `API 키: ${keyStateText()} · 기록 폴더: ${folder}`,
+    keyHowto(await hasKeyCommand($).catch(() => false)),
   ].join('\n')
 }
 
@@ -130,7 +130,7 @@ export const ASK_QUESTION = {
 
 /** `/likely <글>`: one predicate on the text, decided and shown call by call. */
 async function askOnce($: EngineInterface, text: string): Promise<string> {
-  if (!hasApiKey()) return NO_KEY_TEXT
+  if (!hasApiKey()) return `Anthropic API 키가 없어 판정하지 않습니다.\n${keyHowto(await hasKeyCommand($).catch(() => false))}`
   const result = await likely($, { task: 'ask', input: text, questions: [ASK_QUESTION] })
   if ('skipped' in result) return result.reason
   const answer = result.answers[0]

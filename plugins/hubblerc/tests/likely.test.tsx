@@ -414,7 +414,9 @@ test('with no key in the options or the keychain nothing is decided: no call, no
   expect(await likelyLineShown($)).toBeUndefined()
   const said = await likelyCommand($, '하늘은 파랗다')
   expect(said).toContain('API 키가 없어 판정하지 않습니다')
-  expect(said).toContain('security add-generic-password -s hubblerc-likely -a "$USER" -w')
+  expect(said).toContain('키 넣기·바꾸기: 터미널에서 `hubblerc-key set` · 지우기: `hubblerc-key delete`')
+  // Before /setup the shell has no hubblerc-key: /setup first.
+  expect(said).toContain('`hubblerc-key`가 아직 없습니다: `/setup`을 실행한 뒤 새 터미널에서 쓰세요.')
   expect(said).toContain('/plugin configure hubblerc@hubblerc')
 })
 
@@ -435,7 +437,9 @@ test('a key in the keychain is read once as the session starts and used; it is k
   expect(JSON.stringify(store)).not.toContain(secret)
   expect(Object.values(standIn.files).join('')).not.toContain(secret)
   expect(await likelyLineShown($)).toBe('likely 오늘 2건 · 이번 달 $0.00 / $100')
-  expect(await likelyCommand($, '')).toContain('API 키: 키체인에서')
+  const usage = await likelyCommand($, '')
+  expect(usage).toContain('API 키: 키체인에 있음')
+  expect(usage).not.toContain(secret)
 })
 
 test('the options\' key comes first: the keychain is not asked', WITH_KEY, async ($, on) => {
@@ -448,7 +452,7 @@ test('the options\' key comes first: the keychain is not asked', WITH_KEY, async
   await standIn.clock.settle()
   expect(standIn.keychainReads).toBe(0)
   expect(standIn.anthropicCalls.every(call => call.headers['x-api-key'] === KEY)).toBe(true)
-  expect(await likelyCommand($, '')).toContain('API 키: 설정에서')
+  expect(await likelyCommand($, '')).toContain('API 키: 설정 비밀 항목에 있음')
 })
 
 test('a key added to the keychain mid-session works from the next /likely, no reload', async ($, on) => {
@@ -593,8 +597,9 @@ test('/likely alone tells how to use it; any other text is one question, decided
   expect(usage).toContain('/likely <질문이나 글>')
   expect(usage).toContain('/likely stats [task]')
   expect(usage).toContain('/likely export')
-  expect(usage).toContain('API 키: 설정에서')
-  expect(usage).toContain('security add-generic-password -s hubblerc-likely')
+  expect(usage).toContain('API 키: 설정 비밀 항목에 있음')
+  expect(usage).not.toContain(KEY)
+  expect(usage).toContain('`hubblerc-key set`')
   expect(standIn.anthropicCalls.length).toBe(0)
 
   const shown = await likelyCommand($, '이 명령은 실패할까: ls /없는경로')
@@ -766,4 +771,21 @@ test('/likely stats ends with the robustness figures of bash-fail', WITH_KEY, as
   expect(stats).toContain('퍼짐(호출 값의 최대−최소)별, 정답 붙은 판정')
   expect(stats).toMatch(/  <0\.1 +1 +100\.0%/)
   expect(stats).toContain('뒤집어 물은 호출 − 그대로 물은 호출: 평균 +0.000')
+})
+
+test('with the shell function in place (after /setup), /likely names hubblerc-key and no /setup', async ($, on) => {
+  const standIn = standInForEngine(on)
+  machine(on, standIn)
+  on('fs.read', (_, e) => {
+    if (e.path === `${HOME}/.claude/hubblerc/relaunch.zsh`) return { value: '# hubblerc-shell-version: 2\nhubblerc-key() {\n}\n' as never }
+    if (e.path === `${HOME}/.zshrc`) return { value: 'source ~/.claude/hubblerc/relaunch.zsh\n' as never }
+    if (e.path.endsWith('/shell/relaunch.zsh')) return { value: '# hubblerc-shell-version: 2\n' as never }
+
+    return { deny: `no file ${e.path}` }
+  })
+  await start($)
+  const said = await likelyCommand($, '')
+  expect(said).toContain('API 키: 없음')
+  expect(said).toContain('키 넣기·바꾸기: 터미널에서 `hubblerc-key set`')
+  expect(said).not.toContain('/setup')
 })

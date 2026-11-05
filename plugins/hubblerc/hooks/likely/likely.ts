@@ -55,7 +55,7 @@ export function configureLikely(raw: PluginOptions): void {
   options = likelyOptions(raw)
 }
 
-/** The keychain item the key is read from where the options have none (`security add-generic-password -s hubblerc-likely`). */
+/** The keychain item the key is read from where the options have none (the shell's `hubblerc-key set` puts it there). */
 export const KEYCHAIN_SERVICE = 'hubblerc-likely'
 
 /**
@@ -180,14 +180,28 @@ export type LikelyResult = {
 /** No decision made, and why: no API key, or a limit reached. */
 export type LikelySkip = { skipped: 'no-key' | 'daily-cap' | 'budget'; reason: string }
 
-/** How to give likely a key, where it has none. */
-export const KEY_HOWTO = [
-  'API 키 넣는 법(둘 중 하나, 설정이 먼저):',
-  `  키체인: 터미널에서 security add-generic-password -s ${KEYCHAIN_SERVICE} -a "$USER" -w  (키를 물으면 붙여 넣기. 개발판 hcc는 이 길뿐)`,
-  '  설정: 설치본은 세션 안 /plugin configure hubblerc@hubblerc 의 anthropicApiKey',
-].join('\n')
+/**
+ * Where the key stands, in words (never the key): the secret option, the keychain, or none.
+ */
+export function keyStateText(): string {
+  const source = keySource()
 
-export const NO_KEY_TEXT = `Anthropic API 키가 없어 판정하지 않습니다.\n${KEY_HOWTO}`
+  return source === 'options' ? '설정 비밀 항목에 있음' : source === 'keychain' ? '키체인에 있음' : '없음'
+}
+
+/**
+ * How to put a key in, change it or take it out: the shell's `hubblerc-key` (shell/relaunch.zsh), or,
+ * before `/setup` put that in, `/setup` first. `hasCommand`: the shell has it.
+ */
+export function keyHowto(hasCommand: boolean): string {
+  return [
+    '키 넣기·바꾸기: 터미널에서 `hubblerc-key set` · 지우기: `hubblerc-key delete` · 확인: `hubblerc-key`',
+    ...(hasCommand ? [] : ['  `hubblerc-key`가 아직 없습니다: `/setup`을 실행한 뒤 새 터미널에서 쓰세요.']),
+    '  설치본은 세션 안 /plugin configure hubblerc@hubblerc 의 anthropicApiKey로도 넣을 수 있습니다(개발판 hcc는 키체인뿐).',
+  ].join('\n')
+}
+
+export const NO_KEY_TEXT = `Anthropic API 키가 없어 판정하지 않습니다.\n${keyHowto(true)}`
 
 /**
  * A decision: `samples` calls at once to the Messages API, each showing the questions its own way;
