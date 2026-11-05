@@ -13,15 +13,14 @@ import { controlEffort, startEffort } from './effort'
 import { closeEffortPicker } from './effort-picker'
 import { noteBashOutcome, predictBashFailure } from './likely/bash-fail'
 import { answerLikelyCommand, registerLikelyCommand } from './likely/command'
-import { configureLikely, refreshLikelyStatus, startLikely } from './likely/likely'
+import { configureLikely, startLikely } from './likely/likely'
 import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
 import { layoutOption, showSidebar, startSidebar } from './sidebar'
-import { gitWatchPaths, markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
+import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
-import { serveTodoTool, startTodos, startTodoTurn, refreshTodos } from './todo'
-import { isStoreFile, storeWatchPaths } from './store-file'
+import { serveTodoTool, startTodos, startTodoTurn } from './todo'
 import { showToolLines } from './tool-lines'
 
 // The validator reads state sources per file, so each file that reads `turns` declares it.
@@ -107,28 +106,23 @@ export const register: Register = (on, options) => {
     return done
   }).catch(($, e, next) => next(e))
 
-  // The classic SessionStart hands the transcript's path (the session's name is read from it) and
-  // takes the files the engine is to watch: git's own, so a commit made anywhere asks for git; and
-  // the plugin's store, so another session's to-dos show at once.
+  // The classic SessionStart hands the transcript's path (the session's name is read from it). It
+  // asks the engine to watch no files: watching git's and the store's cost an idle session about 1.35
+  // seconds of CPU a minute (measured 2026-11-06); a commit made elsewhere and another session's
+  // to-dos show as the next question starts or within the half minute.
   on('classic.SessionStart', async ($, e, next) => {
     noteTranscript(e.transcript_path)
-    const result = await next(e)
-    const paths = [...(await gitWatchPaths($, e.cwd).catch(() => [])), ...(await storeWatchPaths($).catch(() => []))]
-    if (paths.length === 0) return result
-
-    return { ...result, watchPaths: [...(result.watchPaths ?? []), ...paths] }
-  }).catch(($, e, next) => next(e))
-
-  on('classic.FileChanged', async ($, e, next) => {
-    if (e.file_path.includes('.git/')) void requestGitRefresh($).catch(() => undefined)
-    // The store changed (this session's writes too): the to-dos and likely's spend read again, drawn
-    // again only where they differ.
-    if (isStoreFile(e.file_path)) {
-      void refreshTodos($).catch(() => undefined)
-      void refreshLikelyStatus($).catch(() => undefined)
-    }
 
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // After the model changed, however (`/model` typed or picked, `/config`, a fallback): the band and
+  // the sidebar name the new one at once, not at the next half minute.
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    const result = await next(e)
+    await refreshStatus($).catch(() => undefined)
+
+    return result
   }).catch(($, e, next) => next(e))
 
   // The engine's /rename (its alias /name folded in): the sidebar's session line shows the name at once.

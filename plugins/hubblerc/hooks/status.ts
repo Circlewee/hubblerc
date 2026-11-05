@@ -58,8 +58,8 @@ let wakeStatus: (() => void) | null = null
  * The timer wakes every second while something runs (an answer, a call, a subagent) and every
  * fifth second otherwise; a question or a call that starts puts it back to each second at once.
  * Every 30 seconds it reads usage, the model and git again, and the session's name and the to-dos
- * while the sidebar shows. Git is read besides when a call that may change files ends, as a
- * question goes out, and when `.git` changes (`gitWatchPaths`).
+ * while the sidebar shows. Git is read besides when a call that may change files ends and as a
+ * question goes out.
  */
 export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
@@ -273,18 +273,6 @@ export async function requestGitRefresh($: EngineInterface): Promise<void> {
       await refreshGit($)
     })().catch(() => undefined)
   })
-}
-
-/**
- * At the classic SessionStart: the files git rewrites on a commit, a checkout or a stage made
- * anywhere (`HEAD`, `index`, the HEAD log), for the engine to watch; its FileChanged then asks for git.
- */
-export async function gitWatchPaths($: EngineInterface, cwd: string): Promise<string[]> {
-  const ran = await $.process.run(['git', 'rev-parse', '--absolute-git-dir'], { cwd, timeoutMs: 3000 })
-  if (ran.exitCode !== 0) return []
-  const dir = ran.stdout.trim()
-
-  return dir === '' ? [] : [`${dir}/HEAD`, `${dir}/index`, `${dir}/logs/HEAD`]
 }
 
 function snapshot(figures: SessionUsage): UsageSnapshot {

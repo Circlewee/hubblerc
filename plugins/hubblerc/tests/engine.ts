@@ -6,6 +6,8 @@ export const NOW = Date.parse('2026-10-25T09:00:00Z')
 
 export type StandIn = {
   clock: MockClock
+  /** The session's model, as `$.session.model()` answers; a test may change it. */
+  modelId: string
   /** The panes open now, as `$.ui.panes()` answers; a test may change them. */
   panes: UiPane[]
   /** How many times the plugin asked for the panes. */
@@ -106,7 +108,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], gitNumstat: '', sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), modelId: 'claude-opus-5-5', panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], gitNumstat: '', sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -114,7 +116,7 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
 
     return { value: { command: e.name } as never }
   })
-  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.model', () => ({ value: standIn.modelId }))
   on('session.cwd', () => ({ value: '/repo/hubblerc' }))
   on('session.id', () => ({ value: standIn.sessionId }))
   on('session.root', () => ({ value: standIn.root }))
@@ -230,7 +232,6 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     }
     if (e.argv[0] === '/bin/sh' && e.argv.some(arg => arg.includes('Ultracode (on|off)'))) return ok(standIn.ultracodeRow === '' ? '' : `${standIn.ultracodeRow}\n`)
     if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('projects')) return ok(`/home/me/.claude/projects/-repo-hubblerc/${standIn.sessionId}.jsonl\n`)
-    if (e.argv.includes('--absolute-git-dir')) return ok('/repo/hubblerc/.git\n')
     if (e.argv[0] === '/usr/sbin/sysctl') return ok('Apple M3 Pro\n19327352832\n')
     // 13.7 GiB in use (app, wired, compressed); 256 GB left on the disk.
     if (e.argv[0] === '/usr/bin/vm_stat') return ok('Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     6279.\nPages wired down:                             198111.\nPages purgeable:                               15550.\nAnonymous pages:                              392549.\nPages stored in compressor:                   625561.\nPages occupied by compressor:                 323642.\n')

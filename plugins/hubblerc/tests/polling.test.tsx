@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { standInForEngine, start } from './engine'
 
 const SIDEBAR = { id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true }
+const BAND_PROPS = { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 160, scroll: { offset: 0, bodyRows: 6 }, view: {} }
 const statusRuns = (ran: string[][]) => ran.filter(argv => argv[0] === 'git' && argv.includes('status')).length
 const count = (ran: string[][], program: string) => ran.filter(argv => argv[0] === program).length
 
@@ -108,21 +109,35 @@ test('a call that may change files reads git after it, a script run through Bash
   expect(statusRuns(standIn.ran)).toBe(from + 2)
 })
 
-test("the engine is asked to watch git's own files, and a change in them reads git", async ($, on) => {
+test('the engine is asked to watch no files; a commit made elsewhere shows as the next question starts', async ($, on) => {
   const standIn = standInForEngine(on)
-  // The engine beneath: no settings hook of its own answers either event.
+  // The engine beneath: no settings hook of its own answers.
   on('classic.SessionStart', () => ({}))
-  on('classic.FileChanged', () => ({}))
   await start($)
 
   const started = await $.classic.SessionStart({ source: 'startup', cwd: '/repo/hubblerc', transcript_path: '/home/me/.claude/projects/x/session-1.jsonl' } as never)
-  expect((started as { watchPaths?: string[] }).watchPaths).toEqual(['/repo/hubblerc/.git/HEAD', '/repo/hubblerc/.git/index', '/repo/hubblerc/.git/logs/HEAD'])
+  expect((started as { watchPaths?: string[] }).watchPaths).toBeUndefined()
 
   await standIn.clock.advance(3000)
   const from = statusRuns(standIn.ran)
-  await $.classic.FileChanged({ file_path: '/repo/hubblerc/.git/index', event: 'change' } as never)
-  await standIn.clock.advance(100)
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await standIn.clock.settle()
   expect(statusRuns(standIn.ran)).toBe(from + 1)
+})
+
+test('after the model changed, the band names the new one at once, not at the next half minute', async ($, on) => {
+  const standIn = standInForEngine(on)
+  on('classic.PostModelSwitch', () => ({}))
+  await start($)
+
+  const band = await $.ui.mount({ plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band', surface: 'terminal', props: BAND_PROPS })
+  expect((await band.find({ type: 'Text', text: /Opus/ }))?.text).toContain('Opus')
+  standIn.modelId = 'claude-sonnet-5-5'
+  await $.classic.PostModelSwitch({ from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5', requested_model: 'sonnet', source: 'picker' } as never)
+  await standIn.clock.settle()
+  expect(await band.find({ type: 'Text', text: /Opus/ })).toBeUndefined()
+  expect((await band.find({ type: 'Text', text: /Sonnet/ }))?.text).toContain('Sonnet')
+  await band.unmount()
 })
 
 test("memory, disk and the session's name are read again only while the sidebar shows", async ($, on) => {

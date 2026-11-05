@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -28,7 +28,6 @@ import {
   trashListText,
 } from '../hooks/todo-format'
 import { shareRows } from '../hooks/sidebar-format'
-import { pluginId, sha256Hex, storeFileName } from '../hooks/store-file'
 import type { TodoRecord, UserTodo } from '../hooks/todo-format'
 import { cellWidth } from '../hooks/band-format'
 import { NOW, standInForEngine, start } from './engine'
@@ -718,56 +717,22 @@ test('a press on an item\'s text edits it below: Enter saves, empty cancels, the
   await ui.unmount()
 })
 
-// ── The store watched ─────────────────────────────────────────────
+// ── Another session's change ──────────────────────────────────────
 
-test('SHA-256 as the engine names a plugin\'s store file by its id', () => {
-  expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
-  expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
-  expect(sha256Hex('a'.repeat(1000))).toBe('41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3')
-  // The files on the Mac it was found on (2026-11-04).
-  expect(storeFileName('hubblerc@inline')).toBe('hubblerc_inline-c039cadca8b5.json')
-  expect(storeFileName('hubblerc@hubblerc')).toBe('hubblerc_hubblerc-3be9b6e2c135.json')
-  expect(pluginId('hubblerc', '/Users/me/.claude/plugins/cache/hubblerc/hubblerc/0.10.0')).toBe('hubblerc@hubblerc')
-  expect(pluginId('hubblerc', '/Users/me/vault/project/hubblerc/plugins/hubblerc')).toBe('hubblerc@inline')
-})
-
-test('the store file is watched; another session\'s change to it shows at once, no answer needed', async ($, on) => {
+test("another session's change to the to-dos shows as the next question starts, no file watched", async ($, on) => {
   const standIn = standInForEngine(on)
   const stored = memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
-  mock.env(on, { HOME: '/home/me' })
-  const file = '/home/me/.claude/plugins/store/hubblerc_inline-c039cadca8b5.json'
-  standIn.existing.push(file)
-  on('classic.SessionStart', () => ({}))
-  on('classic.FileChanged', () => ({}))
   await start($)
-
-  const started = await $.classic.SessionStart({ source: 'startup', cwd: '/repo/hubblerc', transcript_path: '/home/me/.claude/projects/x/session-1.jsonl' } as never)
-  expect((started as { watchPaths?: string[] }).watchPaths).toEqual(['/repo/hubblerc/.git/HEAD', '/repo/hubblerc/.git/index', '/repo/hubblerc/.git/logs/HEAD', file])
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 1')
   stored[KEY] = { items: [item(1, 'pending'), item(2, 'pending')], nextId: 3 }
-  // Another file changing reads nothing.
-  await $.classic.FileChanged({ file_path: '/home/me/other.json', event: 'change' } as never)
   await standIn.clock.settle()
   expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 1')
-  await $.classic.FileChanged({ file_path: file, event: 'change' } as never)
+  await $.turn.start({ text: '다음 질문', turnId: 't1' })
   await standIn.clock.settle()
   expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 2')
   await ui.unmount()
-})
-
-test('where the named store file is not there, the plugin\'s files in the store folder are watched', async ($, on) => {
-  standInForEngine(on)
-  memoryStore(on, {})
-  mock.env(on, { HOME: '/home/me' })
-  on('fs.list', (_, e) => ({
-    value: ['hubblerc_local-0123456789ab.json', 'other_market-0123456789ab.json', 'hubblerc_notes.txt'].map(name => ({ name, kind: 'file' as const, size: 2, mtimeMs: 0, isLink: false })),
-  }))
-  on('classic.SessionStart', () => ({}))
-  await start($)
-  const started = await $.classic.SessionStart({ source: 'startup', cwd: '/repo/hubblerc', transcript_path: '/home/me/.claude/projects/x/session-1.jsonl' } as never)
-  expect((started as { watchPaths?: string[] }).watchPaths?.slice(3)).toEqual(['/home/me/.claude/plugins/store/hubblerc_local-0123456789ab.json'])
 })
 
 // ── The keyboard to the edit field in one press ───────────────────
