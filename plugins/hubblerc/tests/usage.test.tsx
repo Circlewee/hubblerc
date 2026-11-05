@@ -23,6 +23,7 @@ const PANE_PROPS = {
   view: {},
 }
 const MAIN_SCREEN = { columns: 200, rows: 50, isFullscreen: false }
+const COMMAND = { args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }
 const MIN = 60_000
 
 /** Stands for the API: each request answers with this many output tokens. */
@@ -125,6 +126,39 @@ test('the band and the sidebar tell when the last request went out, its input wi
   expect((await pane.find({ type: 'Text', text: /마지막 요청/ }))?.text).toBe(`마지막 요청 ${time}`)
   expect((await pane.find({ type: 'Text', text: /^캐시/ }))?.text).toBe('캐시 0%')
   expect((await pane.find({ type: 'Text', text: /⚠/ }))?.text).toBe(' ⚠ 33m 뒤 소진')
+  await pane.unmount()
+})
+
+test('/effort-log keeps the last twenty requests; the band and the sidebar draw the last one', async ($, on) => {
+  standInForEngine(on)
+  // Each request's output tells it apart: the first gives 1, the twenty-fifth 25.
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses: [],
+      stopReason: 'end_turn' as const,
+      usage: { model: 'claude-opus-5-5', input_tokens: 10, output_tokens: e.index + 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    }
+  })
+  drawBeneath(on)
+  await start($)
+
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await requests($, 't1', 25)
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 5000 })
+
+  const log = ((await $.command.run({ command: 'effort-log', ...COMMAND })).text ?? '').split('\n')
+  expect(log[0]).toBe('요청별 effort (전체 20개 중 최근 20개)')
+  // The first five went: the table starts at the sixth request.
+  expect(log[2]?.startsWith('#1        5  ')).toBe(true)
+
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal', props: BAND_PROPS, viewport: MAIN_SCREEN })
+  expect((await band.find({ type: 'Text', text: /^\) · 출력/ }))?.text).toBe(') · 출력 25')
+  await band.unmount()
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await pane.find({ type: 'Text', text: /^\) · 출력/ }))?.text).toBe(') · 출력 25')
   await pane.unmount()
 })
 

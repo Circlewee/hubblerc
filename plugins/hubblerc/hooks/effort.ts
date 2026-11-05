@@ -8,12 +8,23 @@ import { addTokens } from './forecast'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
-const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
+const lastRequest = atom({ plugin: 'hubblerc', key: 'lastRequest' } as const, null)
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
 const streamPhase = atom({ plugin: 'hubblerc', key: 'streamPhase' } as const, null)
 
-const MAX_SAMPLES = 300
+/** How many requests `/effort-log` keeps. */
+const MAX_SAMPLES = 20
+/**
+ * The session's last main-loop requests, oldest first: what `/effort-log` shows. Module state, so
+ * the band and the sidebar, which draw only the last (`lastRequest`), read no list; a reload empties it.
+ */
+let samples: EffortSample[] = []
+
+/** The requests `/effort-log` shows, oldest first. */
+export function effortSamples(): readonly EffortSample[] {
+  return samples
+}
 
 /**
  * Sends this session's main-loop requests with the effort the slider chose, else auto's pick for
@@ -93,13 +104,18 @@ async function logRequest($: EngineInterface, sent: Pick<EffortSample, 'turnId' 
     cacheWrite: usage.cache_creation_input_tokens,
     output: usage.output_tokens,
   }
-  await update($, effortLog, log => [...log, sample].slice(-MAX_SAMPLES))
+  samples = [...samples, sample].slice(-MAX_SAMPLES)
+  await update($, lastRequest, () => sample)
   const request = { input: sample.input, cacheRead: sample.cacheRead, cacheWrite: sample.cacheWrite, output: sample.output }
   await update($, turns, list => list.map(turn => (turn.id === sent.turnId ? { ...turn, tokens: addTokens(turn.tokens, request) } : turn)))
 }
 
-/** At session.start: before the first request, the engine's effort is what settings say for the model. */
+/**
+ * At session.start: the request log starts empty; before the first request, the engine's effort is
+ * what settings say for the model.
+ */
 export async function startEffort($: EngineInterface): Promise<void> {
+  samples = []
   const [modelId, level, perModel] = await Promise.all([
     $.session.model(),
     $.settings.read({ key: 'effortLevel' }),

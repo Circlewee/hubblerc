@@ -212,8 +212,8 @@ declare module 'claude-code' {
       autoPick: AutoPick | null
       /** The sidebar contents' page, 0 the newest answers. */
       tocPage: number
-      /** The session's last main-loop requests, oldest first: what `/effort-log` shows. */
-      effortLog: EffortSample[]
+      /** The last main-loop request's effort and tokens: all the band and the sidebar draw of the requests. */
+      lastRequest: EffortSample | null
       /** The 5-hour window's readings of the last two hours, oldest first, one per change. */
       fiveHourLog: FiveHourPoint[]
       /** When the last main-loop request came back: how long the prompt cache has sat. */

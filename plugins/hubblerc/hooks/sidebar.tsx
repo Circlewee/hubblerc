@@ -43,7 +43,7 @@ const catPicture = atom({ plugin: 'hubblerc', key: 'catPicture' } as const, 'unk
 const catImageCount = atom({ plugin: 'hubblerc', key: 'catImageCount' } as const, 0)
 const streamPhase = atom({ plugin: 'hubblerc', key: 'streamPhase' } as const, null)
 const restartPending = atom({ plugin: 'hubblerc', key: 'restartPending' } as const, false)
-const effortLog = atom({ plugin: 'hubblerc', key: 'effortLog' } as const, [])
+const lastRequest = atom({ plugin: 'hubblerc', key: 'lastRequest' } as const, null)
 const sessionId = atom({ plugin: 'hubblerc', key: 'sessionId' } as const, '')
 const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, null)
 const sidebarTab = atom({ plugin: 'hubblerc', key: 'sidebarTab' } as const, 'contents')
@@ -307,7 +307,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequest, foldedIds, isFilesExpanded, deviceInfo, phase, isRestartPending, requestLog, id, name] =
+    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequestTime, foldedIds, isFilesExpanded, deviceInfo, phase, isRestartPending, lastSample, id, name] =
       await Promise.all([
         read($, turns),
         read($, running),
@@ -329,7 +329,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         read($, device),
         read($, streamPhase),
         read($, restartPending),
-        read($, effortLog),
+        read($, lastRequest),
         read($, sessionId),
         read($, sessionName),
       ])
@@ -369,7 +369,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     )
     const isWorking = turnList.at(-1)?.durationMs === null
     // When the last request went out and what it carried, the cache's share of its input; mid-answer too.
-    const request = requestSegments(requestTime(lastRequest), requestLog.at(-1), THEME_COLORS)
+    const request = requestSegments(requestTime(lastRequestTime), lastSample, THEME_COLORS)
     const activity = activityParts(runningList, agentList, todoList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
     const all = tocEntries(turnList, now)
