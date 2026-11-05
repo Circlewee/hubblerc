@@ -270,10 +270,9 @@ export function describeRun(e: CallInput, ran: ToolCallResult, ms: number): Tool
   const path = text(args.file_path) ?? text(args.notebook_path)
   if (path !== undefined) run.path = path
 
+  // Bash: what the command is for, not the command; its exact text stays in the transcript.
   if (run.tool === 'Bash') {
-    const command = text(args.command)
     const description = text(args.description)
-    if (command !== undefined) run.command = command.slice(0, 400)
     if (description !== undefined) run.description = description.slice(0, 200)
   }
 

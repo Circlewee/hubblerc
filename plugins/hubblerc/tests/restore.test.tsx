@@ -94,6 +94,10 @@ test('a transcript reads back as its answers, titled by what each answered', () 
   expect(list.every(turn => turn.restored === true)).toBe(true)
   expect(list[1]?.agents).toEqual(['ag-9'])
   expect(list[1]?.runs[0]).toMatchObject({ tool: 'Agent', description: '호출부 찾기', agentType: 'Explore', spawned: 'ag-9' })
+  // A Bash run keeps what the command was for, not its text: the transcript has that.
+  const bash = list[0]?.runs.find(run => run.tool === 'Bash')
+  expect(bash?.description).toBe('테스트 실행')
+  expect(bash !== undefined && 'command' in bash).toBe(false)
   // The key a question's row is found by: what a UserMessage row shows for it.
   expect(list.map(turn => turn.promptKey)).toEqual([
     '인증 버그 고쳐줘',

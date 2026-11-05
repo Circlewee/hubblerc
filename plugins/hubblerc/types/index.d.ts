@@ -11,9 +11,8 @@ export type ToolRun = {
   isError: boolean
   /** The file the call read or changed. */
   path?: string
-  /** Bash: what the model said the command is for, and the command. Agent: the task it was given. */
+  /** Bash: what the model said the command is for (not the command). Agent: the task it was given. */
   description?: string
-  command?: string
   /** Grep and Glob: the pattern. WebSearch: the query. */
   pattern?: string
   /** Agent: the kind of subagent and the id of the one it started. */
