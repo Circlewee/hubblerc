@@ -20,7 +20,6 @@ import { statusLine } from './likely/cost'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
-const todos = atom({ plugin: 'hubblerc', key: 'todos' } as const, [])
 const agents = atom({ plugin: 'hubblerc', key: 'agents' } as const, [])
 const usage = atom({ plugin: 'hubblerc', key: 'usage' } as const, null)
 const git = atom({ plugin: 'hubblerc', key: 'git' } as const, null)
@@ -310,11 +309,10 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         })
     }
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequestTime, foldedIds, isFilesExpanded, deviceInfo, phase, isRestartPending, lastSample, id, name] =
+    const [turnList, runningList, agentList, figures, gitInfo, projectName, modelId, override, engine, auto, pick, pageIndex, log, lastRequestTime, foldedIds, isFilesExpanded, deviceInfo, phase, isRestartPending, lastSample, id, name] =
       await Promise.all([
         read($, turns),
         read($, running),
-        read($, todos),
         read($, agents),
         read($, usage),
         read($, git),
@@ -373,7 +371,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const isWorking = turnList.at(-1)?.durationMs === null
     // When the last request went out and what it carried, the cache's share of its input; mid-answer too.
     const request = requestSegments(requestTime(lastRequestTime), lastSample, THEME_COLORS)
-    const activity = activityParts(runningList, agentList, todoList, isWorking, now)
+    const activity = activityParts(runningList, agentList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
     const all = tocEntries(turnList, now)
 

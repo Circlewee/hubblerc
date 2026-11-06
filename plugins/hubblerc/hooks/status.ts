@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, SessionUsage, Timer, ToolCallResult } from 'claude-code'
 
 import type { AgentSeen, RunningCall, UsageSnapshot } from '../types'
-import { applyTaskUpdate, parseGitStatus, todosFromTodoWrite } from './band-format'
+import { parseGitStatus } from './band-format'
 import { bashPurpose } from './bash-purpose'
 import { addFiveHourPoint } from './forecast'
 import { isSidebarShown } from './pane'
@@ -10,7 +10,6 @@ import { refreshTodos } from './todo'
 import { refreshLikelyStatus } from './likely/likely'
 
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
-const todos = atom({ plugin: 'hubblerc', key: 'todos' } as const, [])
 const agents = atom({ plugin: 'hubblerc', key: 'agents' } as const, [])
 const agentStarts = atom({ plugin: 'hubblerc', key: 'agentStarts' } as const, {})
 const usage = atom({ plugin: 'hubblerc', key: 'usage' } as const, null)
@@ -154,23 +153,6 @@ export async function noteCall($: EngineInterface, e: CallInput, ran: ToolCallRe
 }
 
 async function afterCall($: EngineInterface, tool: string, e: CallInput, ran: ToolCallResult, startedAt: number): Promise<void> {
-  const args = e as unknown as Record<string, unknown>
-
-  if (e.agentId === undefined) {
-    if (tool === 'TodoWrite') {
-      await update($, todos, () => todosFromTodoWrite(args.todos))
-    } else if (tool === 'TaskCreate') {
-      const taskId = taskIdOf(ran.result)
-      const subject = typeof args.subject === 'string' ? args.subject : ''
-      const activeForm = typeof args.activeForm === 'string' ? { activeForm: args.activeForm } : {}
-      if (taskId !== undefined) {
-        await update($, todos, list => [...list, { id: taskId, subject, status: 'pending' as const, ...activeForm }])
-      }
-    } else if (tool === 'TaskUpdate') {
-      await update($, todos, list => applyTaskUpdate(list, args))
-    }
-  }
-
   if (tool === 'Agent') {
     const agentId = isRecord(ran.result) && typeof ran.result.agentId === 'string' ? ran.result.agentId : undefined
     if (agentId !== undefined) {
@@ -458,12 +440,6 @@ function callLabel(tool: string, e: CallInput): string {
     default:
       return ''
   }
-}
-
-function taskIdOf(result: unknown): string | undefined {
-  if (!isRecord(result) || !isRecord(result.task)) return undefined
-
-  return typeof result.task.id === 'string' ? result.task.id : undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -98,14 +98,6 @@ export type RunningCall = {
   agentId?: string
 }
 
-/** A todo of the main loop, from TodoWrite or TaskCreate/TaskUpdate. */
-export type TodoItem = {
-  id: string
-  subject: string
-  activeForm?: string
-  status: 'pending' | 'in_progress' | 'completed'
-}
-
 /** A subagent as `$.agent.list()` last reported it, with when it started when known. */
 export type AgentSeen = {
   id: string
@@ -187,7 +179,6 @@ declare module 'claude-code' {
       /** The session the turns belong to: another one (a resume, /clear) rebuilds them. */
       sessionId: string
       running: RunningCall[]
-      todos: TodoItem[]
       agents: AgentSeen[]
       /** When each subagent this session started was started, by agent id. */
       agentStarts: Record<string, number>

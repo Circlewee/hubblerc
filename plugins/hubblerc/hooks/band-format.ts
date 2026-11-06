@@ -1,4 +1,4 @@
-import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TodoItem, TokenTotals, TurnRecord, UsageSnapshot } from '../types'
+import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TokenTotals, TurnRecord, UsageSnapshot } from '../types'
 
 import { cacheShare, tokenCount } from './forecast'
 
@@ -417,11 +417,13 @@ function segmentsWidth(segments: readonly Segment[]): number {
 
 const MAX_AGENTS_SHOWN = 2
 
-/** Line 2: what runs now (main-loop tools, subagents) and the todo in progress. */
+/**
+ * Line 2: what runs now (main-loop tools, subagents). Claude's own to-do progress (`▸ … 2/5`) went
+ * 2026-11-06.
+ */
 export function activityParts(
   running: readonly RunningCall[],
   agents: readonly AgentSeen[],
-  todos: readonly TodoItem[],
   isWorking: boolean,
   now: number,
 ): string[] {
@@ -442,22 +444,9 @@ export function activityParts(
   }
   if (live.length > MAX_AGENTS_SHOWN) parts.push(`에이전트 +${live.length - MAX_AGENTS_SHOWN}`)
 
-  const todo = todoProgress(todos)
-  if (todo !== '') parts.push(todo)
-
   if (parts.length === 0) parts.push(isWorking ? '◐ 응답 중' : '· 대기 중')
 
   return parts
-}
-
-/** `▸ 인증 버그 수정 2/5`: the todo in progress and how many are done; '' with no todos. */
-export function todoProgress(todos: readonly TodoItem[]): string {
-  if (todos.length === 0) return ''
-  const done = todos.filter(todo => todo.status === 'completed').length
-  const current = todos.find(todo => todo.status === 'in_progress')
-  if (current === undefined) return `▸ 할 일 ${done}/${todos.length}`
-
-  return `▸ ${current.activeForm ?? current.subject} ${done}/${todos.length}`
 }
 
 /**
@@ -529,39 +518,4 @@ function changedPath(line: string): string {
   const renamed = path.split(' -> ')
 
   return (renamed[renamed.length - 1] ?? path).replace(/^"(.*)"$/, '$1')
-}
-
-/** TodoWrite's whole list, as the band keeps it. */
-export function todosFromTodoWrite(value: unknown): TodoItem[] {
-  if (!Array.isArray(value)) return []
-
-  return value.flatMap((item: unknown, i): TodoItem[] => {
-    if (typeof item !== 'object' || item === null) return []
-    const { content, activeForm, status } = item as Record<string, unknown>
-    if (typeof content !== 'string' || !isTodoStatus(status)) return []
-
-    return [{ id: `todo-${i}`, subject: content, status, ...(typeof activeForm === 'string' ? { activeForm } : {}) }]
-  })
-}
-
-/** The list after one TaskUpdate: its fields applied, or the task removed when deleted. */
-export function applyTaskUpdate(list: readonly TodoItem[], update: Record<string, unknown>): TodoItem[] {
-  const { taskId, status, subject, activeForm } = update
-  if (typeof taskId !== 'string') return [...list]
-  if (status === 'deleted') return list.filter(todo => todo.id !== taskId)
-
-  return list.map(todo =>
-    todo.id !== taskId
-      ? todo
-      : {
-          ...todo,
-          ...(isTodoStatus(status) ? { status } : {}),
-          ...(typeof subject === 'string' ? { subject } : {}),
-          ...(typeof activeForm === 'string' ? { activeForm } : {}),
-        },
-  )
-}
-
-function isTodoStatus(value: unknown): value is TodoItem['status'] {
-  return value === 'pending' || value === 'in_progress' || value === 'completed'
 }

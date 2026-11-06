@@ -135,7 +135,7 @@ test('the slider closes by itself after a while, and when the next turn starts',
   await ui.unmount()
 })
 
-test('line 2 shows a running subagent and the todo in progress; line 3 the last answer', async ($, on) => {
+test('line 2 shows a running subagent, and none of Claude\'s own to-do progress; line 3 the last answer', async ($, on) => {
   standInForEngine(on, { agents: [{ id: 'ag-1', type: 'general-purpose', description: '코드 찾기', status: 'running' }] })
   await start($)
 
@@ -153,7 +153,8 @@ test('line 2 shows a running subagent and the todo in progress; line 3 the last 
   await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 5000 })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND_PROPS, isWorking: true } })
-  expect((await ui.find({ type: 'Text', text: /◐/ }))?.text).toBe('◐ general-purpose: 코드 찾기 0s │ ▸ 인증 버그 수정 중 1/3')
+  expect((await ui.find({ type: 'Text', text: /◐/ }))?.text).toBe('◐ general-purpose: 코드 찾기 0s')
+  expect(await ui.find({ type: 'Text', text: /▸/ })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /직전/ }))?.text).toBe('직전 5s · Agent 1 · Read 1 · TodoWrite 1')
   await ui.unmount()
 })

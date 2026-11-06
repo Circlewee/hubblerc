@@ -12,7 +12,6 @@ import type { Layout } from './sidebar'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
-const todos = atom({ plugin: 'hubblerc', key: 'todos' } as const, [])
 const agents = atom({ plugin: 'hubblerc', key: 'agents' } as const, [])
 const usage = atom({ plugin: 'hubblerc', key: 'usage' } as const, null)
 const git = atom({ plugin: 'hubblerc', key: 'git' } as const, null)
@@ -34,7 +33,7 @@ const LEVEL_LABELS: Record<EffortLevel, string> = { low: 'low', medium: 'med', h
 /**
  * The three lines above the prompt, in place of the claude-hud status line:
  * 1. model · effort │ context │ 5h and 7d limits (a burn-out chip when 5h runs out soon) │ project branch
- * 2. what runs now, or the todo in progress, or that it waits
+ * 2. what runs now, or that it waits
  * 3. the last answer's summary and, while idle, how long since the last request; or the effort slider while it is open
  *
  * Colors only where something needs attention, by the terminal's own color names.
@@ -44,11 +43,10 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
     const isSidebarUp = await syncSidebar($, layout, e.viewport).catch(() => false)
     if (e.props.hasSurvey) return next(e)
 
-    const [turnList, runningList, todoList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt, auto, pick, log, lastRequestTime, lastSample] =
+    const [turnList, runningList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt, auto, pick, log, lastRequestTime, lastSample] =
       await Promise.all([
         read($, turns),
         read($, running),
-        read($, todos),
         read($, agents),
         read($, usage),
         read($, git),
@@ -75,7 +73,7 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
       { model: modelId, effort, isOverridden: override !== null, isAuto, isUltracode, usage: figures, project: projectName, git: gitInfo, now, burnout },
       e.props.bodyColumns,
     )
-    const line2 = activityParts(runningList, agentList, todoList, e.props.isWorking, now).join(SEPARATOR)
+    const line2 = activityParts(runningList, agentList, e.props.isWorking, now).join(SEPARATOR)
     const isIdle = runningList.length === 0 && line2.startsWith('·')
     // When the last request went out and what it carried, the cache's share of its input; mid-answer too.
     const request = requestSegments(requestTime(lastRequestTime), lastSample)

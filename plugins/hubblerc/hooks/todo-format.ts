@@ -3,7 +3,7 @@ import { cellWidth } from './band-format'
 /**
  * The person's own to-dos (`/todo`, the sidebar's "할 일" tab, the model's `user_todos` tool): a
  * note and a queue, kept per project and per machine in `$.store`. Not Claude's own task list
- * (TodoWrite, TaskCreate: the `todos` state and the activity box's `▸ … 2/5`).
+ * (TodoWrite, TaskCreate), which hubblerc no longer follows (2026-11-06).
  */
 export type UserTodoStatus = 'pending' | 'in_progress' | 'done' | 'on_hold'
 

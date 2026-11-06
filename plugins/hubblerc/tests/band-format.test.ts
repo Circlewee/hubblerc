@@ -2,7 +2,6 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   activityParts,
-  applyTaskUpdate,
   cellWidth,
   countdown,
   elapsed,
@@ -11,8 +10,6 @@ import {
   parseGitStatus,
   partsWidth,
   statusParts,
-  todoProgress,
-  todosFromTodoWrite,
   isListed,
   levelStep,
   requestSegments,
@@ -110,19 +107,9 @@ test('line 2 names what runs, the subagents and the todo, or says it waits', () 
     { id: 'ag-1', type: 'Explore', description: '인증 코드 찾기', status: 'running', startedAt: NOW - 135_000 },
     { id: 'ag-2', type: 'Explore', description: '끝난 일', status: 'completed' },
   ]
-  const todos = [
-    { id: '1', subject: '원인 찾기', status: 'completed' as const },
-    { id: '2', subject: '수정', activeForm: '수정 중', status: 'in_progress' as const },
-  ]
-
-  expect(activityParts(running, agents, todos, true, NOW)).toEqual([
-    '◐ Bash 테스트 실행 12s +1',
-    '◐ Explore: 인증 코드 찾기 2m15s',
-    '▸ 수정 중 1/2',
-  ])
-  expect(activityParts([], [], [], true, NOW)).toEqual(['◐ 응답 중'])
-  expect(activityParts([], [], [], false, NOW)).toEqual(['· 대기 중'])
-  expect(todoProgress([{ id: '1', subject: 'a', status: 'pending' }])).toBe('▸ 할 일 0/1')
+  expect(activityParts(running, agents, true, NOW)).toEqual(['◐ Bash 테스트 실행 12s +1', '◐ Explore: 인증 코드 찾기 2m15s'])
+  expect(activityParts([], [], true, NOW)).toEqual(['◐ 응답 중'])
+  expect(activityParts([], [], false, NOW)).toEqual(['· 대기 중'])
 })
 
 test('git status reads as a branch and whether the tree has changes', () => {
@@ -151,27 +138,6 @@ test('untracked and ignored come apart, a folder whole as dir/; ignored alone is
   expect(isListed(['/r/drafts/', '/r/top.md'], '/r/drafts/notes/x.md')).toBe(true)
   expect(isListed(['/r/drafts/'], '/r/drafts.md')).toBe(false)
   expect(isListed(undefined, '/r/a.ts')).toBe(false)
-})
-
-test('todos follow TodoWrite whole and TaskUpdate one by one', () => {
-  expect(
-    todosFromTodoWrite([
-      { content: 'a', activeForm: 'doing a', status: 'in_progress' },
-      { content: 'b', status: 'bogus' },
-    ]),
-  ).toEqual([{ id: 'todo-0', subject: 'a', status: 'in_progress', activeForm: 'doing a' }])
-
-  const list = [
-    { id: '1', subject: 'a', status: 'pending' as const },
-    { id: '2', subject: 'b', status: 'pending' as const },
-  ]
-  expect(applyTaskUpdate(list, { taskId: '1', status: 'in_progress', activeForm: 'doing a' })[0]).toEqual({
-    id: '1',
-    subject: 'a',
-    status: 'in_progress',
-    activeForm: 'doing a',
-  })
-  expect(applyTaskUpdate(list, { taskId: '2', status: 'deleted' })).toEqual([list[0]])
 })
 
 test("line 3 is the last completed answer, and the engine's effort comes from the model's settings", () => {
