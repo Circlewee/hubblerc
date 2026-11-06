@@ -149,10 +149,8 @@ export async function startSidebar($: EngineInterface, layout: Layout): Promise<
   // Each second till the terminal has said whether it draws the cat's picture.
   probeTimer = null
   startProbe($)
-  // A picture that stands still is sent again now and then: the terminal can lose one it drew.
-  $.clock.every(REFRESH_MS, () => {
-    void refreshPicture($).catch(() => undefined)
-  })
+  sentPicture = null
+  sentAt = Number.NEGATIVE_INFINITY
   if (layout !== 'band') return
   if ((await $.ui.panes()).some(open => open.id === SIDEBAR_ID)) await $.ui.close({ id: SIDEBAR_ID })
 }
@@ -214,20 +212,24 @@ async function probePicture($: EngineInterface): Promise<boolean> {
   if (drawn === null) return false
   const result = await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn }).catch((error: unknown) => ({ deny: String(error) }))
   if (result.deny !== undefined && !NO_PICTURE.test(result.deny)) return false
+  if (result.deny === undefined) {
+    sentPicture = drawn.source.png
+    sentAt = await $.clock.now()
+  }
   await update($, catPicture, () => (result.deny === undefined ? 'shown' : 'blocked'))
 
   return true
 }
 
 const PROBE_MS = 1000
-/** Seconds the probe waits for a drawn picture before it stops; the refresh tick starts it again on one. */
+/** Seconds the probe waits for a drawn picture before it stops; the sidebar's next drawing starts it again. */
 const PROBE_IDLE_TICKS = 10
 let probeTimer: Timer | null = null
 
 /**
  * Asks each second whether the terminal draws the picture, till it has said. With no picture drawn
  * for ten seconds (a band layout, a closed sidebar) it stops rather than wake each second all
- * session; the refresh tick starts it again once a picture is drawn.
+ * session; the sidebar's next drawing of a picture starts it again while that is not known.
  */
 function startProbe($: EngineInterface): void {
   if (probeTimer !== null) return
@@ -248,42 +250,44 @@ function startProbe($: EngineInterface): void {
 }
 
 /**
- * How long a picture stands unchanged before it is sent again. Orca drops a picture while its tab is
- * hidden behind another: back on the tab, the cat is blank till this sends it again. Every second
- * cost no more than every two (measured, docs/spec.md); two keeps idle wake-ups fewer.
+ * How long after the picture was last sent a sign of the person back sends it again: keys typed
+ * one after another send it once.
  */
-const REFRESH_MS = 2000
-/** The picture the last refresh tick saw: one seen again unchanged has stood a whole tick. */
-let lastSeenPicture: string | null = null
+const RESEND_GAP_MS = 10_000
+/** The picture last sent to the terminal (a new frame drawn, or a blit) and when. */
+let sentPicture: string | null = null
+let sentAt = Number.NEGATIVE_INFINITY
+/** A resend under way: the keys typed meanwhile start none. */
+let isResending = false
 
 /**
- * Sends the cat's picture again when it has not changed for a tick and the sidebar shows. A
- * drawing with an unchanged source sends nothing, so an idle cat is never sent again; a terminal
- * that lost it (Orca, back from another tab) shows nothing till it changes. A blit
- * always sends. While the cat moves, each new frame is sent anyway and this does nothing.
- * Once the sidebar is closed or hidden the picture is forgotten, so the ticks after it end at once
- * instead of asking for the panes every two seconds; the sidebar's next drawing records it again.
+ * As the person shows they are back (a key in the prompt box, a question; register.tsx): the cat's
+ * picture sent again, if ten seconds have gone since it last was and the sidebar shows. Orca drops
+ * a picture while its tab is hidden behind another, and a drawing with an unchanged source sends
+ * nothing, so an idle cat stays blank till this; a moving cat's new frames are sent anyway. No
+ * timer: a sidebar woken every two seconds to send it cost more than all else idle (2026-11-06).
+ * Once the sidebar is closed or hidden the picture is forgotten, so the keys after it ask nothing;
+ * the sidebar's next drawing records it again.
  */
-async function refreshPicture($: EngineInterface): Promise<void> {
+export async function resendPicture($: EngineInterface): Promise<void> {
   const drawn = drawnPicture
-  const seen = lastSeenPicture
-  lastSeenPicture = drawn?.source.png ?? null
-  if (drawn === null) return
-  const state = await read($, catPicture)
-  // Drawn while the probe had stopped: ask again.
-  if (state === 'unknown') {
-    startProbe($)
+  if (drawn === null || isResending) return
+  isResending = true
+  try {
+    const now = await $.clock.now()
+    if (now - sentAt < RESEND_GAP_MS) return
+    if ((await read($, catPicture)) !== 'shown') return
+    if (!(await isSidebarShown($))) {
+      if (drawnPicture === drawn) drawnPicture = null
 
-    return
+      return
+    }
+    await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn })
+    sentPicture = drawn.source.png
+    sentAt = now
+  } finally {
+    isResending = false
   }
-  if (state !== 'shown' || drawn.source.png !== seen) return
-  if (!(await isSidebarShown($))) {
-    if (drawnPicture === drawn) drawnPicture = null
-    lastSeenPicture = null
-
-    return
-  }
-  await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn })
 }
 
 /**
@@ -481,6 +485,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const picture = Image === undefined || isApp ? null : ownImage !== undefined ? { png: ownImage.png } : pixelPicture(cat.art, CAT_PALETTE)
     const pictureColumns = Math.max(1, Math.round((PICTURE_ROWS * 2 * artSize.width) / Math.max(1, artSize.height)))
     drawnPicture = picture === null ? null : { source: picture, columns: pictureColumns, rows: PICTURE_ROWS }
+    // A new source goes to the terminal with this drawing.
+    if (picture !== null && picture.png !== sentPicture) {
+      sentPicture = picture.png
+      sentAt = now
+    }
+    // Drawn while the probe had stopped (nothing drawn in its first ten seconds): ask again.
+    if (picture !== null && pictureState === 'unknown') startProbe($)
     const catRows = picture === null && !isApp ? pixelRows(cat.art, CAT_PALETTE) : []
     const mark = (
       // Beside the head: z, ?, !; a column of its own, so nothing moves. Over the blocks' empty last

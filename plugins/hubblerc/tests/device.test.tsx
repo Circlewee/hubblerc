@@ -1,4 +1,6 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+import type { On } from 'claude-code'
 
 import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, manifestVersion, newest, parseDf, parseSysctl, parseVmStat, versionNote } from '../hooks/device'
 import { CAT, CAT_PALETTE, catFrame, catMood, pixelRows } from '../hooks/pixel-art'
@@ -99,7 +101,19 @@ test('where the terminal draws the picture\'s alt, the cat goes back to half blo
   await ui.unmount()
 })
 
-test('a picture that stands still is sent again every two seconds while the sidebar shows, and not when it is hidden', async ($, on) => {
+const SHOWN = { id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true }
+type PromptEdit = { origin: { kind: 'composer' }; text: string; cursor: number; start: number; end: number; inputText: string }
+/**
+ * A key typed in the prompt box. The kit raises `prompt.edit` though its `$` types leave it out; the
+ * editor beneath (`typingBeneath`) applies the splice.
+ */
+const typeKey = ($: Engine) =>
+  ($.prompt as unknown as { edit: (e: PromptEdit) => Promise<unknown> }).edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'a' })
+function typingBeneath(on: On): void {
+  on('prompt.edit', (_, e) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+}
+
+test('a picture that stands still is not sent again while nothing happens: no timer wakes for it', async ($, on) => {
   const standIn = standInForEngine(on)
   let blits = 0
   on('ui.blit', () => {
@@ -108,19 +122,48 @@ test('a picture that stands still is sent again every two seconds while the side
     return { value: {} }
   })
   await start($)
-  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
+  standIn.panes.push(SHOWN)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  // The probe at one second; the idle cat seen at two, sent again at four, six, … thirty.
-  await standIn.clock.advance(31_000)
-  expect(blits).toBe(15)
-  standIn.panes = []
-  await standIn.clock.advance(20_000)
-  expect(blits).toBe(15)
+  // The probe's one, at a second; then a minute of nothing.
+  await standIn.clock.advance(61_000)
+  expect(blits).toBe(1)
   await ui.unmount()
 })
 
-test('once the sidebar is closed, the picture tick stops asking for the panes till it is drawn again', async ($, on) => {
+test('a key in the prompt box sends the picture again, at most every ten seconds', async ($, on) => {
+  const standIn = standInForEngine(on)
+  typingBeneath(on)
+  let blits = 0
+  on('ui.blit', () => {
+    blits += 1
+
+    return { value: {} }
+  })
+  await start($)
+  standIn.panes.push(SHOWN)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  // The probe sent it at a second; ten seconds on, a key sends it again.
+  await standIn.clock.advance(11_000)
+  expect(blits).toBe(1)
+  await typeKey($)
+  await standIn.clock.settle()
+  expect(blits).toBe(2)
+  // The keys after it, within ten seconds, send nothing.
+  await standIn.clock.advance(5_000)
+  await typeKey($)
+  await typeKey($)
+  await standIn.clock.settle()
+  expect(blits).toBe(2)
+  await standIn.clock.advance(5_000)
+  await typeKey($)
+  await standIn.clock.settle()
+  expect(blits).toBe(3)
+  await ui.unmount()
+})
+
+test('a question that starts sends the picture again', async ($, on) => {
   const standIn = standInForEngine(on)
   let blits = 0
   on('ui.blit', () => {
@@ -129,29 +172,56 @@ test('once the sidebar is closed, the picture tick stops asking for the panes ti
     return { value: {} }
   })
   await start($)
-  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
+  standIn.panes.push(SHOWN)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   await standIn.clock.advance(11_000)
-  expect(blits).toBeGreaterThan(0)
+  expect(blits).toBe(1)
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await standIn.clock.settle()
+  expect(blits).toBe(2)
+  await ui.unmount()
+})
 
-  // Closed: one tick finds it hidden and forgets the picture; the ticks after it read no panes.
+test('a closed sidebar is sent nothing: the first key forgets the picture, the keys after it ask for no panes till it is drawn again', async ($, on) => {
+  const standIn = standInForEngine(on)
+  typingBeneath(on)
+  let blits = 0
+  on('ui.blit', () => {
+    blits += 1
+
+    return { value: {} }
+  })
+  await start($)
+  standIn.panes.push(SHOWN)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  await standIn.clock.advance(11_000)
+  expect(blits).toBe(1)
+
   standIn.panes = []
   await ui.unmount()
-  await standIn.clock.advance(4_000)
-  const readsAfterClose = standIn.paneReads
-  const blitsAfterClose = blits
-  await standIn.clock.advance(60_000)
-  // Two half-minute timers (device's resources, status's slow refresh) still ask once each, four
-  // in the minute; a picture tick still asking would add thirty.
-  expect(standIn.paneReads - readsAfterClose).toBeLessThanOrEqual(4)
-  expect(blits).toBe(blitsAfterClose)
+  const reads = standIn.paneReads
+  await typeKey($)
+  await standIn.clock.settle()
+  expect(standIn.paneReads).toBe(reads + 1)
+  await typeKey($)
+  // A question sends nothing either.
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 1000 })
+  await standIn.clock.settle()
+  expect(blits).toBe(1)
+  await typeKey($)
+  await standIn.clock.settle()
+  expect(standIn.paneReads).toBe(reads + 1)
 
-  // Drawn again: sent again as before.
-  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
+  // Drawn again (a new frame, sent with the drawing): a key ten seconds on sends it again.
+  standIn.panes.push(SHOWN)
   const again = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  await standIn.clock.advance(6_000)
-  expect(blits).toBeGreaterThan(blitsAfterClose)
+  await standIn.clock.advance(10_000)
+  await typeKey($)
+  await standIn.clock.settle()
+  expect(blits).toBe(2)
   await again.unmount()
 })
 
@@ -169,8 +239,10 @@ test('a sidebar first drawn after the probe stopped is still asked about', async
   expect(blits).toBe(0)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  // The next refresh tick, at thirty-two seconds, starts the probe again; it asks at thirty-three.
-  await standIn.clock.advance(12_000)
+  // Its drawing starts the probe again; it asks a second on.
+  await standIn.clock.advance(1_000)
+  expect(blits).toBe(1)
+  await standIn.clock.advance(11_000)
   expect(blits).toBe(1)
   await ui.unmount()
 })

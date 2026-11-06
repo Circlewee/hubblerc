@@ -17,7 +17,7 @@ import { configureLikely, startLikely } from './likely/likely'
 import { startRelaunch } from './relaunch'
 import { restoreTurns } from './restore'
 import { checkSetup } from './setup'
-import { layoutOption, showSidebar, startSidebar } from './sidebar'
+import { layoutOption, resendPicture, showSidebar, startSidebar } from './sidebar'
 import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status'
 import { findTurnForLine, summarize } from './summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo'
@@ -61,6 +61,8 @@ export const register: Register = (on, options) => {
     // Not awaited: the status is read while the model starts its answer, so what changed while idle
     // (an edit in an editor) shows as the question goes.
     if (e.agentId === undefined) void requestGitRefresh($).catch(() => undefined)
+    // The person is here: the cat's picture again, which Orca may have dropped behind another tab.
+    if (e.agentId === undefined) void resendPicture($).catch(() => undefined)
     await startAutoEffort($, e, autoByDefault).catch(() => undefined)
 
     return next(e)
@@ -141,6 +143,15 @@ export const register: Register = (on, options) => {
     await noteEffortChange($, effortWord(e.args), 'engine').catch(() => undefined)
 
     return ran
+  }).catch(($, e, next) => next(e))
+
+  // A key in the prompt box: the person is back (Orca may have dropped the cat's picture behind
+  // another tab), so it is sent again, at most every ten seconds. Not awaited: the editor waits on
+  // this hook for the box it shows.
+  on('prompt.edit', ($, e, next) => {
+    void resendPicture($).catch(() => undefined)
+
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
