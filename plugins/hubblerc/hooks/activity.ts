@@ -3,7 +3,7 @@ import type { EngineInterface, On, ToolCallResult, TurnCompleteInput, TurnStartI
 
 import type { ToolRun, TurnRecord } from '../types'
 import { pointsUsed } from './forecast'
-import { countShellChanges, snapshotGit } from './shell-changes'
+import { countShellChanges, lineCount, snapshotGit } from './shell-changes'
 import type { GitSnapshot } from './shell-changes'
 
 export const MAX_TURNS = 100
@@ -335,7 +335,7 @@ export function changedLines(result: unknown): { added: number; removed: number 
 
   const patch = Array.isArray(result.structuredPatch) ? result.structuredPatch : []
   if (patch.length === 0 && result.type === 'create' && typeof result.content === 'string') {
-    return { added: countLines(result.content), removed: 0 }
+    return { added: lineCount(result.content), removed: 0 }
   }
 
   let added = 0
@@ -352,17 +352,11 @@ export function changedLines(result: unknown): { added: number; removed: number 
   return { added, removed }
 }
 
-function countLines(content: string): number {
-  if (content === '') return 0
-  const count = content.split('\n').length
-
-  return content.endsWith('\n') ? count - 1 : count
-}
-
-function text(value: unknown): string | undefined {
+/** A string that holds something; undefined for anything else. */
+export function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

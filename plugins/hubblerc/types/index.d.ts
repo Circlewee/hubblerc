@@ -117,7 +117,6 @@ export type UsageSnapshot = {
   contextPercent?: number
   fiveHour?: RateWindow
   sevenDay?: RateWindow
-  costUsd?: number
   /** Every rate-limit window the engine handed over, as it named them: what `/effort-log` lists to tell a window the engine left out. */
   limits?: { kind: string; percent: number }[]
 }

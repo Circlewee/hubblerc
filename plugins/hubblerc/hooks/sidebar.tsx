@@ -55,7 +55,6 @@ const FOLDED_KEY = 'sidebarFolded'
 /** Cells a box takes from the width: its border and a cell of padding, each side. */
 const BOX_FRAME = 4
 
-export { SIDEBAR_ID }
 /**
  * Twelve files in all at most; each folder outside the repository shows two, three folders at most;
  * the repository six at least. A pane too short for them shows fewer (`fitFileLayout`).

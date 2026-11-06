@@ -1,6 +1,6 @@
 import type { EngineInterface, On, ResolveInput, ToolGroupCall } from 'claude-code'
 
-import { changedLines } from './activity'
+import { changedLines, isRecord, text } from './activity'
 import { COLORS } from './band-format'
 import { bashPurpose } from './bash-purpose'
 import { basename, signed } from './summary'
@@ -188,12 +188,4 @@ function diffLine($: EngineInterface, e: ResultRow): JSX.Element | undefined {
       <Text dimColor> · ctrl+o로 전체 보기</Text>
     </Box>
   )
-}
-
-function text(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
