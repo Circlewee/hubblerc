@@ -50,10 +50,10 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
       effort = override
       source = 'manual'
     } else if (await isAutoOn($, autoByDefault)) {
-      const picked = await autoLevelFor($, e.turnId, e.index).catch(() => undefined)
+      const picked = await autoLevelFor($, e.turnId).catch(() => undefined)
       if (picked !== undefined) {
-        effort = picked
-        source = 'auto'
+        effort = picked.level
+        source = picked.isFallback ? 'fallback' : 'auto'
       }
     }
 

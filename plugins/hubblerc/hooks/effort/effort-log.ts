@@ -1,6 +1,6 @@
 import type { AutoPick, EffortSample, EffortSource, TurnRecord, UsageSnapshot } from '../../types'
 
-const SOURCE_LABELS: Record<EffortSource, string> = { engine: '엔진', manual: '직접', auto: 'auto' }
+const SOURCE_LABELS: Record<EffortSource, string> = { engine: '엔진', manual: '직접', auto: 'auto', fallback: '대체' }
 
 /**
  * The `/effort-log` table: the last main-loop requests with the effort each went out with and its
@@ -28,7 +28,7 @@ export function effortLogTable(samples: readonly EffortSample[], list: readonly 
 
   const header = ['답변 ', '요청', 'effort      ', '    입력', ' 캐시 읽기', ' 캐시 쓰기', '    출력'].join('  ')
   const lines = [`요청별 effort (전체 ${samples.length}개 중 최근 ${rows.length}개)`, header, ...rows, '', cacheSummary(samples)]
-  if (pick !== null) lines.push(`마지막 auto 판정: ${pick.level} (${(pick.ms / 1000).toFixed(1)}s)`)
+  if (pick !== null) lines.push(pick.ms === null ? `마지막 auto 판정: 제때 오지 않아 ${pick.level}로 보냄` : `마지막 auto 판정: ${pick.level} (${(pick.ms / 1000).toFixed(1)}s)`)
 
   return lines.join('\n')
 }

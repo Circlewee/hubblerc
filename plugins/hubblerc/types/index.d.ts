@@ -69,11 +69,11 @@ export type TokenTotals = { input: number; cacheRead: number; cacheWrite: number
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-/** Whose effort a main-loop request went out with: the engine's, the slider's, or auto's pick. */
-export type EffortSource = 'engine' | 'manual' | 'auto'
+/** Whose effort a main-loop request went out with: the engine's, the slider's, auto's pick, or auto's fallback (no pick in time). */
+export type EffortSource = 'engine' | 'manual' | 'auto' | 'fallback'
 
-/** What auto effort picked for a turn, and how long the pick took. */
-export type AutoPick = { turnId: string; level: EffortLevel; ms: number }
+/** The level auto set a turn to, and how long its pick took (null and `isFallback` when none came in time). */
+export type AutoPick = { turnId: string; level: EffortLevel; ms: number | null; isFallback?: boolean }
 
 /** One main-loop request: the effort it went out with, and its tokens as the API reported them. */
 export type EffortSample = {
@@ -197,7 +197,7 @@ declare module 'claude-code' {
       effortPicker: number | null
       /** Auto effort on (true) or off (false) for this session; null: as the `autoEffort` option says. */
       effortAuto: boolean | null
-      /** Auto effort's latest pick. */
+      /** The level auto set the latest turn to. */
       autoPick: AutoPick | null
       /** The sidebar contents' page, 0 the newest answers. */
       tocPage: number

@@ -97,7 +97,7 @@ export async function notePickDone($: EngineInterface, turnId: string, result: P
   await writeWhatIsKnown($, record)
 }
 
-/** The turn's first request went out: with the pick, or at the engine's effort (the pick late). */
+/** The turn's first request went out: with the pick, at auto's fallback (no pick in time), or at a level the person set. */
 export async function noteFirstRequest($: EngineInterface, turnId: string, effort: string, source: string): Promise<void> {
   const record = records.get(turnId)
   if (record === undefined || record.first !== undefined) return
@@ -152,7 +152,7 @@ async function writeWhatIsKnown($: EngineInterface, record: PickRecord): Promise
       latencyMs: result.latencyMs,
       tokens: result.tokens,
       ...(result.error === undefined ? {} : { error: result.error }),
-      // Whether the first request went out at the pick: false when it waited past its limit, or the person had set a level.
+      // Whether the first request went out at the pick: false when none came in time (the fallback), or the person had set a level.
       appliedFirst: first === undefined ? null : first.source === 'auto',
       ...(first === undefined ? {} : { firstEffort: first.effort }),
     })

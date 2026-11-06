@@ -137,7 +137,7 @@ test('a question after an answer is picked with that answer, kept as it complete
   expect(standIn.completions[1]?.prompt).toEqual(expect.stringContaining('두 가지 안이 있습니다.'))
 })
 
-test('the autoEffort option turns auto on for a new session; a failed pick leaves the engine effort', { options: { autoEffort: true } }, async ($, on) => {
+test('the autoEffort option turns auto on for a new session; a failed pick sends the fallback, not the engine effort', { options: { autoEffort: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   const sent = answerRequests(on)
   await start($)
@@ -147,9 +147,31 @@ test('the autoEffort option turns auto on for a new session; a failed pick leave
   standIn.completion = null
   await ask($, 't2', '질문')
   standIn.completion = 'whatever'
-  await ask($, 't3', '질문')
-  expect(sent).toEqual(['xhigh', 'xhigh', 'xhigh'])
+  await ask($, 't3', '질문', 2)
+  expect(sent).toEqual(['xhigh', 'high', 'high', 'high'])
   expect(standIn.completions).toHaveLength(3)
+
+  const log = (await $.command.run({ command: 'effort-log', ...COMMAND })).text ?? ''
+  expect(log).toContain('#3        1  대체 high')
+  expect(log).toContain('마지막 auto 판정: 제때 오지 않아 high로 보냄')
+})
+
+test("a slow pick: the turn's first request waits for it, and the later ones keep it", { options: { autoEffort: true } }, async ($, on) => {
+  const standIn = standInForEngine(on)
+  const sent = answerRequests(on)
+  standIn.completion = 'medium'
+  standIn.completionDelayMs = 3000
+  await start($)
+
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  const steps = (async () => {
+    for (let index = 0; index < 2; index += 1) {
+      for await (const chunk of $.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 1 })) void chunk
+    }
+  })()
+  await standIn.clock.advance(3000)
+  await steps
+  expect(sent).toEqual(['medium', 'medium'])
 })
 
 test('/effort-log lists each request with whose effort it was, and the cache share after a change', async ($, on) => {

@@ -115,23 +115,23 @@ test('a level set by hand after a pick, on the slider or with /effort, and the n
   await band.unmount()
 })
 
-test('a pick later than the first request\'s wait is logged as not taken by it; a failed pick is logged with why', { options: { autoEffort: true } }, async ($, on) => {
+test('a pick later than the first request\'s wait is logged as not taken: the fallback went out; a failed pick is logged with why', { options: { autoEffort: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   mock.env(on, { HOME: '/home/me' })
   const sent = answerRequests(on)
   standIn.completion = 'xhigh - 설계 결정'
-  standIn.completionDelayMs = 3000
+  standIn.completionDelayMs = 5000
   await start($)
 
   await $.turn.start({ text: '구조를 다시 짜자', turnId: 't1' })
   const first = step($, 't1', 0)
-  await standIn.clock.advance(3000)
+  await standIn.clock.advance(5000)
   await first
   await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 9000 })
   await standIn.clock.settle()
-  expect(sent).toEqual(['xhigh'])
-  expect(lines(standIn)[0]).toMatchObject({ effort: 'xhigh', reason: '설계 결정', appliedFirst: false, firstEffort: 'xhigh' })
-  expect(Number(lines(standIn)[0]?.latencyMs)).toBeGreaterThanOrEqual(3000)
+  expect(sent).toEqual(['high'])
+  expect(lines(standIn)[0]).toMatchObject({ effort: 'xhigh', reason: '설계 결정', appliedFirst: false, firstEffort: 'high' })
+  expect(Number(lines(standIn)[0]?.latencyMs)).toBeGreaterThanOrEqual(5000)
 
   standIn.completionDelayMs = 0
   standIn.completion = null
