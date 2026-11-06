@@ -488,8 +488,8 @@ test('a Bash call is predicted in the background; the command does not wait, and
 
   await standIn.clock.advance(5000)
   const [decision, outcome] = lines(standIn)
-  expect(decision).toMatchObject({ type: 'decision', task: BASH_TASK, meta: { toolUseId: 'toolu_slow' }, answers: [{ type: 'predicate', name: 'fails', probability: 0.2 }] })
-  expect(outcome).toMatchObject({ type: 'outcome', id: decision?.id, outcome: true })
+  expect(decision).toMatchObject({ type: 'decision', task: BASH_TASK, meta: { toolUseId: 'toolu_slow', sessionId: 'session-1' }, answers: [{ type: 'predicate', name: 'fails', probability: 0.2 }] })
+  expect(outcome).toMatchObject({ type: 'outcome', id: decision?.id, outcome: true, note: 'exit 1' })
   expect(String(decision?.input)).toContain('Command:\nfalse')
   expect(String(decision?.input)).toContain('What it is for: 테스트 실행')
   expect(String(decision?.input)).toContain('Working folder: /repo/hubblerc')
@@ -517,7 +517,8 @@ test('a command that answered is not failed; one refused, or run in the backgrou
 
   expect(bashOutcome({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1' } } as never)).toEqual({ failed: null, note: 'background' })
   expect(bashOutcome({ result: { stdout: '', stderr: '', interrupted: true } } as never)).toEqual({ failed: null, note: 'interrupted' })
-  expect(bashOutcome({ isError: true, result: 'Exit code 2', text: 'Exit code 2' })).toEqual({ failed: true })
+  expect(bashOutcome({ isError: true, result: 'Exit code 2', text: 'Exit code 2' })).toEqual({ failed: true, note: 'exit 2' })
+  expect(bashOutcome({ isError: true, result: 'boom', text: 'boom' } as never)).toEqual({ failed: true })
   expect(bashInput('ls', '', '')).toBe('A command Claude Code is about to run with its Bash tool (zsh on macOS).\n\nCommand:\nls')
 })
 

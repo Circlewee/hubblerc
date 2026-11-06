@@ -40,7 +40,9 @@ export function predictBashFailure($: EngineInterface, e: BashCall): Promise<str
   if (e.agentId !== undefined) meta.agentId = e.agentId
 
   return (async () => {
-    const cwd = await $.session.cwd().catch(() => '')
+    // The session groups a machine's decisions: a later replay can give a command the ones before it in its session.
+    const [cwd, sessionId] = await Promise.all([$.session.cwd().catch(() => ''), $.session.id().catch(() => '')])
+    if (sessionId !== '') meta.sessionId = sessionId
     const description = typeof e.description === 'string' ? e.description : ''
     const result = await likely($, { task: BASH_TASK, input: bashInput(command, description, cwd), questions: [BASH_QUESTION], samples: 5, thinking, meta })
 
@@ -61,11 +63,17 @@ export function bashInput(command: string, description: string, cwd: string): st
 /**
  * How a Bash call ended, as the activity record counts it: failed when the tool reported an error (a
  * non-zero exit), not when it answered. Unknowable (null) when it was refused before running, moved
- * to the background, or interrupted.
+ * to the background, or interrupted. A failure's exit code is noted (`exit 2`) when its text gives one.
  */
 export function bashOutcome(ran: ToolCallResult): { failed: boolean | null; note?: string } {
   if (ran.deny !== undefined) return { failed: null, note: 'denied' }
-  if (ran.isError === true) return /interrupted/i.test(ran.text ?? '') ? { failed: null, note: 'interrupted' } : { failed: true }
+  if (ran.isError === true) {
+    if (/interrupted/i.test(ran.text ?? '')) return { failed: null, note: 'interrupted' }
+    // A failed command's text starts `Exit code N` (as the test stand-in has it; to be seen in a real log).
+    const code = /^Exit code (\d+)/.exec(ran.text ?? '')?.[1]
+
+    return code === undefined ? { failed: true } : { failed: true, note: `exit ${code}` }
+  }
   const result = ran.result as { interrupted?: unknown; backgroundTaskId?: unknown } | undefined
   if (typeof result === 'object' && result !== null) {
     if (typeof result.backgroundTaskId === 'string') return { failed: null, note: 'background' }
