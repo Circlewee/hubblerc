@@ -38,7 +38,15 @@ const CUTOFF = '2026-11-06T00:50:00.000Z'
  */
 const BASE_RATE_HINT = 'For reference: most commands Claude Code runs here succeed; about 1 in 25 fails.'
 
-type Variant = { model: string; flip: boolean; hint: boolean; thinking: boolean; note: string }
+/**
+ * How a variant asks. `samples`: calls a decision (the logged count when not given). `effort`: in
+ * place of likely's `low`. `request`: fields put over the request likely.ts would send (another
+ * model's thinking setting, a larger `max_tokens`).
+ */
+type Variant = { model: string; flip: boolean; hint: boolean; thinking: boolean; note: string; samples?: number; effort?: 'low' | 'medium' | 'high'; request?: Record<string, unknown> }
+
+const SONNET = 'claude-sonnet-5-5'
+const OPUS = 'claude-opus-5-5'
 
 /** Stage 1 (2026-11-06): Haiku, thinking off, five calls as logged; only the way of asking changes. */
 const VARIANTS: Record<string, Variant> = {
@@ -48,6 +56,15 @@ const VARIANTS: Record<string, Variant> = {
   'v3-no-flip-hint': { model: HAIKU, flip: false, hint: true, thinking: false, note: '뒤집기 없음 + 기저율 힌트' },
   /** Stage 2 (2026-11-06): stage 1's best-calibrated way of asking, with thinking (adaptive, effort low, as likely.ts asks it). */
   'v4-thinking': { model: HAIKU, flip: false, hint: true, thinking: true, note: 'v3 + thinking 켬' },
+  /**
+   * Stage 3 (2026-11-06): the ceiling, v3's way of asking with a larger model, one call a decision
+   * (repeats did not change Haiku's ranking). Sonnet 5.5 turns thinking off with `between_tools`
+   * (`disabled` is a 400); Opus 5.5 cannot turn it off (`disabled` is a 400), so effort alone sets how
+   * much it thinks. No refusal fallback: a fallback model would answer for Opus unseen.
+   */
+  's1-sonnet-off': { model: SONNET, flip: false, hint: true, thinking: false, note: 'Sonnet 5.5, thinking 끔, 1회', samples: 1, request: { thinking: { type: 'between_tools' } } },
+  'o1-opus-low': { model: OPUS, flip: false, hint: true, thinking: true, note: 'Opus 5.5, effort low, 1회', samples: 1, request: { max_tokens: 8000 } },
+  'o1-opus-high': { model: OPUS, flip: false, hint: true, thinking: true, note: 'Opus 5.5, effort high, 1회', samples: 1, effort: 'high', request: { max_tokens: 16000 } },
 }
 
 type Logged = { id: string; at: string; input: string; questions: Question[]; samples: number; thinking: boolean; p: number; failed: boolean }
@@ -192,17 +209,30 @@ async function callApi(key: string, body: Record<string, unknown>): Promise<{ bo
   }
 }
 
-/** Haiku 5.5's prices (cost.ts); another model has to have its prices added before it runs. */
+/**
+ * Dollars per million tokens, from the claude-api skill's model table (cached 2026-10-06); prompts
+ * here are far below any long-prompt rate. A cache read counted at 0.1x and a write at 1.25x the
+ * input price, as cost.ts does (these requests set no cache).
+ */
+const PRICES: Record<string, { input: number; output: number }> = {
+  [SONNET]: { input: 2, output: 10 },
+  [OPUS]: { input: 4, output: 20 },
+}
+
+/** Haiku 5.5's prices (cost.ts), or the table's; a model without prices stops the run before it starts. */
 function priceOf(model: string): (tokens: Tokens) => number {
   if (model.startsWith('claude-haiku-5-5')) return costOf
-  throw new Error(`${model}의 가격이 아직 없습니다`)
+  const price = PRICES[model]
+  if (price === undefined) throw new Error(`${model}의 가격이 아직 없습니다`)
+
+  return tokens => (tokens.input * price.input + tokens.cacheRead * price.input * 0.1 + tokens.cacheWrite * price.input * 1.25 + tokens.output * price.output) / 1_000_000
 }
 
 /** A logged decision asked again as the variant asks it: the same layouts as logged (seeded by its id), changed as the variant says. */
 async function replayOne(decision: Logged, name: string, variant: Variant, key: string, limit: ReturnType<typeof limiter>): Promise<ResultLine> {
   const questions: Question[] = variant.hint ? decision.questions.map(question => ({ ...question, instructions: `${question.instructions} ${BASE_RATE_HINT}` })) : decision.questions
   const random = seededRandom(seedOf(decision.id))
-  const layouts: CallLayout[] = Array.from({ length: decision.samples }, (_, i) => {
+  const layouts: CallLayout[] = Array.from({ length: variant.samples ?? decision.samples }, (_, i) => {
     const layout = layoutCall(decision.questions, i, random)
 
     return variant.flip ? layout : { ...layout, questions: layout.questions.map(question => ({ ...question, negated: false })) }
@@ -213,7 +243,10 @@ async function replayOne(decision: Logged, name: string, variant: Variant, key: 
     layouts.map(layout =>
       limit(async (): Promise<CallResult> => {
         const negated = layout.questions[0]?.negated === true
-        const ran = await callApi(key, requestBody({ model: variant.model, input: decision.input, questions, layout, thinking: variant.thinking }))
+        const base = requestBody({ model: variant.model, input: decision.input, questions, layout, thinking: variant.thinking })
+        const body: Record<string, unknown> = { ...base, ...variant.request }
+        if (variant.effort !== undefined) body.output_config = { ...(base.output_config as Record<string, unknown>), effort: variant.effort }
+        const ran = await callApi(key, body)
         const tokens = ran.body === undefined ? NO_TOKENS : tokensOf(ran.body)
         if (isRecord(ran.body) && typeof ran.body.model === 'string') model = ran.body.model
         if (ran.error !== undefined) return { negated, error: ran.error, latencyMs: ran.latencyMs, tokens }
@@ -425,7 +458,7 @@ function timeSplitSkill(pairs: readonly Pair[]): { skill: number; testFails: num
   return { skill: 1 - model / constant, testFails: test.filter(pair => pair.y).length }
 }
 
-function report(names: string[]): void {
+function report(names: string[], referenceName = 'v0-current'): void {
   const all = loadDecisions()
   const ys = new Map(all.map(decision => [decision.id, decision.failed]))
   const chosen = names.length > 0 ? names : Object.keys(VARIANTS).filter(name => existsSync(join(OUT_DIR, `${name}.jsonl`)))
@@ -456,10 +489,10 @@ function report(names: string[]): void {
   }
   console.log(`(상위k 기대값: 상위10 ${(10 * base).toFixed(1)}, 상위25 ${(25 * base).toFixed(1)}. BSS = 1 − Brier/상수 기저율 Brier, 0 이하는 상수보다 못함)`)
 
-  const reference = sets.find(set => set.name === 'v0-current')
+  const reference = sets.find(set => set.name === referenceName)
   if (reference !== undefined) {
     console.log('')
-    console.log('v0-current와 짝지어 비교 (같은 명령, 차이의 95% 구간; 0을 걸치면 차이 미판정)')
+    console.log(`${referenceName}와 짝지어 비교 (같은 명령, 차이의 95% 구간; 0을 걸치면 차이 미판정)`)
     for (const set of sets) {
       if (set === reference) continue
       const dAuc = auc(pairsOf(set, common)) - auc(pairsOf(reference, common))
@@ -478,7 +511,7 @@ function report(names: string[]): void {
       const cov = mean(xs.map((x, i) => (x - mx) * ((zs[i] ?? 0) - mz)))
       const r = cov / Math.sqrt(mean(xs.map(x => (x - mx) ** 2)) * mean(zs.map(z => (z - mz) ** 2)))
       console.log('')
-      console.log(`재현(live thinking 끔 ${ids.length}건 vs v0-current): 상관 ${r.toFixed(3)}, 평균 차 ${(mz - mx >= 0 ? '+' : '') + (mz - mx).toFixed(3)}, 평균 |차| ${mean(xs.map((x, i) => Math.abs(x - (zs[i] ?? 0)))).toFixed(3)}`)
+      console.log(`재현(live thinking 끔 ${ids.length}건 vs ${referenceName}): 상관 ${r.toFixed(3)}, 평균 차 ${(mz - mx >= 0 ? '+' : '') + (mz - mx).toFixed(3)}, 평균 |차| ${mean(xs.map((x, i) => Math.abs(x - (zs[i] ?? 0)))).toFixed(3)}`)
     }
   }
 
@@ -523,6 +556,6 @@ function parseFlags(args: readonly string[]): { positional: string[]; flags: Rec
 const [command, ...rest] = process.argv.slice(2)
 const { positional, flags } = parseFlags(rest)
 if (command === 'run' && positional[0] !== undefined) await run(positional[0], flags)
-else if (command === 'report') report(positional)
+else if (command === 'report') report(positional, flags.ref)
 else if (command === 'variants') for (const [name, variant] of Object.entries(VARIANTS)) console.log(`${name}: ${variant.note} (${variant.model}, thinking ${variant.thinking ? '켬' : '끔'})`)
 else console.log('사용법: bun tools/likely-replay.ts run <변형> [--limit N] [--max-usd X] [--concurrency N] | report [변형 ...] | variants')
