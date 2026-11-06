@@ -46,6 +46,8 @@ const VARIANTS: Record<string, Variant> = {
   'v1-no-flip': { model: HAIKU, flip: false, hint: false, thinking: false, note: '뒤집어 묻기 없음' },
   'v2-hint': { model: HAIKU, flip: true, hint: true, thinking: false, note: '기저율 힌트' },
   'v3-no-flip-hint': { model: HAIKU, flip: false, hint: true, thinking: false, note: '뒤집기 없음 + 기저율 힌트' },
+  /** Stage 2 (2026-11-06): stage 1's best-calibrated way of asking, with thinking (adaptive, effort low, as likely.ts asks it). */
+  'v4-thinking': { model: HAIKU, flip: false, hint: true, thinking: true, note: 'v3 + thinking 켬' },
 }
 
 type Logged = { id: string; at: string; input: string; questions: Question[]; samples: number; thinking: boolean; p: number; failed: boolean }
@@ -488,6 +490,19 @@ function report(names: string[]): void {
     const straight = calls.filter(call => !call.negated && typeof call.p === 'number').map(call => call.p ?? 0)
     const flipped = calls.filter(call => call.negated && typeof call.p === 'number').map(call => call.p ?? 0)
     console.log(`  ${set.name.padEnd(18)} ${straight.length === 0 ? '-' : mean(straight).toFixed(3)} (${straight.length}) / ${flipped.length === 0 ? '-' : mean(flipped).toFixed(3)} (${flipped.length}), 답 없음 ${calls.filter(call => call.p === undefined).length}`)
+  }
+  for (const set of sets) {
+    if (set.lines === undefined || !set.lines.some(line => line.thinking)) continue
+    // Without thinking a reply is about 22 tokens: past 50, the call thought.
+    const lines = set.lines.filter(line => common.includes(line.id))
+    const calls = lines.flatMap(line => line.calls)
+    const thought = calls.filter(call => call.tokens.output > 50)
+    const outputs = calls.map(call => call.tokens.output).sort((a, b) => a - b)
+    const byThinking = (did: boolean) => lines.filter(line => line.calls.some(call => call.tokens.output > 50) === did && line.p !== null).map(line => ({ id: line.id, p: line.p ?? 0, y: ys.get(line.id) === true }))
+    const some = byThinking(true)
+    const none = byThinking(false)
+    console.log(`  ${set.name}: 생각한 호출 ${thought.length}/${calls.length} (${((thought.length / calls.length) * 100).toFixed(0)}%), 출력 토큰 중앙값 ${outputs[Math.floor(outputs.length / 2)]}`)
+    console.log(`    한 호출이라도 생각한 판정 ${some.length}건(실패 ${some.filter(pair => pair.y).length}) · 아무도 안 생각한 판정 ${none.length}건(실패 ${none.filter(pair => pair.y).length})`)
   }
 }
 
