@@ -9,6 +9,7 @@ import type { Answer, Question, Reply, Spread } from './method'
 import { maskSecrets, MAX_INPUT_CHARS, utf8Length } from './record'
 import type { CallLog, DecisionLine, OutcomeLine } from './record'
 import { appendLogLine, defaultLogFolder, homeFolder, logFileIn, resetLogs } from '../shared/jsonl-log'
+import { isRecord } from '../shared/values'
 
 const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)
 
@@ -407,8 +408,4 @@ export async function readLogPieces($: EngineInterface, path: string, each: (pie
     each(whole)
     offset += utf8Length(whole)
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }

@@ -6,6 +6,7 @@
 import type { Tokens } from './cost'
 import type { Answer, CallLayout, Question, Spread } from './method'
 import { spreadOfValues } from './method'
+import { isRecord } from '../shared/values'
 
 /** One call of a decision as logged: how it showed the questions, what it gave back, and what it took. */
 export type CallLog = {
@@ -336,8 +337,4 @@ export function robustnessLines(bins: ReturnType<typeof spreadBins>, variants: R
   )
 
   return lines
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }

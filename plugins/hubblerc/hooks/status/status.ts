@@ -2,10 +2,11 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, SessionUsage, Timer, ToolCallResult } from 'claude-code'
 
 import type { AgentSeen, RunningCall, UsageSnapshot } from '../../types'
-import { parseGitStatus } from './band-format'
+import { parseGitStatus } from './git'
 import { bashPurpose } from '../activity/bash-purpose'
 import { addFiveHourPoint } from './forecast'
 import { isSidebarShown } from '../shared/pane'
+import { isRecord } from '../shared/values'
 import { refreshTodos } from '../todo/todo'
 import { refreshLikelyStatus } from '../likely/likely'
 
@@ -439,8 +440,4 @@ function callLabel(tool: string, e: CallInput): string {
     default:
       return ''
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }

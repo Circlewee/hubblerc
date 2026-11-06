@@ -1,21 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
-import {
-  activityParts,
-  cellWidth,
-  countdown,
-  elapsed,
-  lastAnswer,
-  modelLabel,
-  parseGitStatus,
-  partsWidth,
-  statusParts,
-  isListed,
-  levelStep,
-  requestSegments,
-  THEME_COLORS,
-  weekStep,
-} from '../hooks/status/band-format'
+import { THEME_COLORS } from '../hooks/shared/style'
+import { cellWidth } from '../hooks/shared/text-width'
+import { countdown, elapsed } from '../hooks/shared/time-text'
+import { activityParts, lastAnswer, modelLabel, partsWidth, statusParts, levelStep, requestSegments, weekStep } from '../hooks/status/band-format'
+import { parseGitStatus, isListed } from '../hooks/status/git'
 import { modelEffort } from '../hooks/effort/effort'
 
 const NOW = Date.parse('2026-10-25T09:00:00Z')

@@ -1,5 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
+import { lineCount } from '../shared/values'
+
 /**
  * Files an answer changed with no Edit or Write: through Bash (`sed`, a script, `git`), which the
  * tool calls do not tell. Inside a git repository only: just before the answer's first call that
@@ -83,14 +85,6 @@ export function shellChanges(before: GitSnapshot, after: GitSnapshot): { changed
   const created = after.untracked.filter(path => !wasUntracked.has(path) && after.tracked[path] === undefined).slice(0, MAX_NEW_FILES)
 
   return { changed, created: created.map(path => `${after.root}/${path}`) }
-}
-
-/** Lines in a text: a final newline closes the last one. */
-export function lineCount(text: string): number {
-  if (text === '') return 0
-  const count = text.split('\n').length
-
-  return text.endsWith('\n') ? count - 1 : count
 }
 
 /** The shell's changes with each new file's lines counted (a file it cannot read counts 0). */

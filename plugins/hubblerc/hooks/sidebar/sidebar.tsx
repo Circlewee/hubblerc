@@ -1,8 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { CommandPresentation, ElementConstructor, EngineInterface, InputProps, On, RenderViewport, Timer } from 'claude-code'
 
-import { activityParts, cellWidth, requestSegments, statusParts, textStyle, THEME_COLORS } from '../status/band-format'
-import type { Segment } from '../status/band-format'
+import { textStyle, THEME_COLORS } from '../shared/style'
+import type { Segment } from '../shared/style'
+import { cellWidth } from '../shared/text-width'
+import { activityParts, requestSegments, statusParts } from '../status/band-format'
 import { promptKey } from '../activity/activity'
 import { EFFORT_KEY_ACTION, togglePicker } from '../effort/effort-picker'
 import { CHANGELOG_URL, deviceLines, versionNote } from './device'

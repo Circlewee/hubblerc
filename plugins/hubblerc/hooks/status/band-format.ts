@@ -1,88 +1,12 @@
-import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TokenTotals, TurnRecord, UsageSnapshot } from '../../types'
+import type { AgentSeen, GitInfo, RunningCall, TokenTotals, TurnRecord, UsageSnapshot } from '../../types'
 
 import { cacheShare, tokenCount } from './forecast'
 
 import { formatDuration, summarize } from '../activity/summary'
-
-export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
-
-/**
- * A run of text in one style. `role` marks what the band draws its own way: a bar's filled and
- * empty cells, and the effort value (a control that opens the effort slider).
- */
-export type Segment = {
-  text: string
-  color?: string
-  dim?: boolean
-  bold?: boolean
-  role?: 'barFilled' | 'barEmpty' | 'effort'
-}
-
-/** What each colour means: the same roles on the band and in the sidebar, each drawn from its own palette. */
-export type Palette = {
-  ok: string
-  warn: string
-  /** Between warn and alert: the sidebar's fourth step of a usage reading. */
-  caution: string
-  alert: string
-  effort: string
-  sessionEffort: string
-  branch: string
-  dirty: string
-  running: string
-  faint: string
-  /** Ultracode, beside the effort. */
-  ultracode: string
-}
-
-/**
- * The band's colours, by the terminal's own names: the band has no background but the terminal's,
- * so the terminal theme (Kanagawa, …) picks the shade and the band sits in it; only what needs
- * attention is coloured.
- */
-export const COLORS: Palette = {
-  ok: 'green',
-  warn: 'yellow',
-  caution: 'yellow',
-  alert: 'red',
-  effort: 'cyan',
-  sessionEffort: 'yellow',
-  branch: 'magenta',
-  dirty: 'yellow',
-  running: 'blue',
-  faint: 'gray',
-  ultracode: 'magenta',
-}
-
-/**
- * The sidebar's colours, by Claude Code's theme keys: the engine paints the pane's background
- * from the theme, so what is drawn on it follows the same theme, light or dark, `auto` or a custom
- * one, and stays readable on it.
- */
-export const THEME_COLORS: Palette = {
-  ok: 'success',
-  warn: 'warning',
-  // Claude's orange: between the theme's yellow and red.
-  caution: 'claude',
-  alert: 'error',
-  effort: 'suggestion',
-  sessionEffort: 'warning',
-  branch: 'merged',
-  dirty: 'warning',
-  running: 'permission',
-  faint: 'inactive',
-  // Claude's orange, as the engine draws its own ultracode mark.
-  ultracode: 'claude',
-}
-
-/** A segment's style as `Text` props, only those it sets. */
-export function textStyle(segment: Segment): { color?: string; dimColor?: true; bold?: true } {
-  return {
-    ...(segment.color === undefined ? {} : { color: segment.color }),
-    ...(segment.dim === true ? { dimColor: true as const } : {}),
-    ...(segment.bold === true ? { bold: true as const } : {}),
-  }
-}
+import { COLORS } from '../shared/style'
+import type { Palette, Segment } from '../shared/style'
+import { cellWidth } from '../shared/text-width'
+import { countdown, elapsed } from '../shared/time-text'
 
 const BAR_CELLS = 8
 
@@ -94,10 +18,6 @@ export function modelLabel(id: string): string {
   const name = family.charAt(0).toUpperCase() + family.slice(1)
 
   return match[3] === undefined ? `${name} ${match[2]}` : `${name} ${match[2]}.${match[3]}`
-}
-
-export function isEffortLevel(value: unknown): value is EffortLevel {
-  return EFFORT_LEVELS.some(level => level === value)
 }
 
 /** How many of a bar's `cells` are filled for `percent` of 100. */
@@ -162,103 +82,6 @@ export function effortStyle(level: string | null, palette: Palette): Pick<Segmen
   if (level === 'max') return { color: palette.branch, bold: true }
 
   return {}
-}
-
-/** Time until `iso`, short: `1h30m`, `45m`, `2d3h`, `<1m` (`isSpaced`, `1h 30m`, `2d 3h`); '' when unknown or past. */
-export function countdown(iso: string | undefined, now: number, isSpaced = false): string {
-  const gap = isSpaced ? ' ' : ''
-  if (iso === undefined) return ''
-  const ms = Date.parse(iso) - now
-  if (!Number.isFinite(ms) || ms <= 0) return ''
-  const minutes = Math.floor(ms / 60_000)
-  if (minutes < 1) return '<1m'
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h${gap}${String(minutes % 60).padStart(2, '0')}m`
-
-  return `${Math.floor(hours / 24)}d${gap}${hours % 24}h`
-}
-
-/** How long something has run, short: `12s`, `2m15s`, `1h3m`. */
-export function elapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000))
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, '0')}s`
-
-  return `${Math.floor(minutes / 60)}h${minutes % 60}m`
-}
-
-/**
- * Terminal cells a text takes: East Asian wide characters and emoji drawn as emoji take two; the
- * variation selectors and the zero-width joiner take none.
- */
-export function cellWidth(text: string): number {
-  let width = 0
-  for (const char of text) {
-    const code = char.codePointAt(0) ?? 0
-    if (code === 0xfe0e || code === 0xfe0f || code === 0x200d) continue
-    const isWide =
-      (code >= 0x1100 && code <= 0x115f) ||
-      (code >= 0x2e80 && code <= 0xa4cf) ||
-      (code >= 0xac00 && code <= 0xd7a3) ||
-      (code >= 0xf900 && code <= 0xfaff) ||
-      (code >= 0xfe30 && code <= 0xfe4f) ||
-      (code >= 0xff00 && code <= 0xff60) ||
-      (code >= 0xffe0 && code <= 0xffe6) ||
-      (code >= 0x1f300 && code <= 0x1faff) ||
-      isEmojiInBmp(code)
-    width += isWide ? 2 : 1
-  }
-
-  return width
-}
-
-/**
- * The characters below U+10000 drawn as emoji with no variation selector (Emoji_Presentation):
- * ⌚⌛ ⏩–⏬ ⏰ ⏳ ◽◾ ☔☕ ♈–♓ ♿ ⚓ ⚡ ⚪⚫ ⚽⚾ ⛄⛅ ⛎ ⛔ ⛪ ⛲⛳ ⛵ ⛺ ⛽ ✅ ✊✋ ✨ ❌ ❎ ❓–❕ ❗ ➕–➗ ➰ ➿ ⬛⬜ ⭐ ⭕.
- * One drawn as text by default (⚠ ✓ ✕ ↗ ◐) stays one cell.
- */
-const EMOJI_IN_BMP: readonly (readonly [number, number])[] = [
-  [0x231a, 0x231b],
-  [0x23e9, 0x23ec],
-  [0x23f0, 0x23f0],
-  [0x23f3, 0x23f3],
-  [0x25fd, 0x25fe],
-  [0x2614, 0x2615],
-  [0x2648, 0x2653],
-  [0x267f, 0x267f],
-  [0x2693, 0x2693],
-  [0x26a1, 0x26a1],
-  [0x26aa, 0x26ab],
-  [0x26bd, 0x26be],
-  [0x26c4, 0x26c5],
-  [0x26ce, 0x26ce],
-  [0x26d4, 0x26d4],
-  [0x26ea, 0x26ea],
-  [0x26f2, 0x26f3],
-  [0x26f5, 0x26f5],
-  [0x26fa, 0x26fa],
-  [0x26fd, 0x26fd],
-  [0x2705, 0x2705],
-  [0x270a, 0x270b],
-  [0x2728, 0x2728],
-  [0x274c, 0x274c],
-  [0x274e, 0x274e],
-  [0x2753, 0x2755],
-  [0x2757, 0x2757],
-  [0x2795, 0x2797],
-  [0x27b0, 0x27b0],
-  [0x27bf, 0x27bf],
-  [0x2b1b, 0x2b1c],
-  [0x2b50, 0x2b50],
-  [0x2b55, 0x2b55],
-]
-
-function isEmojiInBmp(code: number): boolean {
-  if (code < 0x231a || code > 0x2b55) return false
-
-  return EMOJI_IN_BMP.some(([from, to]) => code >= from && code <= to)
 }
 
 export const SEPARATOR = ' │ '
@@ -482,40 +305,4 @@ export function lastAnswer(turns: readonly TurnRecord[]): string {
   }
 
   return '직전 답변 없음'
-}
-
-/** The branch and whether the tree has changes, from `git status --porcelain=v1 --branch`. */
-export function parseGitStatus(stdout: string): GitInfo | null {
-  const [header = '', ...rest] = stdout.split('\n')
-  if (!header.startsWith('## ')) return null
-
-  let branch = header.slice(3)
-  const unborn = /^No commits yet on (.+)$/.exec(branch)
-  if (unborn?.[1] !== undefined) branch = unborn[1]
-  branch = (branch.split('...')[0] ?? branch).split(' ')[0] ?? branch
-
-  const lines = rest.filter(line => line.trim() !== '')
-  // `!!` ignored, `??` untracked (with --ignored and --untracked-files=normal, a folder whole as `dir/`).
-  const kept = lines.filter(line => !line.startsWith('!! '))
-
-  return {
-    branch,
-    isDirty: kept.length > 0,
-    changed: kept.map(changedPath),
-    untracked: kept.filter(line => line.startsWith('?? ')).map(changedPath),
-    ignored: lines.filter(line => line.startsWith('!! ')).map(changedPath),
-  }
-}
-
-/** Whether `path` is one of `entries`, or under one that is a folder (`dir/`). */
-export function isListed(entries: readonly string[] | undefined, path: string): boolean {
-  return (entries ?? []).some(entry => (entry.endsWith('/') ? path.startsWith(entry) : path === entry))
-}
-
-/** A porcelain line's path, relative to the repository's top: the new one of a rename. */
-function changedPath(line: string): string {
-  const path = line.slice(3)
-  const renamed = path.split(' -> ')
-
-  return (renamed[renamed.length - 1] ?? path).replace(/^"(.*)"$/, '$1')
 }

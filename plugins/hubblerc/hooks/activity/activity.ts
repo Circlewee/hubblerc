@@ -3,7 +3,8 @@ import type { EngineInterface, On, ToolCallResult, TurnCompleteInput, TurnStartI
 
 import type { ToolRun, TurnRecord } from '../../types'
 import { pointsUsed } from '../status/forecast'
-import { countShellChanges, lineCount, snapshotGit } from './shell-changes'
+import { isRecord, lineCount, text } from '../shared/values'
+import { countShellChanges, snapshotGit } from './shell-changes'
 import type { GitSnapshot } from './shell-changes'
 
 export const MAX_TURNS = 100
@@ -352,11 +353,3 @@ export function changedLines(result: unknown): { added: number; removed: number 
   return { added, removed }
 }
 
-/** A string that holds something; undefined for anything else. */
-export function text(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}

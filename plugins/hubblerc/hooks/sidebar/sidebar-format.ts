@@ -1,5 +1,7 @@
 import type { GitInfo, TurnRecord } from '../../types'
-import { cellWidth, elapsed, isListed } from '../status/band-format'
+import { cellWidth } from '../shared/text-width'
+import { elapsed } from '../shared/time-text'
+import { isListed } from '../status/git'
 import { basename, fileTotals } from '../activity/summary'
 
 /** One answer of the session as the sidebar's table of contents lists it. */
