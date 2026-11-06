@@ -2,8 +2,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { classifierPrompt, parseLevel } from '../hooks/auto-effort'
-import { cacheSummary } from '../hooks/effort-log'
+import { classifierPrompt, parseLevel } from '../hooks/effort/auto-effort'
+import { cacheSummary } from '../hooks/effort/effort-log'
 import { standInForEngine, start } from './engine'
 
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const

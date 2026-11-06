@@ -1,6 +1,6 @@
-import type { GitInfo, TurnRecord } from '../types'
-import { cellWidth, elapsed, isListed } from './band-format'
-import { basename, fileTotals } from './summary'
+import type { GitInfo, TurnRecord } from '../../types'
+import { cellWidth, elapsed, isListed } from '../status/band-format'
+import { basename, fileTotals } from '../activity/summary'
 
 /** One answer of the session as the sidebar's table of contents lists it. */
 export type TocEntry = {

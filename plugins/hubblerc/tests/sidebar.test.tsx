@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { TurnRecord } from '../types'
-import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from '../hooks/sidebar-format'
+import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from '../hooks/sidebar/sidebar-format'
 import { NOW, standInForEngine, start } from './engine'
 
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const

@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { DeviceInfo } from '../types'
-import { isSidebarShown } from './pane'
+import type { DeviceInfo } from '../../types'
+import { isSidebarShown } from '../shared/pane'
 import { loadCatImages } from './cat-images'
 
 const device = atom({ plugin: 'hubblerc', key: 'device' } as const, null)

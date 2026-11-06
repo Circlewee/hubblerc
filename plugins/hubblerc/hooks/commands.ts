@@ -1,14 +1,14 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
-import { effortSamples } from './effort'
-import { effortLogTable, limitsLine } from './effort-log'
-import { requestRestart } from './relaunch'
-import { runSetup } from './setup'
-import { toggleSidebar } from './sidebar'
-import type { Layout } from './sidebar'
-import { activityTable } from './summary'
-import { runTodoCommand } from './todo'
+import { effortSamples } from './effort/effort'
+import { effortLogTable, limitsLine } from './effort/effort-log'
+import { requestRestart } from './system/relaunch'
+import { runSetup } from './system/setup'
+import { toggleSidebar } from './sidebar/sidebar'
+import type { Layout } from './sidebar/sidebar'
+import { activityTable } from './activity/summary'
+import { runTodoCommand } from './todo/todo'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)

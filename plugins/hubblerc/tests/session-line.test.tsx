@@ -1,8 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { statusParts } from '../hooks/band-format'
-import { limitsLine } from '../hooks/effort-log'
-import { titleIn, ultracodeIn } from '../hooks/status'
+import { statusParts } from '../hooks/status/band-format'
+import { limitsLine } from '../hooks/effort/effort-log'
+import { titleIn, ultracodeIn } from '../hooks/status/status'
 import { NOW, standInForEngine, start } from './engine'
 
 const COMMAND = { args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }

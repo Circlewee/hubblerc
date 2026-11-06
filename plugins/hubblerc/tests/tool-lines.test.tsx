@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { groupLine, readNames } from '../hooks/tool-lines'
+import { groupLine, readNames } from '../hooks/activity/tool-lines'
 
 // Nothing draws beneath the plugin: this hook stands for the engine's own row.
 function engineDraws(on: On): void {

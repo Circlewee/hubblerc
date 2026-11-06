@@ -1,8 +1,8 @@
-import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TokenTotals, TurnRecord, UsageSnapshot } from '../types'
+import type { AgentSeen, EffortLevel, GitInfo, RunningCall, TokenTotals, TurnRecord, UsageSnapshot } from '../../types'
 
 import { cacheShare, tokenCount } from './forecast'
 
-import { formatDuration, summarize } from './summary'
+import { formatDuration, summarize } from '../activity/summary'
 
 export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 

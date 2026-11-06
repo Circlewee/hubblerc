@@ -1,4 +1,4 @@
-import type { AutoPick, EffortSample, EffortSource, TurnRecord, UsageSnapshot } from '../types'
+import type { AutoPick, EffortSample, EffortSource, TurnRecord, UsageSnapshot } from '../../types'
 
 const SOURCE_LABELS: Record<EffortSource, string> = { engine: '엔진', manual: '직접', auto: 'auto' }
 

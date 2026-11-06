@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { EffortLevel, TurnRecord } from '../types'
+import type { EffortLevel, TurnRecord } from '../../types'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])

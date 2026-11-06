@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { EffortLevel } from '../types'
-import { isEffortLevel } from './band-format'
+import type { EffortLevel } from '../../types'
+import { isEffortLevel } from '../status/band-format'
 import { noteEffortChange } from './effort-record'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)

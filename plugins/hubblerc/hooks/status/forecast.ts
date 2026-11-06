@@ -1,4 +1,4 @@
-import type { FiveHourPoint, RateWindow, TokenTotals } from '../types'
+import type { FiveHourPoint, RateWindow, TokenTotals } from '../../types'
 
 /** Readings older than this are dropped. */
 const KEEP_MS = 2 * 60 * 60_000

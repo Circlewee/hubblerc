@@ -2,9 +2,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import type { TurnRecord } from '../types'
-import { lineCount, parseNumstat, shellChanges } from '../hooks/shell-changes'
-import type { GitSnapshot } from '../hooks/shell-changes'
-import { summarize } from '../hooks/summary'
+import { lineCount, parseNumstat, shellChanges } from '../hooks/activity/shell-changes'
+import type { GitSnapshot } from '../hooks/activity/shell-changes'
+import { summarize } from '../hooks/activity/summary'
 import { standInForEngine, start } from './engine'
 
 const snap = (tracked: GitSnapshot['tracked'], untracked: string[] = []): GitSnapshot => ({ root: '/repo', base: 'abc', tracked, untracked })

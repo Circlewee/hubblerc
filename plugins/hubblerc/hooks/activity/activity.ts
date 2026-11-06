@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, ToolCallResult, TurnCompleteInput, TurnStartInput } from 'claude-code'
 
-import type { ToolRun, TurnRecord } from '../types'
-import { pointsUsed } from './forecast'
+import type { ToolRun, TurnRecord } from '../../types'
+import { pointsUsed } from '../status/forecast'
 import { countShellChanges, lineCount, snapshotGit } from './shell-changes'
 import type { GitSnapshot } from './shell-changes'
 

@@ -15,8 +15,8 @@ import {
   requestSegments,
   THEME_COLORS,
   weekStep,
-} from '../hooks/band-format'
-import { modelEffort } from '../hooks/effort'
+} from '../hooks/status/band-format'
+import { modelEffort } from '../hooks/effort/effort'
 
 const NOW = Date.parse('2026-10-25T09:00:00Z')
 

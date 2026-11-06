@@ -1,4 +1,4 @@
-import { cellWidth } from './band-format'
+import { cellWidth } from '../status/band-format'
 
 /**
  * The person's own to-dos (`/todo`, the sidebar's "할 일" tab, the model's `user_todos` tool): a

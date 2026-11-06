@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FiveHourPoint } from '../types'
-import { addFiveHourPoint, burnoutMinutes, cacheShare, pointsUsed, requestTime, tokenCount } from '../hooks/forecast'
+import { addFiveHourPoint, burnoutMinutes, cacheShare, pointsUsed, requestTime, tokenCount } from '../hooks/status/forecast'
 
 const MIN = 60_000
 const NOW = Date.parse('2026-10-26T09:00:00Z')

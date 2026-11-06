@@ -1,13 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, SessionUsage, Timer, ToolCallResult } from 'claude-code'
 
-import type { AgentSeen, RunningCall, UsageSnapshot } from '../types'
+import type { AgentSeen, RunningCall, UsageSnapshot } from '../../types'
 import { parseGitStatus } from './band-format'
-import { bashPurpose } from './bash-purpose'
+import { bashPurpose } from '../activity/bash-purpose'
 import { addFiveHourPoint } from './forecast'
-import { isSidebarShown } from './pane'
-import { refreshTodos } from './todo'
-import { refreshLikelyStatus } from './likely/likely'
+import { isSidebarShown } from '../shared/pane'
+import { refreshTodos } from '../todo/todo'
+import { refreshLikelyStatus } from '../likely/likely'
 
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
 const agents = atom({ plugin: 'hubblerc', key: 'agents' } as const, [])

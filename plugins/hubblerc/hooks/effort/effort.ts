@@ -1,10 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, HookStream, On, TurnStepResult } from 'claude-code'
 
-import type { EffortSample, EffortSource } from '../types'
+import type { EffortSample, EffortSource } from '../../types'
 import { autoLevelFor, isAutoOn } from './auto-effort'
 import { noteFirstRequest } from './effort-record'
-import { addTokens } from './forecast'
+import { addTokens } from '../status/forecast'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, TurnCompleteInput, TurnStartInput } from 'claude-code'
 
-import type { EffortLevel } from '../types'
+import type { EffortLevel } from '../../types'
 import { noteNextQuestion, notePickDone, notePickStart } from './effort-record'
 import type { PickResult } from './effort-record'
 

@@ -1,9 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 import type { SessionMessage } from 'claude-code'
 
-import { lastAnswer } from '../hooks/band-format'
-import { turnsFromTranscript } from '../hooks/restore'
-import { summarize } from '../hooks/summary'
+import { lastAnswer } from '../hooks/status/band-format'
+import { turnsFromTranscript } from '../hooks/activity/restore'
+import { summarize } from '../hooks/activity/summary'
 import { standInForEngine, start } from './engine'
 
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const

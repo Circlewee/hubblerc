@@ -22,8 +22,8 @@ import {
   trashListText,
 } from './todo-format'
 import type { SidebarTab, TodoRecord, TurnRef, UserTodo, UserTodoStatus } from './todo-format'
-import { askSidebarKeyboard, SIDEBAR_ID } from './pane'
-import { clipCells } from './sidebar-format'
+import { askSidebarKeyboard, SIDEBAR_ID } from '../shared/pane'
+import { clipCells } from '../sidebar/sidebar-format'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const sidebarTab = atom({ plugin: 'hubblerc', key: 'sidebarTab' } as const, 'contents')

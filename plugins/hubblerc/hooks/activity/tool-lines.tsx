@@ -1,7 +1,7 @@
 import type { EngineInterface, On, ResolveInput, ToolGroupCall } from 'claude-code'
 
 import { changedLines, isRecord, text } from './activity'
-import { COLORS } from './band-format'
+import { COLORS } from '../status/band-format'
 import { bashPurpose } from './bash-purpose'
 import { basename, signed } from './summary'
 

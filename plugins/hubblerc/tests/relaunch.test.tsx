@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { needsRelaunch, relaunchState, shellVersion, withRelaunchLine } from '../hooks/setup'
+import { needsRelaunch, relaunchState, shellVersion, withRelaunchLine } from '../hooks/system/setup'
 import { NOW, standInForEngine, start } from './engine'
 
 const COMMAND = { args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }

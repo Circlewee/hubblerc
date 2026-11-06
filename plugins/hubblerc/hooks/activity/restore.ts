@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, SessionMessage, ToolCallResult, ToolUseSummary } from 'claude-code'
 
-import type { ToolRun, TurnRecord } from '../types'
+import type { ToolRun, TurnRecord } from '../../types'
 import { describeRun, isIgnoredTool, MAX_RUNS_PER_TURN, MAX_TURNS, promptKey, promptLabel } from './activity'
-import { restoreSnapshot } from './relaunch'
+import { restoreSnapshot } from '../system/relaunch'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const sessionId = atom({ plugin: 'hubblerc', key: 'sessionId' } as const, '')

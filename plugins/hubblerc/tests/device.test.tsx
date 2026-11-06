@@ -2,8 +2,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, manifestVersion, newest, parseDf, parseSysctl, parseVmStat, versionNote } from '../hooks/device'
-import { catMark, catMood, pngSize } from '../hooks/cat-images'
+import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, manifestVersion, newest, parseDf, parseSysctl, parseVmStat, versionNote } from '../hooks/sidebar/device'
+import { catMark, catMood, pngSize } from '../hooks/sidebar/cat-images'
 import { catPictures, PNG_4X2, standInForEngine, start } from './engine'
 
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const

@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementConstructor, EngineInterface, MarkdownProps, On } from 'claude-code'
 
-import type { TurnRecord } from '../types'
-import { THEME_COLORS } from './band-format'
-import { ANSWER_ID, SIDEBAR_COLUMNS } from './pane'
+import type { TurnRecord } from '../../types'
+import { THEME_COLORS } from '../status/band-format'
+import { ANSWER_ID, SIDEBAR_COLUMNS } from '../shared/pane'
 import { answersOf, answerText } from './restore'
 import type { ApiLike, TranscriptAnswer } from './restore'
 import { formatDuration, summarize } from './summary'

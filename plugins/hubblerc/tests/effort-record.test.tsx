@@ -2,8 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseLevel, parseReason } from '../hooks/auto-effort'
-import { effortWord } from '../hooks/effort-record'
+import { parseLevel, parseReason } from '../hooks/effort/auto-effort'
+import { effortWord } from '../hooks/effort/effort-record'
 import { standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
 

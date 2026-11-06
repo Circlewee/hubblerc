@@ -26,10 +26,10 @@ import {
   todoStoreKey,
   todoToolList,
   trashListText,
-} from '../hooks/todo-format'
-import { shareRows } from '../hooks/sidebar-format'
-import type { TodoRecord, UserTodo } from '../hooks/todo-format'
-import { cellWidth } from '../hooks/band-format'
+} from '../hooks/todo/todo-format'
+import { shareRows } from '../hooks/sidebar/sidebar-format'
+import type { TodoRecord, UserTodo } from '../hooks/todo/todo-format'
+import { cellWidth } from '../hooks/status/band-format'
 import { NOW, standInForEngine, start } from './engine'
 
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { isAutoUpdating, keyStates, missingCount, setupState, withAutoUpdate, withKeys } from '../hooks/setup'
+import { isAutoUpdating, keyStates, missingCount, setupState, withAutoUpdate, withKeys } from '../hooks/system/setup'
 import { standInForEngine, start } from './engine'
 
 const OURS = { 'ctrl+x ctrl+e': 'app:cycleDiffBase', 'ctrl+x ctrl+p': 'command:panel' }

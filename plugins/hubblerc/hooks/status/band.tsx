@@ -1,14 +1,14 @@
 import { atom, read } from 'claude-code'
 import type { On } from 'claude-code'
 
-import type { EffortLevel } from '../types'
+import type { EffortLevel } from '../../types'
 import { activityParts, COLORS, EFFORT_LEVELS, lastAnswer, requestSegments, SEPARATOR, statusParts, textStyle } from './band-format'
 import type { Segment } from './band-format'
-import { choose, EFFORT_KEY_ACTION, togglePicker } from './effort-picker'
-import { isAppSurface } from './pane'
+import { choose, EFFORT_KEY_ACTION, togglePicker } from '../effort/effort-picker'
+import { isAppSurface } from '../shared/pane'
 import { burnoutMinutes, requestTime } from './forecast'
-import { syncSidebar } from './sidebar'
-import type { Layout } from './sidebar'
+import { syncSidebar } from '../sidebar/sidebar'
+import type { Layout } from '../sidebar/sidebar'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])

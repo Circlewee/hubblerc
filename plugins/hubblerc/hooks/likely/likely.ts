@@ -8,7 +8,7 @@ import { combine, distributionsOf, invalidQuestions, layoutCall, MAX_SAMPLES, ME
 import type { Answer, Question, Reply, Spread } from './method'
 import { maskSecrets, MAX_INPUT_CHARS, utf8Length } from './record'
 import type { CallLog, DecisionLine, OutcomeLine } from './record'
-import { appendLogLine, defaultLogFolder, homeFolder, logFileIn, resetLogs } from '../jsonl-log'
+import { appendLogLine, defaultLogFolder, homeFolder, logFileIn, resetLogs } from '../shared/jsonl-log'
 
 const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)
 

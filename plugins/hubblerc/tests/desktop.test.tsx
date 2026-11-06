@@ -1,9 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { isIgnoredTool } from '../hooks/activity'
-import { isAppSurface } from '../hooks/pane'
-import { shortToolName, summarize } from '../hooks/summary'
+import { isIgnoredTool } from '../hooks/activity/activity'
+import { isAppSurface } from '../hooks/shared/pane'
+import { shortToolName, summarize } from '../hooks/activity/summary'
 import type { TurnRecord } from '../types'
 import { catPictures, NOW, standInForEngine, start } from './engine'
 

@@ -1,8 +1,8 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import { appendLogLine, defaultLogFolder } from './jsonl-log'
-import { maskSecrets } from './likely/record'
+import { appendLogLine, defaultLogFolder } from '../shared/jsonl-log'
+import { maskSecrets } from '../likely/record'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 

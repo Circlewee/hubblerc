@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import { safeFileName } from './likely/record'
+import { safeFileName } from '../likely/record'
 
 /**
  * A machine's own JSONL logs: one file per machine (`<machine>.jsonl`) in a log's folder, lines only

@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { activityTable, formatDuration } from '../hooks/summary'
-import { promptLabel } from '../hooks/activity'
+import { activityTable, formatDuration } from '../hooks/activity/summary'
+import { promptLabel } from '../hooks/activity/activity'
 
 test('the table numbers each answer with its time, the start of its prompt and its summary', () => {
   const lines = activityTable([
