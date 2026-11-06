@@ -1,24 +1,28 @@
 import { atom, read, update } from 'claude-code'
-import type { CommandPresentation, ElementConstructor, EngineInterface, InputProps, On, RenderViewport, Timer } from 'claude-code'
+import type { CommandPresentation, ElementConstructor, EngineInterface, InputProps, On, RenderViewport } from 'claude-code'
 
-import { textStyle, THEME_COLORS } from '../shared/style'
-import type { Segment } from '../shared/style'
-import { cellWidth } from '../shared/text-width'
+import { THEME_COLORS } from '../shared/style'
 import { activityParts, requestSegments, statusParts } from '../status/band-format'
 import { promptKey } from '../activity/activity'
-import { EFFORT_KEY_ACTION, togglePicker } from '../effort/effort-picker'
-import { CHANGELOG_URL, deviceLines, versionNote } from './device'
+import { deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from '../status/forecast'
-import { ANSWER_ID, isAppSurface, isSidebarShown, SIDEBAR_COLUMNS, SIDEBAR_ID, SIDEBAR_TITLE } from '../shared/pane'
+import { ANSWER_ID, isAppSurface, SIDEBAR_COLUMNS, SIDEBAR_ID, SIDEBAR_TITLE } from '../shared/pane'
 import { openAnswer } from '../activity/answer'
 import { catImageAt, catMark, catMood } from './cat-images'
-import { requestRestart } from '../system/relaunch'
-import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
-import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
-import { addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, editFieldKey, editTarget, offerTodo, saveEditFromField, selectTab, startEditTodo, todosForDrawing, undoCount, undoDelete } from '../todo/todo'
-import { footerRows, oneLine, openCount, rowTailCells, showsTurn, sortTodos, STATUS_MARK, todoLeastRows, todoRows, todosShown } from '../todo/todo-format'
-import type { SidebarTab, UserTodo } from '../todo/todo-format'
+import { notePicture, PICTURE_ROWS, startPictures } from './picture'
+import { fileLayout, fileRows, fitFileLayout, sessionFiles, shareRows, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
+import type { FileLimits, TocEntry } from './sidebar-format'
+import { editTarget, selectTab, todosForDrawing, undoCount } from '../todo/todo'
+import { footerRows, openCount, sortTodos, todoLeastRows, todoRows, todosShown } from '../todo/todo-format'
+import type { SidebarTab } from '../todo/todo-format'
 import { statusLine } from '../likely/cost'
+import { contentsBody, tabsHeading } from './boxes/contents'
+import { deviceBox } from './boxes/device'
+import { filesBox } from './boxes/files'
+import { frame } from './boxes/frame'
+import type { SectionId } from './boxes/frame'
+import { activityBox, statusBox } from './boxes/status'
+import { todoBody } from './boxes/todo'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
@@ -50,8 +54,6 @@ const sidebarTab = atom({ plugin: 'hubblerc', key: 'sidebarTab' } as const, 'con
 const userTodoVersion = atom({ plugin: 'hubblerc', key: 'userTodoVersion' } as const, 0)
 const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)
 
-/** The sidebar's boxes, by the id their fold is kept under. */
-export type SectionId = 'device' | 'status' | 'activity' | 'files' | 'contents'
 /** Where the folds are kept across sessions. */
 const FOLDED_KEY = 'sidebarFolded'
 /** Cells a box takes from the width: its border and a cell of padding, each side. */
@@ -64,7 +66,6 @@ const BOX_FRAME = 4
 const FILE_LIMITS: FileLimits = { total: 12, minInside: 6, folders: 3, perFolder: 2 }
 /** Every file, once the person asked for the rest. */
 const NO_FILE_LIMITS: FileLimits = { total: Infinity, minInside: Infinity, folders: Infinity, perFolder: Infinity }
-const MAX_TURN_REFS = 4
 /** Answers on one page of the contents at most; fewer in a pane too short for them. */
 const TOC_PAGE_SIZE = 10
 /** The engine docks a pane beside the fullscreen transcript from this many columns; below, it sits above the prompt. */
@@ -146,10 +147,7 @@ export async function startSidebar($: EngineInterface, layout: Layout): Promise<
   isPeeking = false
   await loadFolds($).catch(() => undefined)
   // Each second till the terminal has said whether it draws the cat's picture.
-  probeTimer = null
-  startProbe($)
-  sentPicture = null
-  sentAt = Number.NEGATIVE_INFINITY
+  startPictures($)
   if (layout !== 'band') return
   if ((await $.ui.panes()).some(open => open.id === SIDEBAR_ID)) await $.ui.close({ id: SIDEBAR_ID })
 }
@@ -188,105 +186,6 @@ export async function toggleSidebar($: EngineInterface, layout: Layout, presenta
   const opened = await $.ui.open({ id: SIDEBAR_ID, title: SIDEBAR_TITLE, columns: SIDEBAR_COLUMNS })
 
   return opened.isPlaced ? undefined : `사이드바가 아직 그려지지 않았습니다: ${opened.reason}`
-}
-
-/** The cat as a picture: as tall as the lines beside it. */
-const PICTURE_ROWS = 5
-/** The picture's key in the drawing: what a blit names. */
-const PICTURE_KEY = 'cat-picture'
-/** A blit refused because the terminal drew the picture's `alt`: no placeholder images, or a file it cannot read. */
-const NO_PICTURE = /placeholder|\balt\b|cannot read/i
-/** The picture the sidebar last drew, for the probe to send again; null while it draws none. */
-let drawnPicture: { source: { png: string }; columns: number; rows: number } | null = null
-
-/**
- * Whether the terminal draws the cat's picture: once the sidebar has drawn one, a blit of the same
- * source answers. Refused for the `alt`, the cat goes and the lines stand alone (the sidebar redraws on
- * the write); refused for anything else (not mounted yet), the next second asks again. Asked from
- * a timer: a render hook writes no state.
- */
-async function probePicture($: EngineInterface): Promise<boolean> {
-  if ((await read($, catPicture)) !== 'unknown') return true
-  const drawn = drawnPicture
-  if (drawn === null) return false
-  const result = await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn }).catch((error: unknown) => ({ deny: String(error) }))
-  if (result.deny !== undefined && !NO_PICTURE.test(result.deny)) return false
-  if (result.deny === undefined) {
-    sentPicture = drawn.source.png
-    sentAt = await $.clock.now()
-  }
-  await update($, catPicture, () => (result.deny === undefined ? 'shown' : 'blocked'))
-
-  return true
-}
-
-const PROBE_MS = 1000
-/** Seconds the probe waits for a drawn picture before it stops; the sidebar's next drawing starts it again. */
-const PROBE_IDLE_TICKS = 10
-let probeTimer: Timer | null = null
-
-/**
- * Asks each second whether the terminal draws the picture, till it has said. With no picture drawn
- * for ten seconds (a band layout, a closed sidebar) it stops rather than wake each second all
- * session; the sidebar's next drawing of a picture starts it again while that is not known.
- */
-function startProbe($: EngineInterface): void {
-  if (probeTimer !== null) return
-  let idleTicks = 0
-  const stop = () => {
-    timer.cancel()
-    if (probeTimer === timer) probeTimer = null
-  }
-  const timer = $.clock.every(PROBE_MS, () => {
-    idleTicks = drawnPicture === null ? idleTicks + 1 : 0
-    void probePicture($)
-      .then(isKnown => {
-        if (isKnown || idleTicks >= PROBE_IDLE_TICKS) stop()
-      })
-      .catch(() => undefined)
-  })
-  probeTimer = timer
-}
-
-/**
- * How long after the picture was last sent a sign of the person back sends it again: keys typed
- * one after another send it once.
- */
-const RESEND_GAP_MS = 10_000
-/** The picture last sent to the terminal (a new frame drawn, or a blit) and when. */
-let sentPicture: string | null = null
-let sentAt = Number.NEGATIVE_INFINITY
-/** A resend under way: the keys typed meanwhile start none. */
-let isResending = false
-
-/**
- * As the person shows they are back (a key in the prompt box, a question; register.tsx): the cat's
- * picture sent again, if ten seconds have gone since it last was and the sidebar shows. Orca drops
- * a picture while its tab is hidden behind another, and a drawing with an unchanged source sends
- * nothing, so an idle cat stays blank till this; a moving cat's new frames are sent anyway. No
- * timer: a sidebar woken every two seconds to send it cost more than all else idle (2026-11-06).
- * Once the sidebar is closed or hidden the picture is forgotten, so the keys after it ask nothing;
- * the sidebar's next drawing records it again.
- */
-export async function resendPicture($: EngineInterface): Promise<void> {
-  const drawn = drawnPicture
-  if (drawn === null || isResending) return
-  isResending = true
-  try {
-    const now = await $.clock.now()
-    if (now - sentAt < RESEND_GAP_MS) return
-    if ((await read($, catPicture)) !== 'shown') return
-    if (!(await isSidebarShown($))) {
-      if (drawnPicture === drawn) drawnPicture = null
-
-      return
-    }
-    await $.ui.blit({ requestId: SIDEBAR_ID, key: PICTURE_KEY, ...drawn })
-    sentPicture = drawn.source.png
-    sentAt = now
-  } finally {
-    isResending = false
-  }
 }
 
 /**
@@ -375,91 +274,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const activity = activityParts(runningList, agentList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
     const all = tocEntries(turnList, now)
-
-    const segmentText = (segment: Segment, key: string) => (
-      <Text key={key} {...textStyle(segment)}>
-        {segment.text}
-      </Text>
-    )
-
-    /** What a box's title draws on its top border, and the cells it takes. */
-    type Heading = { element: JSX.Element; cells: number }
-    /** The arrow and the title, one press that folds the box. */
-    const titleHeading = (id: SectionId, title: string, isFolded: boolean): Heading => ({
-      cells: 3 + cellWidth(title) + 1,
-      element: (
-        <Button
-          key={`fold-${id}`}
-          plain
-          onPress={() => {
-            void toggleFold($, id)
-          }}
-        >
-          <Text dimColor>{isFolded ? ' ▸ ' : ' ▾ '}</Text>
-          <Text bold>{title}</Text>
-          <Text> </Text>
-        </Button>
-      ),
-    })
-
-    /**
-     * A box with its title on the top border (`╭── ▾ 상태 ───╮`), the title a press that folds it;
-     * folded, the title alone on a rule as wide as the box (`╶── ▸ 상태 ────`). A box with tabs
-     * draws its own heading.
-     *
-     * The title is the box's sibling, not its child: a child drawn over the border vanished on
-     * screen (2.1.310), the border painted over it. Laid out `column-reverse`, the box comes first
-     * and is painted first; the title row after it sits above it and, by a margin of -1, on its top
-     * border, painted last.
-     */
-    const box = (id: SectionId, title: string | ((isFolded: boolean) => Heading), body: JSX.Element) => {
-      const isFolded = foldedIds.includes(id)
-      const { element: heading, cells } = typeof title === 'string' ? titleHeading(id, title, isFolded) : title(isFolded)
-
-      // The app draws no border and no title over one: the title on its own row, a dim rule under it.
-      if (isApp) {
-        return (
-          <Box key={`box-${id}`} flexDirection="column">
-            <Box key={`title-${id}`}>{heading}</Box>
-            {isFolded ? null : (
-              <Text key={`rule-${id}`} dimColor wrap="truncate-end">
-                {'─'.repeat(width)}
-              </Text>
-            )}
-            {isFolded ? null : (
-              <Box flexDirection="column" paddingX={1}>
-                {body}
-              </Box>
-            )}
-          </Box>
-        )
-      }
-
-      if (isFolded) {
-        const rule = Math.max(0, width - 3 - cells)
-
-        return (
-          <Box key={`box-${id}`}>
-            <Text dimColor>╶──</Text>
-            {heading}
-            <Text dimColor>{'─'.repeat(rule)}</Text>
-          </Box>
-        )
-      }
-
-      return (
-        <Box flexDirection="column-reverse">
-          <Box key={`box-${id}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
-            {body}
-          </Box>
-          {/* As wide as it is written, so the rest of the top border stays; it draws its corner itself. */}
-          <Box key={`title-${id}`} marginBottom={-1} alignSelf="flex-start">
-            <Text dimColor>╭──</Text>
-            {heading}
-          </Box>
-        </Box>
-      )
-    }
+    // Each box is drawn by its own function (`boxes/`) from what was read here.
+    const f = frame({ Box, Text, Button, Link }, { isApp, width, inner, foldedIds, onFold: id => void toggleFold($, id) })
 
     // A cat that shows what the session does, and the machine and the engine: the cat a picture beside
     // the lines where the terminal draws one, else the lines alone.
@@ -481,192 +297,13 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const image = Image === undefined || isApp ? null : catImageAt(mood, second)
     const picture = image === null ? null : { png: image.png }
     const pictureColumns = image === null ? 0 : Math.max(1, Math.round((PICTURE_ROWS * 2 * image.width) / Math.max(1, image.height)))
-    const mark = catMark(mood)
-    drawnPicture = picture === null ? null : { source: picture, columns: pictureColumns, rows: PICTURE_ROWS }
-    // A new source goes to the terminal with this drawing.
-    if (picture !== null && picture.png !== sentPicture) {
-      sentPicture = picture.png
-      sentAt = now
-    }
-    // Drawn while the probe had stopped (nothing drawn in its first ten seconds): ask again.
-    if (picture !== null && pictureState === 'unknown') startProbe($)
-    const deviceBox = box(
-      'device',
-      '장비',
-      // A row of air above and below: the cat and its lines sit apart from the borders.
-      <Box key="device-body" {...(picture === null ? {} : { columnGap: 2 })} paddingY={1}>
-        {picture !== null && Image !== undefined ? (
-          <Box key="cat" flexShrink={0}>
-            <Image key={PICTURE_KEY} source={picture} columns={pictureColumns} rows={PICTURE_ROWS} alt=" " />
-            {/* Beside the head: z, ?, !; a column of its own, so nothing moves. */}
-            <Box key="cat-mark-box" width={1} flexShrink={0}>
-              <Text key="cat-mark" {...(mood === 'startled' ? { color: THEME_COLORS.alert, bold: true } : { dimColor: true })}>
-                {mark === '' ? ' ' : mark}
-              </Text>
-            </Box>
-          </Box>
-        ) : null}
-        <Box flexDirection="column">
-          {lines.length === 0 && deviceInfo?.version === undefined ? <Text dimColor>장비 정보를 읽는 중</Text> : null}
-          {lines.map((line, i) => (
-            <Text key={`device-${i}`} wrap="truncate-end" dimColor>
-              {line}
-            </Text>
-          ))}
-          {deviceInfo?.version === undefined ? null : (
-            // A later version beside the running one, a link to what changed: cyan when released, yellow
-            // with "재시작" when installed and a restart away. (↻ is the 5h reset's: not used here.)
-            <Box key="device-version">
-              <Text wrap="truncate-end">
-                {`Claude Code ${deviceInfo.version}`}
-                {note === null ? null : (
-                  <Text {...(note.kind === 'restart' ? { color: THEME_COLORS.warn } : { color: THEME_COLORS.effort })}>
-                    {' ↑ '}
-                    <Link href={CHANGELOG_URL}>{note.version}</Link>
-                  </Text>
-                )}
-              </Text>
-              {/* A press restarts onto it, keeping the session: once what runs ends; again, it is taken back. */}
-              {note?.kind === 'restart' ? (
-                <Button
-                  key="restart"
-                  plain
-                  onPress={() => {
-                    void requestRestart($).then(text => $.ui.toast(text))
-                  }}
-                >
-                  {isRestartPending ? <Text color={THEME_COLORS.warn}> 재시작 대기</Text> : <Text dimColor> 재시작</Text>}
-                </Button>
-              ) : null}
-            </Box>
-          )}
-          {deviceInfo?.pluginVersion === undefined ? null : (
-            // hubblerc itself, and whether it runs from the folder it is made in (`hcc`) or the installed copy.
-            <Text key="plugin-version" wrap="truncate-end">
-              {`hubblerc ${deviceInfo.pluginVersion}`}
-              {deviceInfo.isDevBuild === true ? <Text dimColor> dev</Text> : null}
-            </Text>
-          )}
-        </Box>
-      </Box>,
-    )
+    notePicture($, picture, pictureColumns, pictureState, now)
 
-    const statusBox = box(
-      'status',
-      '상태',
-      <Box flexDirection="column">
-        {status.map((part, i) => (
-          <Box key={`status-${i}`}>
-            {part.map((segment, j) =>
-              segment.role === 'effort' && !isApp ? (
-                <Button
-                  key="effort"
-                  plain
-                  action={EFFORT_KEY_ACTION}
-                  onPress={() => {
-                    void togglePicker($)
-                  }}
-                >
-                  {segmentText(segment, 'effort-text')}
-                </Button>
-              ) : (
-                segmentText(segment, `status-${i}-${j}`)
-              ),
-            )}
-          </Box>
-        ))}
-        {id === '' ? null : (
-          // The session: its name as `/rename` set it (none, none shown), and its short id, a press
-          // that copies the whole id (what `claude --resume` takes).
-          <Box key="session">
-            {name === null ? null : (
-              <Text key="session-name" wrap="truncate-end">
-                {clipCells(name, Math.max(1, inner - 11))}
-                <Text dimColor> · </Text>
-              </Text>
-            )}
-            <Button
-              key="session-id"
-              plain
-              onPress={() => {
-                void $.ui.copy({ text: id }).then(copied => $.ui.toast(copied.isCopied ? `세션 id를 복사했습니다: ${id}` : `세션 id를 복사하지 못했습니다: ${copied.reason ?? ''}`))
-              }}
-            >
-              <Text dimColor>{id.slice(0, 8)}</Text>
-            </Button>
-          </Box>
-        )}
-        {request.length === 0 ? null : <Box key="request">{request.map((segment, i) => segmentText(segment, `request-${i}`))}</Box>}
-        {likelyLine === '' ? null : (
-          <Text key="likely" wrap="truncate-end" dimColor>
-            {likelyLine}
-          </Text>
-        )}
-      </Box>,
-    )
-
-    const activityBox = box(
-      'activity',
-      '작업',
-      <Box flexDirection="column">
-        {activity.map((line, i) => (
-          <Text key={`activity-${i}`} wrap="truncate-end" {...(line.startsWith('·') ? { dimColor: true } : { color: THEME_COLORS.running })}>
-            {line}
-          </Text>
-        ))}
-      </Box>,
-    )
-
-    // What is left to commit in this repository stands out; a committed file goes dim with a tick,
-    // and a file outside the repository (git never commits it) goes dim under its folder's rule.
-    // Its name is a link to the file, as a path in the conversation is: under the fullscreen layout
-    // the engine opens a clicked `file:` link itself, elsewhere the terminal does.
-    // git's own signs mark the two that are neither: `?` a file git does not track yet (bright, as
-    // it is left to commit), `!` one `.gitignore` keeps out (dim, as git never commits it).
-    const fileRow = (file: SessionFile) => {
-      const isDim = file.isCommitted || file.isOutside || file.isIgnored
-      const refs = file.turns.slice(-MAX_TURN_REFS).map(n => `#${n}`)
-      const counts: Segment[] = [
-        ...(file.isCommitted ? [{ text: ' ✓', dim: true }] : []),
-        ...(file.isUntracked ? [{ text: ' ?', color: THEME_COLORS.warn }] : []),
-        ...(file.isIgnored ? [{ text: ' !', dim: true }] : []),
-        ...(file.added > 0 ? [{ text: ` +${file.added}`, ...(isDim ? { dim: true } : { color: THEME_COLORS.ok }) }] : []),
-        ...(file.removed > 0 ? [{ text: ` −${file.removed}`, ...(isDim ? { dim: true } : { color: THEME_COLORS.alert }) }] : []),
-        { text: `  ${file.turns.length > MAX_TURN_REFS ? '… ' : ''}${refs.join(' ')}`, dim: true },
-      ]
-      const room = inner - counts.reduce((sum, segment) => sum + cellWidth(segment.text), 0)
-
-      return (
-        <Box key={`file-${file.path}`}>
-          <Text {...(isDim ? { dimColor: true } : {})}>
-            {file.path.startsWith('/') ? <Link href={fileUrl(file.path)}>{clipCells(file.name, room)}</Link> : clipCells(file.name, room)}
-          </Text>
-          {counts.map((segment, i) => segmentText(segment, `count-${i}`))}
-        </Box>
-      )
-    }
-    /** `┄┄ ~/.claude/…/memory ┄┄┄┄`: a rule with a label on it, as wide as the box holds. */
-    const labelledRule = (label: string, key: string) => {
-      // Two cells of rule at least after the label, so it reads as a rule.
-      const text = shortPath(label, Math.max(1, inner - 6))
-
-      return (
-        <Text key={key} dimColor>
-          {`┄┄ ${text} ${'┄'.repeat(Math.max(0, inner - 4 - cellWidth(text)))}`}
-        </Text>
-      )
-    }
     // What the twelve left out is a press away: the whole list. Then "줄이기" stands where the
     // repository's "외 N개" stood, between its files and the folders outside, and puts it back.
     const expandFiles = () => {
       void update($, filesExpanded, () => true)
     }
-    const more = (count: number, key: string) =>
-      count > 0 ? (
-        <Button key={key} plain onPress={expandFiles}>
-          <Text dimColor>{`외 ${count}개 더 보기`}</Text>
-        </Button>
-      ) : null
 
     // The sidebar fits the pane's height: the boxes above take what they hold, the files and the
     // contents share the rest, each showing fewer (and "외 N개", more pages) as rows run short.
@@ -715,279 +352,24 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       void update($, tocPageIndex, () => Math.min(Math.max(0, to), pages - 1))
     }
 
-    const filesBox =
-      files.length === 0
-        ? null
-        : box(
-            'files',
-            '파일',
-            <Box flexDirection="column">
-              {shownFiles.inside.map(fileRow)}
-              {more(shownFiles.insideHidden, 'inside-more')}
-              {isFilesExpanded && isCut ? (
-                <Button
-                  key="files-collapse"
-                  plain
-                  onPress={() => {
-                    void update($, filesExpanded, () => false)
-                  }}
-                >
-                  <Text dimColor>줄이기</Text>
-                </Button>
-              ) : null}
-              {shownFiles.outside.map(group => (
-                <Box key={`outside-${group.folder}`} flexDirection="column">
-                  {labelledRule(group.folder, `folder-${group.folder}`)}
-                  {group.files.map(fileRow)}
-                  {more(group.hidden, `more-${group.folder}`)}
-                </Box>
-              ))}
-              {shownFiles.foldersHidden > 0 ? (
-                <Button key="folders-more" plain onPress={expandFiles}>
-                  {labelledRule(`다른 폴더 ${shownFiles.foldersHidden}개 더 보기`, 'folders-more-rule')}
-                </Button>
-              ) : null}
-            </Box>,
-          )
-
-    const contentsBody = (
-      <Box flexDirection="column">
-        {all.length === 0 ? <Text dimColor>아직 기록된 답변이 없습니다</Text> : null}
-        {entries.map(entry => {
-          const failed = entry.failed > 0 ? ` 실패 ${entry.failed}` : ''
-          const head = `#${entry.number} `
-          const room = inner - cellWidth(head) - cellWidth(failed) - cellWidth(entry.time) - 1
-          const label = head + clipCells(entry.title, room)
-          const mark = failed === '' ? null : <Text color={THEME_COLORS.alert}>{failed}</Text>
-          const canJump = entry.target !== undefined || entry.key !== undefined
-
-          return (
-            <Box key={`entry-${entry.id}`} justifyContent="space-between">
-              {!canJump ? (
-                // Nothing to find its row by.
-                <Text>
-                  {label}
-                  {mark}
-                </Text>
-              ) : (
-                <Button
-                  key={`turn-${entry.id}`}
-                  plain
-                  onPress={() => {
-                    void jumpTo($, entry)
-                  }}
-                >
-                  {label}
-                  {mark}
-                </Button>
-              )}
-              <Text {...(entry.isRunning ? { color: THEME_COLORS.running } : { dimColor: true })}>{entry.time}</Text>
-            </Box>
-          )
-        })}
-        {pages > 1 ? (
-          // Pages run from the newest answers (1) back; the arrows point the way the numbers do.
-          <Box columnGap={2}>
-            {page > 0 ? (
-              <Button key="toc-newer" plain onPress={() => goTo(page - 1)}>
-                ◀ 최근
-              </Button>
-            ) : (
-              <Text dimColor>◀ 최근</Text>
-            )}
-            {pageNumbers(page, pages).map(n =>
-              n === page ? (
-                <Text key={`toc-page-${n}`} color={THEME_COLORS.effort} bold>
-                  {String(n + 1)}
-                </Text>
-              ) : (
-                <Button key={`toc-page-${n}`} plain onPress={() => goTo(n)}>
-                  {String(n + 1)}
-                </Button>
-              ),
-            )}
-            {page < pages - 1 ? (
-              <Button key="toc-older" plain onPress={() => goTo(page + 1)}>
-                이전 ▶
-              </Button>
-            ) : (
-              <Text dimColor>이전 ▶</Text>
-            )}
-          </Box>
-        ) : null}
-      </Box>
-    )
-
-    // The to-dos: in progress, waiting, on hold, done, as many as the rows hold (twelve at most) and
-    // "외 N개"; under them "완료 N개 지우기", "↶ 되돌리기" after a delete, and the field that writes one
-    // (or edits the item whose text was pressed, that row marked).
     const shownTodos = userTodos.slice(0, todosShown(userTodos.length, contentsRoom, todoFooter))
-    const todoRow = (item: UserTodo) => {
-      const isEdited = edited?.id === item.id
-      const isDim = !isEdited && (item.status === 'done' || item.status === 'on_hold')
-      const mark = STATUS_MARK[item.status]
-      // The sign (an emoji, two cells), a space, the text; then a cell at least before the tail.
-      const room = inner - cellWidth(`${mark} `) - rowTailCells(item) - 1
-      const text = (
-        <Text {...(isEdited ? { bold: true, color: THEME_COLORS.effort } : isDim ? { dimColor: true } : {})}>{` ${clipCells(oneLine(item.text), room)}`}</Text>
-      )
-
-      // ↗ and ✕ hold a space each side, three cells to press, the sign in the middle of the focus mark.
-      return (
-        <Box key={`todo-${item.id}`} justifyContent="space-between">
-          <Box>
-            {/* A press moves it on: waiting, in progress, done, on hold, waiting. An emoji keeps its colours: no dim, no theme colour. */}
-            <Button
-              key={`todo-status-${item.id}`}
-              plain
-              onPress={() => {
-                void cycleTodo($, item.id)
-              }}
-            >
-              <Text>{mark}</Text>
-            </Button>
-            {/* A press on the text edits it in the field below; no field (mobile), no press. */}
-            {hasField ? (
-              <Button
-                key={`todo-text-${item.id}`}
-                plain
-                onPress={() => {
-                  void startEditTodo($, item.id)
-                }}
-              >
-                {text}
-              </Button>
-            ) : (
-              text
-            )}
-          </Box>
-          <Box>
-            {showsTurn(item) ? <Text dimColor>{` #${item.turn}`}</Text> : null}
-            {item.status === 'pending' ? (
-              <Button
-                key={`todo-send-${item.id}`}
-                plain
-                onPress={() => {
-                  void offerTodo($, item)
-                }}
-              >
-                <Text color={THEME_COLORS.effort}> ↗ </Text>
-              </Button>
-            ) : null}
-            <Button
-              key={`todo-delete-${item.id}`}
-              plain
-              onPress={() => {
-                void deleteTodo($, item.id)
-              }}
-            >
-              <Text dimColor> ✕ </Text>
-            </Button>
-          </Box>
-        </Box>
-      )
-    }
-    const todoBody = (
-      <Box flexDirection="column">
-        {userTodos.length === 0 ? <Text dimColor>적어 둔 할 일이 없습니다</Text> : null}
-        {shownTodos.map(todoRow)}
-        {userTodos.length > shownTodos.length ? (
-          <Text key="todo-more" dimColor>
-            {`외 ${userTodos.length - shownTodos.length}개`}
-          </Text>
-        ) : null}
-        {doneCount > 0 ? (
-          <Button
-            key="todo-clear-done"
-            plain
-            onPress={() => {
-              void clearDoneTodos($)
-            }}
-          >
-            <Text dimColor>{`완료 ${doneCount}개 지우기`}</Text>
-          </Button>
-        ) : null}
-        {undoN > 0 ? (
-          <Button
-            key="todo-undo"
-            plain
-            onPress={() => {
-              void undoDelete($)
-            }}
-          >
-            <Text color={THEME_COLORS.effort}>{`↶ 되돌리기 (${undoN}개)`}</Text>
-          </Button>
-        ) : null}
-        {/* Enter writes it; the engine empties the field after. Editing, a field of its own holds the
-            item's text: Enter saves, empty cancels, and so does the pane letting the keyboard go (Esc). */}
-        {Input === undefined ? null : edited !== null ? (
-          <Input
-            key={editFieldKey()}
-            label="수정 중 "
-            value={edited.text}
-            placeholder="비우고 Enter면 취소"
-            submitLabel="저장"
-            onSubmit={value => {
-              void saveEditFromField($, edited.id, value)
-            }}
-          />
-        ) : (
-          <Input
-            key="todo-input"
-            placeholder="할 일 적기"
-            submitLabel="추가"
-            onSubmit={value => {
-              void addTodoFromField($, value)
-            }}
-          />
-        )}
-      </Box>
-    )
-
-    // The contents and the to-dos share the last box, its title the tabs: `╭── ▾ 목차 12 │ 할 일 3 ──`.
-    // The arrow folds the box; a tab's name shows that tab (and unfolds a folded box), the shown one bold.
-    const contentsLabel = shownTab === 'contents' && pages > 1 ? `목차 #${entries.at(-1)?.number ?? ''}~${entries[0]?.number ?? ''} / ${all.length}` : `목차 ${all.length}`
-    const todoLabel = `할 일 ${openCount(userTodos)}`
-    const tabButton = (tab: SidebarTab, label: string, isFolded: boolean) => (
-      <Button
-        key={`tab-${tab}`}
-        plain
-        onPress={() => {
-          void selectTab($, tab).then(() => (isFolded ? toggleFold($, 'contents') : undefined))
-        }}
-      >
-        <Text {...(tab === shownTab ? { bold: true } : { dimColor: true })}>{label}</Text>
-      </Button>
-    )
-    const tabsHeading = (isFolded: boolean) => ({
-      cells: 3 + cellWidth(contentsLabel) + 3 + cellWidth(todoLabel) + 1,
-      element: (
-        <Box key="tabs-contents">
-          <Button
-            key="fold-contents"
-            plain
-            onPress={() => {
-              void toggleFold($, 'contents')
-            }}
-          >
-            <Text dimColor>{isFolded ? ' ▸ ' : ' ▾ '}</Text>
-          </Button>
-          {tabButton('contents', contentsLabel, isFolded)}
-          <Text dimColor> │ </Text>
-          {tabButton('todo', todoLabel, isFolded)}
-          <Text> </Text>
-        </Box>
-      ),
+    const contents = { count: all.length, entries, page, pages, onJump: (entry: TocEntry) => void jumpTo($, entry), onPage: goTo }
+    const tabs = tabsHeading(f, {
+      shownTab,
+      contents,
+      openTodos: openCount(userTodos),
+      onFold: () => void toggleFold($, 'contents'),
+      onTab: (tab, isFolded) => void selectTab($, tab).then(() => (isFolded ? toggleFold($, 'contents') : undefined)),
     })
-    const contentsBox = box('contents', tabsHeading, shownTab === 'todo' ? todoBody : contentsBody)
+    const lastBody = shownTab === 'todo' ? todoBody($, f, { items: userTodos, shown: shownTodos, edited, Input, doneCount, undoN }) : contentsBody(f, contents)
 
     return (
       <Box flexDirection="column">
-        {deviceBox}
-        {statusBox}
-        {activityBox}
-        {filesBox}
-        {contentsBox}
+        {deviceBox($, f, { info: deviceInfo, lines, note, picture, pictureColumns, Image, mood, mark: catMark(mood), isRestartPending })}
+        {statusBox($, f, { status, id, name, request, likelyLine })}
+        {activityBox(f, activity)}
+        {files.length === 0 ? null : filesBox(f, { shown: shownFiles, isExpanded: isFilesExpanded, isCut, onExpand: expandFiles, onCollapse: () => void update($, filesExpanded, () => false) })}
+        {f.box('contents', tabs, lastBody)}
       </Box>
     )
   })
@@ -1039,12 +421,4 @@ async function jumpTo($: EngineInterface, entry: TocEntry): Promise<void> {
     deny: String(error),
   }))
   if (moved.deny !== undefined) await openAnswer($, entry)
-}
-
-/** The page numbers the pager offers: up to seven around the page shown, the first and last kept. */
-function pageNumbers(page: number, pages: number): number[] {
-  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i)
-  const start = Math.min(Math.max(0, page - 3), pages - 7)
-
-  return Array.from({ length: 7 }, (_, i) => start + i)
 }

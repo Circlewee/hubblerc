@@ -1,0 +1,96 @@
+import type { EngineInterface } from 'claude-code'
+
+import { EFFORT_KEY_ACTION, togglePicker } from '../../effort/effort-picker'
+import { THEME_COLORS } from '../../shared/style'
+import type { Segment } from '../../shared/style'
+import { clipCells } from '../sidebar-format'
+import type { Frame } from './frame'
+
+export type StatusDrawing = {
+  /** The band's line 1 as the sidebar draws it, one part a line. */
+  status: readonly Segment[][]
+  /** The session's id ('' none) and its name as `/rename` set it. */
+  id: string
+  name: string | null
+  /** When the last request went out and what it carried. */
+  request: readonly Segment[]
+  /** likely's spend, '' with no API key. */
+  likelyLine: string
+}
+
+/** The band's status, one item a line; the session; the last request; likely's spend. `$` only on a press. */
+export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.Element {
+  const { Box, Text, Button } = f.parts
+  const { status, id, name, request, likelyLine } = s
+
+  return f.box(
+    'status',
+    '상태',
+    <Box flexDirection="column">
+      {status.map((part, i) => (
+        <Box key={`status-${i}`}>
+          {part.map((segment, j) =>
+            segment.role === 'effort' && !f.isApp ? (
+              <Button
+                key="effort"
+                plain
+                action={EFFORT_KEY_ACTION}
+                onPress={() => {
+                  void togglePicker($)
+                }}
+              >
+                {f.segmentText(segment, 'effort-text')}
+              </Button>
+            ) : (
+              f.segmentText(segment, `status-${i}-${j}`)
+            ),
+          )}
+        </Box>
+      ))}
+      {id === '' ? null : (
+        // The session: its name as `/rename` set it (none, none shown), and its short id, a press
+        // that copies the whole id (what `claude --resume` takes).
+        <Box key="session">
+          {name === null ? null : (
+            <Text key="session-name" wrap="truncate-end">
+              {clipCells(name, Math.max(1, f.inner - 11))}
+              <Text dimColor> · </Text>
+            </Text>
+          )}
+          <Button
+            key="session-id"
+            plain
+            onPress={() => {
+              void $.ui.copy({ text: id }).then(copied => $.ui.toast(copied.isCopied ? `세션 id를 복사했습니다: ${id}` : `세션 id를 복사하지 못했습니다: ${copied.reason ?? ''}`))
+            }}
+          >
+            <Text dimColor>{id.slice(0, 8)}</Text>
+          </Button>
+        </Box>
+      )}
+      {request.length === 0 ? null : <Box key="request">{request.map((segment, i) => f.segmentText(segment, `request-${i}`))}</Box>}
+      {likelyLine === '' ? null : (
+        <Text key="likely" wrap="truncate-end" dimColor>
+          {likelyLine}
+        </Text>
+      )}
+    </Box>,
+  )
+}
+
+/** What runs now, one item a line; `· 대기 중` dim. */
+export function activityBox(f: Frame, activity: readonly string[]): JSX.Element {
+  const { Box, Text } = f.parts
+
+  return f.box(
+    'activity',
+    '작업',
+    <Box flexDirection="column">
+      {activity.map((line, i) => (
+        <Text key={`activity-${i}`} wrap="truncate-end" {...(line.startsWith('·') ? { dimColor: true } : { color: THEME_COLORS.running })}>
+          {line}
+        </Text>
+      ))}
+    </Box>,
+  )
+}
