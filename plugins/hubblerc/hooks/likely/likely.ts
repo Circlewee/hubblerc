@@ -6,9 +6,10 @@ import { addSpend, addTokens, costOf, dollars, limitReached, NO_TOKENS, spendAt,
 import type { Limits, Spend, Tokens } from './cost'
 import { combine, distributionsOf, invalidQuestions, layoutCall, MAX_SAMPLES, METHOD_VERSION, readReply, requestBody, seededRandom, seedOf, spreadOf } from './method'
 import type { Answer, Question, Reply, Spread } from './method'
-import { maskSecrets, MAX_INPUT_CHARS, utf8Length } from './record'
+import { MAX_INPUT_CHARS, utf8Length } from './record'
 import type { CallLog, DecisionLine, OutcomeLine } from './record'
 import { appendLogLine, defaultLogFolder, homeFolder, logFileIn, resetLogs } from '../shared/jsonl-log'
+import { maskSecrets } from '../shared/log-safety'
 import { isRecord } from '../shared/values'
 
 const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)

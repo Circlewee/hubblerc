@@ -22,7 +22,8 @@ import {
 } from '../hooks/likely/method'
 import { spreadOf, spreadOfValues } from '../hooks/likely/method'
 import type { Question } from '../hooks/likely/method'
-import { calibrationOf, maskSecrets, predicatePairs, readLog, robustnessLines, safeFileName, spreadBins, taskCounts, utf8Length, variantSummary } from '../hooks/likely/record'
+import { calibrationOf, predicatePairs, readLog, robustnessLines, spreadBins, taskCounts, utf8Length, variantSummary } from '../hooks/likely/record'
+import { maskSecrets, safeFileName } from '../hooks/shared/log-safety'
 import { messageReply, NOW, standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
 
