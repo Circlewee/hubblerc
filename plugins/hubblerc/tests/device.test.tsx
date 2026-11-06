@@ -3,9 +3,8 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { CHANGELOG_URL, compareVersions, deviceLines, latestVersion, manifestVersion, newest, parseDf, parseSysctl, parseVmStat, versionNote } from '../hooks/device'
-import { CAT, CAT_PALETTE, catFrame, catMood, pixelRows } from '../hooks/pixel-art'
-import { pngSize } from '../hooks/cat-images'
-import { standInForEngine, start } from './engine'
+import { catMark, catMood, pngSize } from '../hooks/cat-images'
+import { catPictures, PNG_4X2, standInForEngine, start } from './engine'
 
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const
 const PANE_PROPS = {
@@ -37,29 +36,9 @@ test('the lines name only what is known', () => {
   expect(deviceLines({ diskFreeGb: 256 })).toEqual(['디스크 256GB 남음'])
 })
 
-test('the cat is thirty-two cells by sixteen in half blocks, two pixels to a cell', () => {
-  const rows = pixelRows(CAT, CAT_PALETTE)
-  expect(rows).toHaveLength(16)
-  for (const row of rows) expect(row.reduce((sum, run) => sum + [...run.text].length, 0)).toBe(32)
-  // The ear tips: outline over seal; outline under nothing a lower half; runs of one style together.
-  const O = CAT_PALETTE.O
-  expect(rows[0]).toEqual([
-    { text: '      ' },
-    { text: '▄', color: O },
-    { text: '▀', color: O, backgroundColor: CAT_PALETTE.S },
-    { text: '▄▄', color: O },
-    { text: '            ' },
-    { text: '▄▄', color: O },
-    { text: '▀', color: O, backgroundColor: CAT_PALETTE.S },
-    { text: '▄', color: O },
-    { text: '      ' },
-  ])
-  // An eye over the mask: the top pixel blue on a mask background, in the row under the eyes.
-  expect(pixelRows(['B', 'M'], CAT_PALETTE)[0]).toEqual([{ text: '▀', color: CAT_PALETTE.B, backgroundColor: CAT_PALETTE.M }])
-})
-
 test('the sidebar opens with a box of the machine and the engine, beside the cat', async ($, on) => {
   standInForEngine(on)
+  catPictures(on)
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
@@ -72,17 +51,31 @@ test('the sidebar opens with a box of the machine and the engine, beside the cat
   expect((await ui.find({ type: 'Text', text: /^메모리/ }))?.text).toBe('메모리 13.7/18GB · 디스크 256GB 남음')
   expect(await ui.find({ type: 'Text', text: /켜진 지/ })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /Claude Code/ }))?.text).toBe('Claude Code 2.1.310')
-  // Where the terminal draws pictures, the cat is one, five rows tall beside the lines; no half blocks.
+  // Before the terminal has said whether it draws pictures, the cat is one, five rows tall beside
+  // the lines: a terminal that cannot shows its blank alt there.
+  expect(await ui.find({ type: 'Text', text: /[▀▄█]/ })).toBeUndefined()
   const picture = await ui.find({ key: 'cat-picture' })
   expect(picture?.props.rows).toBe(5)
-  expect(picture?.props.columns).toBe(10)
-  expect((picture?.props.source as { png: string }).png.startsWith('iVBORw0KGgo')).toBe(true)
-  expect((await ui.findAll({ type: 'Text', text: /[▀▄█]/ })).length).toBe(0)
+  expect(picture?.props.columns).toBe(20)
+  expect(picture?.props.alt).toBe(' ')
+  expect((picture?.props.source as { png: string }).png).toBe(PNG_4X2)
   await ui.unmount()
 })
 
-test('where the terminal draws the picture\'s alt, the cat goes back to half blocks above the lines', async ($, on) => {
+test('with no pictures in assets/cat the sidebar draws no cat: the lines alone', async ($, on) => {
+  standInForEngine(on)
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await ui.find({ key: 'cat' })).toBeUndefined()
+  expect(await ui.find({ key: 'cat-mark' })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /M3/ }))?.text).toBe('Apple M3 Pro · 18GB')
+  await ui.unmount()
+})
+
+test('where the terminal draws the picture\'s alt, the cat goes and the lines stand alone', async ($, on) => {
   const standIn = standInForEngine(on)
+  catPictures(on)
   const blits: unknown[] = []
   on('ui.blit', (_, e) => {
     blits.push(e)
@@ -95,9 +88,12 @@ test('where the terminal draws the picture\'s alt, the cat goes back to half blo
   expect(await ui.find({ key: 'cat-picture' })).toBeDefined()
   await standIn.clock.advance(1000)
   expect(blits).toHaveLength(1)
-  expect(await ui.find({ key: 'cat-picture' })).toBeUndefined()
-  expect((await ui.findAll({ type: 'Text', text: /[▀▄█]/ })).length).toBeGreaterThan(0)
-  expect((await ui.find({ key: 'device-body' }))?.props.flexDirection).toBe('column')
+  // No cat, no mark, no half blocks: the lines alone, as in the app.
+  expect(await ui.find({ key: 'cat' })).toBeUndefined()
+  expect(await ui.find({ key: 'cat-mark' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /[▀▄█]/ })).toBeUndefined()
+  expect((await ui.find({ key: 'device-body' }))?.props.columnGap).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /M3/ }))?.text).toBe('Apple M3 Pro · 18GB')
   await ui.unmount()
 })
 
@@ -115,6 +111,7 @@ function typingBeneath(on: On): void {
 
 test('a picture that stands still is not sent again while nothing happens: no timer wakes for it', async ($, on) => {
   const standIn = standInForEngine(on)
+  catPictures(on)
   let blits = 0
   on('ui.blit', () => {
     blits += 1
@@ -133,6 +130,7 @@ test('a picture that stands still is not sent again while nothing happens: no ti
 
 test('a key in the prompt box sends the picture again, at most every ten seconds', async ($, on) => {
   const standIn = standInForEngine(on)
+  catPictures(on)
   typingBeneath(on)
   let blits = 0
   on('ui.blit', () => {
@@ -165,6 +163,7 @@ test('a key in the prompt box sends the picture again, at most every ten seconds
 
 test('a question that starts sends the picture again', async ($, on) => {
   const standIn = standInForEngine(on)
+  catPictures(on)
   let blits = 0
   on('ui.blit', () => {
     blits += 1
@@ -185,6 +184,7 @@ test('a question that starts sends the picture again', async ($, on) => {
 
 test('a closed sidebar is sent nothing: the first key forgets the picture, the keys after it ask for no panes till it is drawn again', async ($, on) => {
   const standIn = standInForEngine(on)
+  catPictures(on)
   typingBeneath(on)
   let blits = 0
   on('ui.blit', () => {
@@ -227,6 +227,7 @@ test('a closed sidebar is sent nothing: the first key forgets the picture, the k
 
 test('a sidebar first drawn after the probe stopped is still asked about', async ($, on) => {
   const standIn = standInForEngine(on)
+  catPictures(on)
   let blits = 0
   on('ui.blit', () => {
     blits += 1
@@ -270,6 +271,7 @@ test('awake, the cat\'s pictures blink one second in four, not every other', asy
 
 test('a blit taken keeps the picture, and is not asked again', async ($, on) => {
   const standIn = standInForEngine(on)
+  catPictures(on)
   let blits = 0
   on('ui.blit', () => {
     blits += 1
@@ -298,26 +300,12 @@ test('the cat\'s mood: a tool first, then what streams, then idle with or withou
   expect(catMood({ ...idle, isToolRunning: true, lastFailed: true })).toBe('busy')
 })
 
-test('only a cat at work moves: its picture changes with the second, a resting one stays', () => {
-  expect(catFrame('sleeping', 1)).toEqual(catFrame('sleeping', 2))
-  expect(catFrame('sleeping', 1).mark).toBe('z')
-  expect(catFrame('thinking', 3).mark).toBe('?')
-  expect(catFrame('startled', 3).mark).toBe('!')
-  expect(catFrame('writing', 1).art).not.toEqual(catFrame('writing', 2).art)
-  expect(catFrame('busy', 1).art).not.toEqual(catFrame('busy', 2).art)
-  // Awake, it blinks one second in four.
-  expect(catFrame('awake', 4).art).not.toEqual(catFrame('awake', 5).art)
-  expect(catFrame('awake', 5).art).toEqual(catFrame('awake', 6).art)
-  for (const mood of ['sleeping', 'awake', 'thinking', 'writing', 'busy', 'startled'] as const) {
-    for (const second of [1, 2]) {
-      expect(catFrame(mood, second).art).toHaveLength(32)
-      for (const row of catFrame(mood, second).art) expect(row).toHaveLength(32)
-    }
-  }
+test('beside the head: z asleep, ? thinking, ! startled, nothing otherwise', () => {
+  expect(catMark('sleeping')).toBe('z')
+  expect(catMark('thinking')).toBe('?')
+  expect(catMark('startled')).toBe('!')
+  for (const mood of ['awake', 'writing', 'busy'] as const) expect(catMark(mood)).toBe('')
 })
-
-/** A 4×2 PNG, base64. */
-const PNG_4X2 = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAEklEQVR4nGP4z8DwHxkzoAsAAA8hD/EEN8afAAAAAElFTkSuQmCC'
 
 test('a PNG\'s size is read from its header; what is not a PNG has none', () => {
   expect(pngSize(PNG_4X2)).toEqual({ width: 4, height: 2 })
@@ -357,6 +345,7 @@ test('the user\'s own PNGs in assets/cat/<mood> are the picture, a frame a secon
 
 test('idle, the sidebar\'s cat sleeps; after an answer with a failed call it is startled', async ($, on) => {
   standInForEngine(on)
+  catPictures(on)
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })

@@ -5,7 +5,7 @@ import { isIgnoredTool } from '../hooks/activity'
 import { isAppSurface } from '../hooks/pane'
 import { shortToolName, summarize } from '../hooks/summary'
 import type { TurnRecord } from '../types'
-import { NOW, standInForEngine, start } from './engine'
+import { catPictures, NOW, standInForEngine, start } from './engine'
 
 // The desktop app (2026-11-05): what draws broken there is drawn plainly, the terminal untouched.
 
@@ -37,6 +37,7 @@ test('the app surfaces: the desktop app, and VS Code assumed alike', () => {
 
 test('in the desktop app the sidebar draws no cat and no borders: each box a title row and a rule; the effort is text', async ($, on) => {
   standInForEngine(on)
+  catPictures(on)
   await start($)
 
   const app = await sidebar($, 'desktop')

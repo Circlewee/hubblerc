@@ -9,8 +9,7 @@ import { CHANGELOG_URL, deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from './forecast'
 import { ANSWER_ID, isAppSurface, isSidebarShown, SIDEBAR_COLUMNS, SIDEBAR_ID, SIDEBAR_TITLE } from './pane'
 import { openAnswer } from './answer'
-import { catImageAt } from './cat-images'
-import { CAT_PALETTE, catFrame, catMood, pixelPicture, pixelRows, pixelSize } from './pixel-art'
+import { catImageAt, catMark, catMood } from './cat-images'
 import { requestRestart } from './relaunch'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, SessionFile, TocEntry } from './sidebar-format'
@@ -202,7 +201,7 @@ let drawnPicture: { source: { png: string }; columns: number; rows: number } | n
 
 /**
  * Whether the terminal draws the cat's picture: once the sidebar has drawn one, a blit of the same
- * source answers. Refused for the `alt`, the cat goes back to half blocks (the sidebar redraws on
+ * source answers. Refused for the `alt`, the cat goes and the lines stand alone (the sidebar redraws on
  * the write); refused for anything else (not mounted yet), the next second asks again. Asked from
  * a timer: a render hook writes no state.
  */
@@ -464,7 +463,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     }
 
     // A cat that shows what the session does, and the machine and the engine: the cat a picture beside
-    // the lines where the terminal draws one, else half blocks above them.
+    // the lines where the terminal draws one, else the lines alone.
     const lines = deviceLines(deviceInfo)
     const note = versionNote(deviceInfo)
     const lastDone = turnList.findLast(turn => turn.durationMs !== null)
@@ -475,15 +474,15 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       lastFailed: lastDone !== undefined && lastDone.runs.some(run => run.isError),
     })
     const second = Math.floor(now / 1000)
-    const cat = catFrame(mood, second)
-    // As a picture, the cat keeps its pixels square in a box as tall as the lines beside it: the
-    // PNGs in assets/cat for the mood (a frame a second) where there are some, else the art drawn
-    // as one. In half blocks it takes a cell for two pixels and stands above the lines.
-    // The app draws no cat: it has no Image, and its rows part the half blocks into stripes.
-    const ownImage = Image === undefined || isApp ? undefined : (catImageAt(mood, second) ?? undefined)
-    const artSize = ownImage ?? pixelSize(cat.art)
-    const picture = Image === undefined || isApp ? null : ownImage !== undefined ? { png: ownImage.png } : pixelPicture(cat.art, CAT_PALETTE)
-    const pictureColumns = Math.max(1, Math.round((PICTURE_ROWS * 2 * artSize.width) / Math.max(1, artSize.height)))
+    // The cat is a picture, its pixels square in a box as tall as the lines beside it: the PNGs in
+    // assets/cat for the mood, a frame a second. Drawn while the terminal has not said whether it
+    // draws pictures (one that cannot shows the blank `alt`). None in the app, where the terminal
+    // refused the picture, or with no PNGs: the lines alone (the half-block cat and the art drawn as
+    // a PNG went, 2026-11-06).
+    const image = Image === undefined || isApp ? null : catImageAt(mood, second)
+    const picture = image === null ? null : { png: image.png }
+    const pictureColumns = image === null ? 0 : Math.max(1, Math.round((PICTURE_ROWS * 2 * image.width) / Math.max(1, image.height)))
+    const mark = catMark(mood)
     drawnPicture = picture === null ? null : { source: picture, columns: pictureColumns, rows: PICTURE_ROWS }
     // A new source goes to the terminal with this drawing.
     if (picture !== null && picture.png !== sentPicture) {
@@ -492,42 +491,22 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     }
     // Drawn while the probe had stopped (nothing drawn in its first ten seconds): ask again.
     if (picture !== null && pictureState === 'unknown') startProbe($)
-    const catRows = picture === null && !isApp ? pixelRows(cat.art, CAT_PALETTE) : []
-    const mark = (
-      // Beside the head: z, ?, !; a column of its own, so nothing moves. Over the blocks' empty last
-      // column; a picture's cells are its own.
-      <Box key="cat-mark-box" width={1} flexShrink={0} {...(picture === null ? { marginLeft: -1 } : {})}>
-        <Text key="cat-mark" {...(mood === 'startled' ? { color: THEME_COLORS.alert, bold: true } : { dimColor: true })}>
-          {cat.mark === '' ? ' ' : cat.mark}
-        </Text>
-      </Box>
-    )
     const deviceBox = box(
       'device',
       '장비',
       // A row of air above and below: the cat and its lines sit apart from the borders.
-      <Box key="device-body" {...(picture === null ? { flexDirection: 'column' as const, rowGap: 1 } : { columnGap: 2 })} paddingY={1}>
-        {isApp ? null : picture !== null && Image !== undefined ? (
+      <Box key="device-body" {...(picture === null ? {} : { columnGap: 2 })} paddingY={1}>
+        {picture !== null && Image !== undefined ? (
           <Box key="cat" flexShrink={0}>
             <Image key={PICTURE_KEY} source={picture} columns={pictureColumns} rows={PICTURE_ROWS} alt=" " />
-            {mark}
-          </Box>
-        ) : (
-          <Box key="cat" flexShrink={0}>
-            <Box flexDirection="column" flexShrink={0}>
-              {catRows.map((row, y) => (
-                <Box key={`cat-${y}`}>
-                  {row.map((run, x) => (
-                    <Text key={`cat-${y}-${x}`} {...(run.color === undefined ? {} : { color: run.color })} {...(run.backgroundColor === undefined ? {} : { backgroundColor: run.backgroundColor })}>
-                      {run.text}
-                    </Text>
-                  ))}
-                </Box>
-              ))}
+            {/* Beside the head: z, ?, !; a column of its own, so nothing moves. */}
+            <Box key="cat-mark-box" width={1} flexShrink={0}>
+              <Text key="cat-mark" {...(mood === 'startled' ? { color: THEME_COLORS.alert, bold: true } : { dimColor: true })}>
+                {mark === '' ? ' ' : mark}
+              </Text>
             </Box>
-            {mark}
           </Box>
-        )}
+        ) : null}
         <Box flexDirection="column">
           {lines.length === 0 && deviceInfo?.version === undefined ? <Text dimColor>장비 정보를 읽는 중</Text> : null}
           {lines.map((line, i) => (
@@ -701,8 +680,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const isFilesOpen = files.length > 0 && !foldedIds.includes('files')
     const isContentsOpen = !foldedIds.includes('contents')
     const above =
-      // Air above and below; a picture beside the lines, or blocks above them with a row between.
-      boxRows('device', 2 + (isApp ? deviceText : picture === null ? catRows.length + 1 + deviceText : Math.max(PICTURE_ROWS, deviceText))) +
+      // Air above and below; a picture beside the lines, or the lines alone.
+      boxRows('device', 2 + (picture === null ? deviceText : Math.max(PICTURE_ROWS, deviceText))) +
       boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1) + (likelyLine === '' ? 0 : 1)) +
       boxRows('activity', activity.length) +
       (files.length === 0 ? 0 : boxRows('files', 0)) +

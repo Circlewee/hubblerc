@@ -1,7 +1,39 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { CatMood } from './pixel-art'
+/**
+ * What the cat shows of the session:
+ * - sleeping: nothing runs (eyes shut, `z`)
+ * - awake: an answer runs, nothing streams yet (eyes open, a blink now and then)
+ * - thinking: the response streams thinking (eyes up, `?`)
+ * - writing: the response streams the answer (mouth opening and closing)
+ * - busy: a tool or a subagent runs (eyes darting, an ear flicking, the tail swishing)
+ * - startled: idle after an answer with a failed call, till the next (wide eyes, mouth open, `!`)
+ */
+export type CatMood = 'sleeping' | 'awake' | 'thinking' | 'writing' | 'busy' | 'startled'
+
+export type CatState = {
+  /** An answer of the main loop runs. */
+  isWorking: boolean
+  /** A tool call runs, or a subagent. */
+  isToolRunning: boolean
+  phase: 'thinking' | 'text' | null
+  /** The last finished answer had a failed call. */
+  lastFailed: boolean
+}
+
+/** The mood, the first that holds: busy, thinking, writing, awake; idle, startled or sleeping. */
+export function catMood(state: CatState): CatMood {
+  if (state.isToolRunning) return 'busy'
+  if (state.isWorking) return state.phase === 'thinking' ? 'thinking' : state.phase === 'text' ? 'writing' : 'awake'
+
+  return state.lastFailed ? 'startled' : 'sleeping'
+}
+
+/** The mark beside the cat's head for a mood: `z` asleep, `?` thinking, `!` startled, else none. */
+export function catMark(mood: CatMood): string {
+  return mood === 'sleeping' ? 'z' : mood === 'thinking' ? '?' : mood === 'startled' ? '!' : ''
+}
 
 /** How many of the cat's pictures were read: written once they are, so the sidebar redraws. */
 const catImageCount = atom({ plugin: 'hubblerc', key: 'catImageCount' } as const, 0)

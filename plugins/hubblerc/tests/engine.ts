@@ -301,6 +301,18 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
   return standIn
 }
 
+/** A 4×2 PNG, base64. */
+export const PNG_4X2 = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAEklEQVR4nGP4z8DwHxkzoAsAAA8hD/EEN8afAAAAAElFTkSuQmCC'
+
+/**
+ * The cat's pictures as assets/cat holds them: one awake frame, which every mood shows. Without
+ * them the sidebar draws no cat.
+ */
+export function catPictures(on: On): void {
+  on('fs.list', (_, e) => (e.path.endsWith('/assets/cat/awake') ? { value: [{ name: '01.png', kind: 'file' as const, size: 70, mtimeMs: 0, isLink: false }] } : { deny: 'no folder' }))
+  on('fs.read', (_, e) => (e.path.includes('/assets/cat/awake/') ? { value: { base64: PNG_4X2 } as never } : { deny: 'no file' }))
+}
+
 export async function start($: Engine): Promise<void> {
   await $.session.start({ cwd: '/repo/hubblerc', surface: 'terminal', isInteractive: true })
 }
