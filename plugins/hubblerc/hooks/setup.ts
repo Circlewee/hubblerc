@@ -5,12 +5,12 @@ import { canRelaunch } from './relaunch'
 /**
  * What a machine needs beside the plugin, which no install carries: the keys in
  * `~/.claude/keybindings.json`, auto-update, the shell setup (sourced from `~/.zshrc`: the relaunch
- * function, and in Orca the value that lets Claude Code draw pictures), the fullscreen layout; and what it is better without or with: claude-hud's status
- * line (the band takes its place), a response language.
+ * function, and in Orca the value that lets Claude Code draw pictures), the fullscreen layout.
  *
- * At session.start the needed ones are checked and, when one is missing, one line says so; `/setup`
- * shows them all, adds the missing keys, turns auto-update on and puts the function in place (each
- * file it changes kept as `.bak` first). The fullscreen layout and the advice are only told.
+ * At session.start they are checked and, when one is missing, one line says so; `/setup` shows
+ * them all, adds the missing keys, turns auto-update on and puts the function in place (each file it
+ * changes kept as `.bak` first). The fullscreen layout is only told. (The advice on claude-hud's
+ * status line and a response language went, 2026-11-06.)
  */
 
 /**
@@ -205,20 +205,13 @@ export function withRelaunchLine(zshrc: string | undefined, scriptPath: string, 
   return `${text}${gap}${block}`
 }
 
-/**
- * What the settings say that the setup looks at, merged: what applies in this folder. A project's
- * own `statusLine` (this repository's settings.local.json sets a no-op one) hides claude-hud here
- * while the user's file still runs it elsewhere, and here it is rightly not reported.
- */
-export type SettingsFacts = { tui: unknown; language: unknown; statusLine: unknown }
+/** What the settings say that the setup looks at, merged: what applies in this folder. */
+export type SettingsFacts = { tui: unknown }
 
-/** The machine's state: our keys, and the settings' fullscreen, language and status line. */
+/** The machine's state: our keys, and the settings' fullscreen. */
 export type SetupState = {
   keys: KeyState[]
   isFullscreen: boolean
-  hasLanguage: boolean
-  /** claude-hud's status line is on: it shows what the band does, twice. */
-  hasClaudeHud: boolean
   /** The keybindings file is there and is not JSON: its keys cannot be read or added. */
   isKeyFileBroken: boolean
   /** Claude Code updates hubblerc as it starts (the user's settings say so). */
@@ -228,17 +221,9 @@ export type SetupState = {
 }
 
 export function setupState(keyFile: string | undefined, settings: SettingsFacts, settingsFile?: string, relaunch?: RelaunchFacts): SetupState {
-  const runsHud = (line: unknown) => {
-    const command = typeof line === 'object' && line !== null ? (line as { command?: unknown }).command : undefined
-
-    return typeof command === 'string' && command.includes('claude-hud')
-  }
-
   return {
     keys: keyStates(keyFile),
     isFullscreen: settings.tui === 'fullscreen',
-    hasLanguage: typeof settings.language === 'string' && settings.language.trim() !== '',
-    hasClaudeHud: runsHud(settings.statusLine),
     isKeyFileBroken: keyFile !== undefined && keyFile.trim() !== '' && parse(keyFile) === null,
     isAutoUpdating: isAutoUpdating(settingsFile),
     relaunch: relaunch === undefined ? null : relaunchState(relaunch),
@@ -247,7 +232,7 @@ export function setupState(keyFile: string | undefined, settings: SettingsFacts,
 
 /**
  * How many of the needed things are missing: our keys, the fullscreen layout, auto-update, the
- * relaunch function where `/setup` can put it. The rest are advice.
+ * relaunch function where `/setup` can put it.
  */
 export function missingCount(state: SetupState): number {
   return (
@@ -299,14 +284,6 @@ export function setupReport(
   lines.push(...relaunchLines(state.relaunch, relaunchChange))
 
   lines.push(state.isFullscreen ? '✓ 전체 화면 (tui: fullscreen)' : '✗ 전체 화면이 아닙니다: `/tui fullscreen`을 실행하거나 `~/.claude/settings.json`에 `"tui": "fullscreen"`. 사이드바와 버튼 클릭은 전체 화면에서만 됩니다')
-
-  lines.push('', '권장')
-  lines.push(
-    state.hasClaudeHud
-      ? '· claude-hud 상태줄이 켜져 있어 밴드와 같은 정보가 두 번 보입니다. `~/.claude/settings.json`에서 `"statusLine"`을 지우고, 다른 곳에서도 안 쓰면 `/plugin uninstall claude-hud`. hubblerc를 이 폴더에서만 켰다면 다른 폴더에서는 그대로 두어도 됩니다'
-      : '✓ claude-hud 상태줄 없음',
-  )
-  lines.push(state.hasLanguage ? '✓ 응답 언어(language) 설정됨' : '· 응답 언어가 없습니다: `~/.claude/settings.json`에 `"language": "korean"`. hubblerc 문구는 한국어입니다')
 
   return lines.join('\n')
 }
@@ -361,14 +338,10 @@ async function readState($: EngineInterface): Promise<ReadState> {
   const settingsPath = dir === undefined ? undefined : `${dir}/settings.json`
   const text = path === undefined ? undefined : await $.fs.read(path).catch(() => undefined)
   const settingsText = settingsPath === undefined ? undefined : await $.fs.read(settingsPath).catch(() => undefined)
-  const [tui, language, statusLine] = await Promise.all([
-    $.settings.read({ key: 'tui' }),
-    $.settings.read({ key: 'language' }),
-    $.settings.read({ key: 'statusLine' }),
-  ])
+  const tui = await $.settings.read({ key: 'tui' })
   const relaunch = await readRelaunch($, dir).catch(() => undefined)
 
-  return { path, text, settingsPath, settingsText, relaunch, state: setupState(text, { tui, language, statusLine }, settingsText, relaunch?.facts) }
+  return { path, text, settingsPath, settingsText, relaunch, state: setupState(text, { tui }, settingsText, relaunch?.facts) }
 }
 
 /** The script the plugin ships, the copy under Claude Code's folder, and the shell's startup file (`$ZDOTDIR` or home). */

@@ -14,7 +14,6 @@ const ALL = [
 ]
 const COMMAND = { args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }
 const KEY_FILE = '/home/me/.claude/keybindings.json'
-const HUD = { type: 'command', command: 'node ~/.claude/plugins/cache/claude-hud/dist/index.js' }
 
 test("our keys are found each in its context: bound, missing, or bound to something else", () => {
   expect(keyStates(JSON.stringify({ bindings: ALL })).map(key => [key.id, key.state])).toEqual([
@@ -77,22 +76,16 @@ test('the close key joins a Pane block already there, the engine\'s own ctrl+x x
   ])
 })
 
-test('needed: our keys and the fullscreen layout; claude-hud and the language are advice', () => {
+test('needed: our keys and the fullscreen layout', () => {
   const done = setupState(
     JSON.stringify({ bindings: ALL }),
-    { tui: 'fullscreen', language: 'korean', statusLine: undefined },
+    { tui: 'fullscreen' },
     JSON.stringify({ extraKnownMarketplaces: { hubblerc: { source: { source: 'github', repo: 'Circlewee/hubblerc' }, autoUpdate: true } } }),
   )
   expect(missingCount(done)).toBe(0)
-  expect(done.hasClaudeHud).toBe(false)
 
-  const bare = setupState(undefined, { tui: undefined, language: undefined, statusLine: HUD })
+  const bare = setupState(undefined, { tui: undefined })
   expect(missingCount(bare)).toBe(6)
-  expect(bare.hasClaudeHud).toBe(true)
-  expect(bare.hasLanguage).toBe(false)
-
-  // A project's own status line in place of claude-hud: none here.
-  expect(setupState(undefined, { tui: 'fullscreen', language: 'korean', statusLine: { type: 'command', command: 'true' } }).hasClaudeHud).toBe(false)
 })
 
 /** The machine's home and its keybindings file, as the test sets them. */
@@ -139,6 +132,10 @@ test('/setup adds the missing keys, keeps the old file as .bak, and tells the re
   )
   expect(text).toContain('✗ 전체 화면이 아닙니다')
   expect(text).toContain(`원래 파일은 \`${KEY_FILE}.bak\``)
+  // No advice on claude-hud or a response language: the fullscreen layout ends it.
+  expect(text).not.toContain('권장')
+  expect(text).not.toMatch(/claude-hud|응답 언어/)
+  expect(text.trimEnd().split('\n').at(-1)).toMatch(/^✗ 전체 화면이 아닙니다/)
 
   // A second run has nothing to add and writes nothing.
   files[`${KEY_FILE}.bak`] = 'untouched'

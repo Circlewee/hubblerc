@@ -76,7 +76,6 @@ export async function startTodos($: EngineInterface): Promise<void> {
   offered = null
   undo = null
   editing = null
-  focusMiss = null
   const tab = await $.store.get(TAB_KEY).catch(() => undefined)
   if (tab === 'contents' || tab === 'todo') await update($, sidebarTab, () => tab)
   await refreshTodos($).catch(() => undefined)
@@ -218,7 +217,7 @@ export async function runTodoCommand($: EngineInterface, args: string): Promise<
   if (text === '') {
     await refreshTodos($)
 
-    return `${todoListText(loaded?.record.items ?? [])}${focusMissLine()}`
+    return todoListText(loaded?.record.items ?? [])
   }
   const [word = ''] = text.split(/\s/, 1)
   const rest = text.slice(word.length).trim()
@@ -296,12 +295,6 @@ export async function undoDelete($: EngineInterface): Promise<void> {
 }
 
 /**
- * Why the keyboard last failed to reach the edit field, and when: shown under `/todo`'s list (a
- * development aid, till the field is known to take it at once on screen). Null after a move that took.
- */
-let focusMiss: { at: number; reason: string } | null = null
-
-/**
  * A press on an item's text: the field below edits it (filled with the text), and the keyboard moved
  * there in one press. A mouse press leaves the keys in the prompt, and `$.ui.focus` moves the ring of
  * a pane holding them only: so the pane asks for them first (`askSidebarKeyboard`). Refused (text in
@@ -315,24 +308,9 @@ export async function startEditTodo($: EngineInterface, id: number): Promise<voi
   const field = `todo-edit-${id}-${(await $.clock.now()).toString(36)}-${edits}`
   editing = { key, id, field, sawFocus: false }
   await redraw($)
-  const held = await askSidebarKeyboard($).catch(() => undefined)
-  const moved = await $.ui.focus({ requestId: SIDEBAR_ID, key: field }).catch((error: unknown) => ({ deny: String(error) }))
-  if (moved.deny === undefined) {
-    focusMiss = null
-
-    return
-  }
-  const keyboard = held === false ? ' (패널이 키보드를 받지 못함: 입력창에 글이 있거나 대화상자·다른 패널이 키를 가짐)' : held === undefined ? ' (사이드바 패널을 찾지 못함)' : ''
-  focusMiss = { at: await $.clock.now(), reason: `${moved.deny}${keyboard}` }
-}
-
-/** `/todo`'s last line while the keyboard last missed the edit field: what the engine said. */
-function focusMissLine(): string {
-  if (focusMiss === null) return ''
-  const date = new Date(focusMiss.at)
-  const two = (n: number) => String(n).padStart(2, '0')
-
-  return `\n(디버그) 수정 칸으로 키보드를 옮기지 못함 ${two(date.getHours())}:${two(date.getMinutes())}: ${focusMiss.reason}`
+  await askSidebarKeyboard($).catch(() => undefined)
+  // Refused, the field still takes a second press (the `/todo` line saying why went, 2026-11-06).
+  await $.ui.focus({ requestId: SIDEBAR_ID, key: field }).catch(() => undefined)
 }
 
 /**
