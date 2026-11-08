@@ -21,9 +21,6 @@ type Sent = { model: string; effort: string | undefined; isAuto: boolean }
 const MAX_LOOPS = 50
 const sentBy = new Map<string, Sent>()
 
-/** Git keeps one line per trailer name: an amend replaces the old values instead of adding beside them. */
-const BEFORE_COMMIT = '-c trailer.ifexists=replace '
-
 let device: Promise<string | undefined> | undefined
 
 /** Notes the model and effort a loop's request went out with: what that loop's commits are signed with. */
@@ -39,14 +36,17 @@ export function noteRequest(agentId: string | undefined, model: string, effort: 
 
 export function signCommits(on: On): void {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const spots = findCommits(e.command)
+    // An amend keeps the trailers the commit already has: git would add a second set beside them.
+    const spots = findCommits(e.command)?.filter(spot => !spot.isAmend)
     if (spots === undefined || spots.length === 0) return next(e)
     if (!(await isOnHere($, spots))) return next(e)
 
     const lines = await trailerLines($, e.agentId)
     const after = lines.map(line => ` --trailer ${shellQuote(line)}`).join('')
 
-    return next({ ...e, command: withAround(e.command, spots, BEFORE_COMMIT, after) })
+    // Nothing goes before `commit`: the command still starts `git commit`, so a person's
+    // `Bash(git commit:*)` rule still matches it at the permission prompt.
+    return next({ ...e, command: withAround(e.command, spots, '', after) })
   }).catch(($, e, next) => next(e))
 
   // The texts the engine asks the model to end a commit or a pull request with: none.

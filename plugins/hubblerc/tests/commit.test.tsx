@@ -62,6 +62,12 @@ test('git -C names the folder the commit is made in', () => {
   expect(findCommits('git -c user.name=me commit -m x')?.[0]?.dir).toBeUndefined()
 })
 
+test('an amend is told apart, by its own words only', () => {
+  expect(findCommits('git commit --amend --no-edit')?.[0]?.isAmend).toBe(true)
+  expect(findCommits('git commit -m "--amend"')?.[0]?.isAmend).toBe(false)
+  expect(findCommits('git commit -m x && git log --amend')?.[0]?.isAmend).toBe(false)
+})
+
 test('a message, a here-document, a comment or another git command is no commit', () => {
   const claudeStyle = `git add a.ts && git commit -m "$(cat <<'EOF'\nSubject "quoted"\n\nBody mentions git commit -m\nEOF\n)"`
   expect(spotsIn(claudeStyle)).toEqual(['commit'])
@@ -82,7 +88,7 @@ test('a command the reader cannot follow is left alone', () => {
 test('the trailers go right after commit, the replace setting right before it', () => {
   const command = 'git add a && git commit -m x'
   const spots = findCommits(command) ?? []
-  expect(withAround(command, spots, '-c trailer.ifexists=replace ', ` --trailer ${shellQuote('Agent: claude')}`)).toBe("git add a && git -c trailer.ifexists=replace commit --trailer 'Agent: claude' -m x")
+  expect(withAround(command, spots, '', ` --trailer ${shellQuote('Agent: claude')}`)).toBe("git add a && git commit --trailer 'Agent: claude' -m x")
   expect(shellQuote("it's")).toBe(`'it'\\''s'`)
 })
 
@@ -101,7 +107,7 @@ test('a commit Claude runs is signed with the session, the model and effort its 
   await bash($, 'git add a.ts && git commit -m "Fix the box"')
 
   expect(seen.commands).toEqual([
-    "git add a.ts && git -c trailer.ifexists=replace commit --trailer 'Agent: claude' --trailer 'Session: session-1' --trailer 'Model: claude-opus-5-5' --trailer 'Effort: xhigh' --trailer 'Device: MacBook Pro (M3 Pro)' -m \"Fix the box\"",
+    "git add a.ts && git commit --trailer 'Agent: claude' --trailer 'Session: session-1' --trailer 'Model: claude-opus-5-5' --trailer 'Effort: xhigh' --trailer 'Device: MacBook Pro (M3 Pro)' -m \"Fix the box\"",
   ])
 })
 
@@ -117,6 +123,16 @@ test('a repository with hubblerc.trailers false gets none; a command with no com
   await bash($, 'echo "git commit"')
 
   expect(seen.commands).toEqual(['git commit -m x', 'echo "git commit"'])
+})
+
+test('an amend keeps the trailers it has; the command still starts "git commit" for a permission rule', async ($, on) => {
+  const seen = standIn(on)
+  await request($)
+  await bash($, 'git commit --amend --no-edit')
+  await bash($, 'git commit -m x')
+
+  expect(seen.commands[0]).toBe('git commit --amend --no-edit')
+  expect(seen.commands[1]?.startsWith("git commit --trailer 'Agent: claude'")).toBe(true)
 })
 
 test("Claude Code's own attribution lines are dropped from commits and pull requests; its other texts pass", async ($, on) => {

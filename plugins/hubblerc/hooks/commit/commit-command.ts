@@ -8,8 +8,11 @@
  * `undefined`: the caller leaves it as it is rather than guess.
  */
 
-/** One `git … commit` in a command: the `commit` word's span, and the `-C` folder before it. */
-export type CommitSpot = { at: number; end: number; dir: string | undefined }
+/**
+ * One `git … commit` in a command: the `commit` word's span, the `-C` folder before it, and whether
+ * it rewrites the last commit (`--amend` among its words).
+ */
+export type CommitSpot = { at: number; end: number; dir: string | undefined; isAmend: boolean }
 
 type Context = 'code' | 'double' | 'single' | 'backtick'
 
@@ -196,9 +199,20 @@ function commitAfterGit(command: string, from: number): CommitSpot | undefined {
       continue
     }
     if (FLAG_OPTIONS.has(token.text) || /^--(git-dir|work-tree|namespace|exec-path)=/.test(token.text)) continue
-    if (token.text === 'commit' && token.isPlain) return { at: token.start, end: token.end, dir }
+    if (token.text === 'commit' && token.isPlain) return { at: token.start, end: token.end, dir, isAmend: hasWord(command, token.end, '--amend') }
 
     return undefined
+  }
+}
+
+/** Whether a word stands among the command's words from `from` on, up to its end (an operator, a newline). */
+function hasWord(command: string, from: number, word: string): boolean {
+  let i = from
+  for (;;) {
+    const token = readToken(command, i)
+    if (token === undefined) return false
+    if (token.isPlain && token.text === word) return true
+    i = token.end
   }
 }
 
