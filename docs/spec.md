@@ -417,7 +417,7 @@ OpenAI Decisions·Jev처럼 입력 글 + 질문(predicate 예/아니오, choice 
 - 모르는 것: Aside 쪽 비용(Aside 설정의 모델로 도는 별도 에이전트, CLI로는 안 보여 Aside 앱·계정 화면에서 확인해야 함), "끝나면 연 탭을 닫아라" 지시로 탭이 실제로 닫히는지(실측 때는 이 지시가 없었고, 아직 확인 안 함).
 - 화면에서 확인할 것: "## 확인할 것"에.
 
-### F12. 커밋 꼬리말 (2026-11-08 사용자 결정, 구현 전, 할 일 id 5)
+### F12. 커밋 꼬리말 (2026-11-08 사용자 결정, 2026-11-08 구현·테스트 통과, 실제 세션 확인 전, 할 일 id 5)
 Claude가 만든 커밋에 어느 세션·모델·effort·기기에서 했는지를 기계가 읽는 꼬리말로 남긴다. hubblerc가 켜진 모든 세션(Orca의 Claude 워커 포함)에 적용한다.
 - 범위: 꼬리말만. 제목·본문·언어 규칙은 정하지 않는다(이 저장소의 "커밋 메시지는 영어"는 CLAUDE.md 그대로).
 - 붙이는 방식: Claude의 Bash `git commit …`을 `tool.call`에서 가로채 `--trailer`를 덧붙인다. 확실히 알아보는 형태에만 끼우고, 모르는 형태(스크립트 안 커밋, 별칭, 변수로 감싼 명령)는 손대지 않는다(꼬리말만 빠지고 커밋은 정상). 지시문으로 시키는 안은 Claude가 세션 id·effort를 정확히 모르고 잊을 수 있어, git 전역 훅(`core.hooksPath`)은 모든 저장소의 기존 git 훅을 끄므로 뺐다. Codex 워커(hubblerc 없음)는 F13 지시서에 코드가 적어 준 꼬리말을 직접 붙인다.
@@ -437,6 +437,7 @@ Claude가 만든 커밋에 어느 세션·모델·effort·기기에서 했는지
 - 서명 줄 제거(사용자 요청, "플러그인 한정"): `attribution.text` 훅으로 kind `commit`·`pr`을 빈 글로 돌려 `Co-Authored-By: Claude …`와 PR의 `🤖 Generated with [Claude Code]`를 없앤다. 사용자 설정(`attribution`)은 건드리지 않는다. 타입 문서 예시가 이 코드 그대로다 [확인: 타입 문서]. `exemption`·`remedy`(엔진의 커밋 관련 안내 문장)는 무엇인지 몰라 손대지 않는다. 저장소별 꼬리말 끄기와 상관없이 항상 적용.
 - 시험할 것: 지시가 없을 때 Claude가 습관적으로 서명을 붙이는지, heredoc·`-F`·`&&` 연결·`git -C` 형태에서 `--trailer`가 맞게 들어가는지, 끼워 넣다 명령을 망가뜨리는 경우가 없는지.
 - 자원: 새 타이머 없음. 모든 Bash 호출에서 `git commit`인지 글자로 보는 정도. 기종 읽기는 세션당 한 번.
+- 구현: hooks/commit/commit-command.ts(명령에서 커밋 위치 찾기, 순수), hooks/commit/trailers.ts(tool.call Bash 훅·attribution.text 훅·기종 읽기), effort.ts가 요청마다 모델·effort를 noteRequest로 알림. 고친 커밋(--amend)에 꼬리말이 두 번 붙지 않게 commit 앞에 -c trailer.ifexists=replace를 함께 넣는다 [확인: 임시 저장소 시험].
 
 ### F13. relay: 리드·워커 오케스트레이션 스킬 (2026-11-06~08 사용자와 설계, 구현 전, 할 일 id 2)
 큰 작업을 워커들에게 나눠 돌리고, 다른 모델(Codex)로 검증하고, 긴 작업을 다른 세션이 이어받게 하는 스킬 `hubblerc:relay`. 작은 일도 느리지 않게 하는 것이 같은 무게의 목표다.

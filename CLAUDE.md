@@ -11,7 +11,7 @@ plugins/hubblerc/
   .claude-plugin/plugin.json   버전·userConfig
   hooks/register.tsx           진입점: 모든 훅 연결(이벤트당 매처 없는 훅은 하나만 됨)
   hooks/commands.ts            슬래시 명령 등록·응답
-  hooks/status/  effort/  activity/  sidebar/(boxes/)  todo/  system/  likely/  shared/
+  hooks/status/  effort/  activity/  sidebar/(boxes/)  todo/  system/  likely/  commit/  shared/
   skills/aside-research/       플러그인 스킬
   shell/relaunch.zsh           /setup이 까는 셸 함수(claude 재시작, hubblerc-key)
   tests/                       claude plugin test용, tests/engine.ts가 엔진 대역

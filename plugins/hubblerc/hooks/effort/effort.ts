@@ -5,6 +5,7 @@ import type { EffortSample, EffortSource } from '../../types'
 import { autoLevelFor, isAutoOn } from './auto-effort'
 import { noteFirstRequest } from './effort-record'
 import { addTokens } from '../status/forecast'
+import { noteRequest } from '../commit/trailers'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
@@ -37,8 +38,14 @@ export function effortSamples(): readonly EffortSample[] {
  */
 export function controlEffort(on: On, autoByDefault: boolean): void {
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId !== undefined) return yield* next(e)
-    if (e.effort === undefined) return yield* watchPhase($, next(e))
+    if (e.agentId !== undefined) {
+      noteRequest(e.agentId, e.model, e.effort === undefined ? undefined : String(e.effort), false)
+      return yield* next(e)
+    }
+    if (e.effort === undefined) {
+      noteRequest(undefined, e.model, undefined, false)
+      return yield* watchPhase($, next(e))
+    }
 
     const engine = String(e.effort)
     if ((await read($, engineEffort)) !== engine) await update($, engineEffort, () => engine)
@@ -57,6 +64,7 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
       }
     }
 
+    noteRequest(undefined, e.model, String(effort), source === 'auto' || source === 'fallback')
     // Auto's record: whether the first request went out at the pick.
     if (e.index === 0) void noteFirstRequest($, e.turnId, String(effort), source).catch(() => undefined)
     const result: TurnStepResult = yield* watchPhase($, next(effort === e.effort ? e : { ...e, effort }))
