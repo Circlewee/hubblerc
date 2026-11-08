@@ -4,6 +4,7 @@ import type { On } from 'claude-code'
 
 import { checkTask, decisionRows, globsOverlap, isPending, isTestFile, parseReport, pathMatches, reportMismatches, withoutSections } from '../hooks/relay/relay-format'
 import type { RelayState } from '../hooks/relay/relay-format'
+import { reserveDispatch } from '../hooks/relay/relay'
 import { standInForEngine, start } from './engine'
 
 const ROOT = '/repo/work'
@@ -17,14 +18,17 @@ const NOON = new Date(2026, 10, 9, 12, 0).getTime()
 const RUN = '2026-11-09-demo'
 const DIR = `${ROOT}/.relay/runs/${RUN}`
 
-type Commit = { task: string; subject: string; files: string[] }
+/** A commit: its Task trailer, subject, files; its Run trailer (the demo run when absent); whether it descends from the base. */
+type Commit = { task: string; subject: string; files: string[]; run?: string; offBase?: boolean }
 type Sim = {
   files: Record<string, string>
   head: string
   commits: Record<string, Commit>
-  /** What `/bin/sh -c <command>` exits with and prints, by the command. */
-  commands: Record<string, { exitCode: number; stdout?: string }>
+  /** What `/bin/sh -c <command>` exits with and prints, by the command, and what running it changes. */
+  commands: Record<string, { exitCode: number; stdout?: string; effect?: () => void }>
   ran: string[]
+  /** What `git status --porcelain` prints ('' a clean tree; null: git status fails). */
+  status: string | null
 }
 
 /** A small FNV hash: what shasum stands in for when the environment has no digest. */
@@ -37,7 +41,7 @@ function fnv(text: string): string {
 
 /** Stands for the engine beneath the plugin: files in memory, a repository with a few commits, a shell that answers by the command. */
 function standIn(on: On): Sim {
-  const sim: Sim = { files: {}, head: HEAD_1, commits: {}, commands: {}, ran: [] }
+  const sim: Sim = { files: {}, head: HEAD_1, commits: {}, commands: {}, ran: [], status: '' }
   const isDir = (path: string) => Object.keys(sim.files).some(file => file.startsWith(`${path}/`))
   on('session.id', () => ({ value: 'lead-session-1234' }))
   on('session.cwd', () => ({ value: ROOT }))
@@ -59,31 +63,67 @@ function standIn(on: On): Sim {
 
     return { value: [...names].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: 0, isLink: false })) }
   })
-  on('process.run', (_, e) => {
-    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    const argv = e.argv
-    const last = argv.at(-1) ?? ''
-    if (argv[0] === '/usr/bin/shasum') return out(`${fnv(e.init?.stdin ?? '')}  -\n`)
-    if (argv[0] === '/bin/sh' && argv[1] === '-c') {
-      sim.ran.push(argv[2] ?? '')
-      const answer = sim.commands[argv[2] ?? ''] ?? { exitCode: 127, stdout: 'not found' }
-
-      return out(answer.stdout ?? '', answer.exitCode)
-    }
-    if (argv[0] !== 'git') return out('', 1)
-    const commit = sim.commits[last]
-    if (argv.includes('--show-toplevel')) return out(`${ROOT}\n`)
-    if (argv[1] === 'rev-parse' && last === 'HEAD') return out(`${sim.head}\n`)
-    if (argv[1] === 'cat-file') return commit === undefined ? out('', 128) : out('commit\n')
-    if (argv[1] === 'log' && argv.some(arg => arg.includes('trailers:key=Task'))) return out(`${commit?.task ?? ''}\n`)
-    if (argv[1] === 'log' && argv.includes('--format=%s')) return out(`${commit?.subject ?? ''}\n`)
-    if (argv[1] === 'show' && argv.includes('--name-only')) return out(`${(commit?.files ?? []).join('\n')}\n`)
-    if (argv[1] === 'show' && argv.includes('--format=fuller')) return out(`commit ${last}\n\n    ${commit?.subject ?? ''}\n\ndiff --git a/x b/x\n`)
-
-    return out('', 1)
-  })
+  on('process.run', (_, e) => ({ value: runIn(sim, e.argv, e.init?.stdin) }))
 
   return sim
+}
+
+/** What a command answers in the stand-in's shell and repository. */
+function runIn(sim: Sim, argv: readonly string[], stdin = '') {
+  const out = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
+  const last = argv.at(-1) ?? ''
+  if (argv[0] === '/usr/bin/shasum') return out(`${fnv(stdin)}  -\n`)
+  if (argv[0] === '/bin/sh' && argv[1] === '-c') {
+    sim.ran.push(argv[2] ?? '')
+    const answer = sim.commands[argv[2] ?? ''] ?? { exitCode: 127, stdout: 'not found' }
+    answer.effect?.()
+
+    return out(answer.stdout ?? '', answer.exitCode)
+  }
+  if (argv[0] !== 'git') return out('', 1)
+  const commit = sim.commits[last]
+  if (argv.includes('--show-toplevel')) return out(`${ROOT}\n`)
+  if (argv[1] === 'rev-parse' && last === 'HEAD') return out(`${sim.head}\n`)
+  if (argv[1] === 'cat-file') return commit === undefined ? out('', 128) : out('commit\n')
+  if (argv[1] === 'status') return sim.status === null ? out('', 128) : out(sim.status)
+  if (argv[1] === 'merge-base') return out('', commit?.offBase === true ? 1 : 0)
+  // The run's signed commits since its base: sha, Task and Run trailers.
+  if (argv[1] === 'log' && argv.some(arg => arg.includes('%x1f'))) {
+    return out(Object.entries(sim.commits).map(([sha, found]) => `${sha}\x1f${found.task}\x1f${found.run ?? RUN}\n`).join(''))
+  }
+  if (argv[1] === 'log' && argv.some(arg => arg.includes('trailers:key=Task'))) return out(`${commit?.task ?? ''}\n`)
+  if (argv[1] === 'log' && argv.includes('--format=%s')) return out(`${commit?.subject ?? ''}\n`)
+  if (argv[1] === 'show' && argv.includes('--name-only')) return out(`${(commit?.files ?? []).join('\n')}\n`)
+  if (argv[1] === 'show' && argv.includes('--format=fuller')) return out(`commit ${last}\n\n    ${commit?.subject ?? ''}\n\ndiff --git a/x b/x\n`)
+
+  return out('', 1)
+}
+
+/**
+ * The engine as a hooks module sees it, over the same stand-in: for a function the plugin exports
+ * to its other hooks (the test's own `$` reaches no files).
+ */
+function engineOver(sim: Sim) {
+  const isDir = (path: string) => Object.keys(sim.files).some(file => file.startsWith(`${path}/`))
+
+  return {
+    clock: { now: async () => NOON },
+    session: { id: async () => 'lead-session-1234' },
+    fs: {
+      exists: async (path: string) => sim.files[path] !== undefined || isDir(path),
+      read: async (path: string) => {
+        const found = sim.files[path]
+        if (found === undefined) throw new Error('ENOENT')
+
+        return found
+      },
+      write: async (path: string, text: string) => {
+        sim.files[path] = text
+      },
+      list: async () => [],
+    },
+    process: { run: async (argv: readonly string[], init?: { stdin?: string }) => runIn(sim, argv, init?.stdin) },
+  } as never
 }
 
 async function relay($: Engine, input: Record<string, unknown>): Promise<{ result?: string; deny?: string }> {
@@ -127,6 +167,12 @@ function report(fields: { status?: string; commits?: string; criteria?: string[]
     fields.extra ?? '',
   ].join('\n')
 }
+
+/** A verdict's criteria passing task A-r1's two. */
+const PASSED = [
+  { id: 'A-r1:C1', result: 'pass', evidence: 'make test → 0' },
+  { id: 'A-r1:C2', result: 'pass', evidence: 'read relay.ts:10' },
+]
 
 async function begin($: Engine, sim: Sim): Promise<void> {
   const started = await relay($, { action: 'start', name: 'demo', goal: 'Ship relay.', done_when: ['all checks pass'] })
@@ -175,7 +221,7 @@ test('test and check files are told apart', () => {
   expect(isTestFile('src/latest.ts')).toBe(false)
 })
 
-test('checkTask refuses an overlap with a running task of another id, not with its own earlier revision', () => {
+test('V1-06 checkTask refuses an overlap with a running or launching task, another revision of the same task included; the entry itself is left out', () => {
   const base: RelayState = { version: 1, run: RUN, goal: '', doneWhen: [], base: '', lead: '', status: 'active', createdAt: 0, tasks: [], verdicts: [] }
   const running = { id: 'A', rev: 1, title: '', runner: 'x', model: 'm', effort: 'e', editScope: ['a/**'], reads: ['r.md'], targets: ['server-1'], criteria: [], status: 'running' as const, specPath: `${DIR}/tasks/A-r1.md`, specHash: '', dispatchedAt: 0, reportedAt: null, tries: {} }
   const state = { ...base, tasks: [running] }
@@ -183,7 +229,11 @@ test('checkTask refuses an overlap with a running task of another id, not with i
   expect(checkTask(state, input).denials).toEqual([])
   expect(checkTask(state, { ...input, editScope: ['r.md'] }).denials[0]).toMatch(/그 reads/)
   expect(checkTask(state, { ...input, targets: ['server-1'] }).denials[0]).toMatch(/external target server-1/)
-  expect(checkTask(state, { ...input, id: 'A', editScope: ['a/x.ts'] }).denials).toEqual([])
+  // A new revision of a running task overlaps it; the running entry checked against itself does not.
+  expect(checkTask(state, { ...input, id: 'A', editScope: ['a/x.ts'] }).denials[0]).toMatch(/돌고 있는 A-r1와 겹칩니다/)
+  expect(checkTask(state, { ...input, id: 'A', rev: 1, editScope: ['a/x.ts'] }).denials).toEqual([])
+  const launching = { ...state, tasks: [{ ...running, status: 'launching' as const }] }
+  expect(checkTask(launching, { ...input, editScope: ['a/y.ts'] }).denials[0]).toMatch(/돌고 있는 A-r1/)
 })
 
 test('a report is read leniently and checked against its brief', () => {
@@ -414,7 +464,7 @@ test('finish refuses while the verdict saw another commit, and closes the run wi
   expect((await relay($, { action: 'finish', run: RUN })).deny).toMatch(/판정이 없습니다/)
 
   await relay($, { action: 'package', run: RUN })
-  const verdict = { commit: HEAD_1, result: 'pass', model: 'gpt-5.5-codex', criteria: [{ id: 'C1', result: 'pass', evidence: 'make test → 0' }], findings: [] }
+  const verdict = { commit: HEAD_1, result: 'pass', model: 'gpt-5.5-codex', criteria: PASSED, findings: [] }
   sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify(verdict)
   sim.head = HEAD_2
   expect((await relay($, { action: 'verdict', run: RUN, id: 'V1' })).result).toContain('검증한 판과 지금 판이 다름')
@@ -422,12 +472,18 @@ test('finish refuses while the verdict saw another commit, and closes the run wi
   expect(refused.deny).toContain('검증한 판과 지금 판이 다름: 다시 검증하세요')
   expect(state(sim).status).toBe('active')
 
+  // A verdict claiming the new HEAD on a package made at the old one does not close the run either.
+  sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({ ...verdict, commit: HEAD_2 })
+  expect((await relay($, { action: 'verdict', run: RUN, id: 'V1' })).result).toContain('꾸러미 V1의 HEAD')
+  expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('꾸러미 V1은 HEAD aaaaaaa에서 만들었습니다')
+  expect((await relay($, { action: 'package', run: RUN })).result).toContain('검증 꾸러미 V2')
+
   sim.files[`${DIR}/progress.md`] = (sim.files[`${DIR}/progress.md`] ?? '').replace(
     '|---|---|---|---|---|---|\n',
     '|---|---|---|---|---|---|\n| D1 | keep one file | simpler | low | lead | decided |\n| D2 | push | needs consent | high | user | asked |\n',
   )
-  sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({ ...verdict, commit: HEAD_2 })
-  await relay($, { action: 'verdict', run: RUN, id: 'V1' })
+  sim.files[`${DIR}/reviews/V2-verdict.json`] = JSON.stringify({ ...verdict, commit: HEAD_2 })
+  await relay($, { action: 'verdict', run: RUN, id: 'V2' })
   const finished = await relay($, { action: 'finish', run: RUN })
   expect(finished.deny).toBeUndefined()
   expect(finished.result).toContain('묶음을 끝냈습니다')
@@ -440,9 +496,10 @@ test('finish refuses while the verdict saw another commit, and closes the run wi
 test('finish refuses a running task and a failed verdict, all reasons at once', async ($, on) => {
   const sim = standIn(on)
   await doneA($, sim)
+  await relay($, { action: 'package', run: RUN })
   await relay($, { ...TASK_A, id: 'B', edit_scope: ['docs/**'], reads: [] })
   await relay($, { action: 'dispatched', run: RUN, task: 'B', runner: 'subagent b' })
-  sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({ commit: HEAD_1, result: 'fail', model: 'm', criteria: [], findings: [{ severity: 'high', file: 'a.ts', line: 3, issue: 'x', evidence: 'y' }] })
+  sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({ commit: HEAD_1, result: 'fail', model: 'm', criteria: PASSED, findings: [{ severity: 'high', file: 'a.ts', line: 3, issue: 'x', evidence: 'y' }] })
   await relay($, { action: 'verdict', run: RUN, id: 'V1' })
   const refused = await relay($, { action: 'finish', run: RUN })
   expect(refused.deny).toContain('끝나지 않은 작업: B-r1(running)')
@@ -451,7 +508,8 @@ test('finish refuses a running task and a failed verdict, all reasons at once', 
 
 test('a verdict of the wrong form is refused with what is wrong', async ($, on) => {
   const sim = standIn(on)
-  await begin($, sim)
+  await doneA($, sim)
+  await relay($, { action: 'package', run: RUN })
   sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({ commit: HEAD_1, result: 'ok', model: 'm', criteria: [{ id: 'C1' }], findings: [] })
   const refused = await relay($, { action: 'verdict', run: RUN, id: 'V1' })
   expect(refused.deny).toContain("result가 'pass' 또는 'fail'이 아님")
@@ -494,4 +552,251 @@ test('spec_text answers a light brief and writes no file', async ($, on) => {
   expect(light.result).not.toContain('Task: A')
   expect(light.result).toContain('보고는 답으로 한다: 15줄 안팎')
   expect(Object.keys(sim.files)).toEqual([])
+})
+
+// ── Verdict V1's findings, each reproduced ──────────────────────────────────────────────
+
+/** Writes V<n>'s verdict file and records it. */
+async function verdictOf($: Engine, sim: Sim, id: string, criteria: unknown[], result = 'pass', commit = HEAD_1) {
+  sim.files[`${DIR}/reviews/${id}-verdict.json`] = JSON.stringify({ commit, result, model: 'gpt-5.5-codex', criteria, findings: [] })
+
+  return relay($, { action: 'verdict', run: RUN, id })
+}
+
+test('V1-01 a verdict is taken only for a package, and must judge each criterion it asked for exactly once', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  expect((await verdictOf($, sim, 'V1', PASSED)).deny).toContain('꾸러미 V1의 기록이 없습니다')
+
+  await relay($, { action: 'package', run: RUN })
+  const text = sim.files[`${DIR}/reviews/V1-package.md`] ?? ''
+  expect(text).toContain('- A-r1:C1 — tests pass')
+  expect(text).toContain('- A-r1:C2 — reads well')
+  expect(state(sim).packages).toEqual([{ id: 'V1', at: NOON, head: HEAD_1, tasks: [{ key: 'A-r1', criteria: ['C1', 'C2'] }] }])
+
+  expect((await verdictOf($, sim, 'V1', [])).deny).toContain('꾸러미 V1가 묻는 기준이 판정에 없음: A-r1:C1, A-r1:C2')
+  expect((await verdictOf($, sim, 'V1', [...PASSED, PASSED[0]])).deny).toContain('판정에 두 번 이상 나온 기준: A-r1:C1')
+  expect(state(sim).verdicts).toEqual([])
+})
+
+test('V1-01 a criterion failed or unverified records the verdict as fail whatever its own result, and finish refuses it', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  await relay($, { action: 'package', run: RUN })
+  for (const result of ['fail', 'unverified']) {
+    const judged = await verdictOf($, sim, 'V1', [{ id: 'A-r1:C1', result, evidence: 'exit 1' }, PASSED[1], { id: 'run:1', result: 'pass', evidence: 'extra' }])
+    expect(judged.result).toContain('판정 V1: 기록 fail (판정 파일의 result pass)')
+    expect(judged.result).toContain(`A-r1:C1: ${result}`)
+    expect(state(sim).verdicts[0]).toMatchObject({ id: 'V1', result: 'fail' })
+    const refused = await relay($, { action: 'finish', run: RUN })
+    expect(refused.deny).toContain('마지막 판정 V1가 fail입니다')
+    expect(state(sim).status).toBe('active')
+  }
+  // Every asked criterion passing, an extra one kept: a pass.
+  expect((await verdictOf($, sim, 'V1', [...PASSED, { id: 'run:1', result: 'unverified', evidence: '-' }])).result).toContain('기록 pass')
+  expect((await relay($, { action: 'finish', run: RUN })).result).toContain('묶음을 끝냈습니다')
+})
+
+test('V1-02 finish refuses a revision never launched; cancel clears it, with its reason kept', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  await relay($, { action: 'package', run: RUN })
+  await verdictOf($, sim, 'V1', PASSED)
+  await relay($, { ...TASK_A, done_when: [{ text: 'a new requirement' }] })
+  const refused = await relay($, { action: 'finish', run: RUN })
+  expect(refused.deny).toContain('띄우지 않은 작업: A-r2')
+  expect(state(sim).status).toBe('active')
+
+  expect((await relay($, { action: 'cancel', run: RUN, task: 'A-r2' })).deny).toMatch(/reason이 비었습니다/)
+  expect((await relay($, { action: 'cancel', run: RUN, task: 'A-r1', reason: 'x' })).deny).toMatch(/끝난 작업/)
+  expect((await relay($, { action: 'cancel', run: RUN, task: 'A-r2', reason: '요구가 바뀜' })).result).toContain('A-r2: ready → cancelled · 요구가 바뀜')
+  expect(state(sim).tasks[1]).toMatchObject({ status: 'cancelled', cancelReason: '요구가 바뀜' })
+  expect((await relay($, { action: 'finish', run: RUN })).result).toContain('묶음을 끝냈습니다')
+})
+
+test('V1-02 a running task is cancelled only once its worker is confirmed stopped', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
+  expect((await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'stuck' })).deny).toContain('confirmed_stopped: true')
+  expect(state(sim).tasks[0]?.status).toBe('running')
+  expect((await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'stuck', confirmed_stopped: true })).result).toContain('running → cancelled')
+  expect(state(sim).tasks[0]?.cancelReason).toBe('stuck (워커 멈춤 확인됨)')
+})
+
+test('V1-02 finish refuses a done task its last package did not hold, or one done again after it', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  await relay($, { ...TASK_A, id: 'B', edit_scope: ['other/**'], reads: [] })
+  await relay($, { action: 'package', run: RUN, tasks: ['A'] })
+  await verdictOf($, sim, 'V1', PASSED)
+  await relay($, { action: 'dispatched', run: RUN, task: 'B', runner: 'subagent b' })
+  sim.commits[SHA_B] = { task: 'B-r1', subject: 'B', files: ['other/b.ts'] }
+  sim.files[`${DIR}/tasks/B-r1-report.md`] = report({ commits: SHA_B }).replace('# Report A-r1', '# Report B-r1')
+  await relay($, { action: 'report', run: RUN, task: 'B' })
+  expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('꾸러미 V1에 없거나 그 뒤에 끝난 작업: B-r1')
+
+  // By default a package holds every done task.
+  expect((await relay($, { action: 'package', run: RUN })).result).toContain('담은 작업: A-r1, B-r1')
+})
+
+test('V1-03 DONE with uncommitted work is a mismatch, and the task is blocked', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ commits: 'none' }).replace('- Change: no_change', '- Change: uncommitted')
+  const checked = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(checked.result).toContain('보고 DONE → 상태 blocked')
+  expect(checked.result).toContain('DONE인데 Change가 uncommitted')
+})
+
+test('V1-03 check marks a criterion unverified on a tree with tracked changes, or when HEAD moves while it runs', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, { ...TASK_A, done_when: [{ text: 'tests', command: 'make test' }, { text: 'lint', command: 'make lint' }] })
+  sim.commands['make test'] = { exitCode: 0 }
+  sim.commands['make lint'] = { exitCode: 0 }
+  sim.status = ' M hooks/relay/relay.ts\n?? notes.txt\n'
+  const dirty = await relay($, { action: 'check', run: RUN, task: 'A' })
+  expect(dirty.result).toContain('작업 트리(추적 파일): 커밋하지 않은 변경 hooks/relay/relay.ts')
+  expect(dirty.result).toContain('- C1: unverified · exit 0(기대 0) · 0 ms · 실행 전 추적 파일에 커밋하지 않은 변경: hooks/relay/relay.ts')
+  expect(sim.files[`${DIR}/tasks/A-r1-checks.md`]).toContain('Summary: pass 0 · fail 0 · unverified 2')
+
+  // Untracked files alone leave the result standing; HEAD moved by the first command spoils both.
+  sim.status = '?? notes.txt\n'
+  expect((await relay($, { action: 'check', run: RUN, task: 'A' })).result).toContain('- C1: pass')
+  sim.commands['make test'] = { exitCode: 0, effect: () => (sim.head = HEAD_2) }
+  const moved = await relay($, { action: 'check', run: RUN, task: 'A' })
+  expect(moved.result).toContain('- C1: unverified · exit 0(기대 0) · 0 ms · 실행 중 HEAD가 바뀜(aaaaaaa → bbbbbbb)')
+  expect(moved.result).toContain('- C2: unverified')
+})
+
+test('V1-03 package and finish refuse a tree with tracked changes not committed', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  await relay($, { action: 'package', run: RUN })
+  await verdictOf($, sim, 'V1', PASSED)
+  sim.status = ' M src/worker.ts\n'
+  expect((await relay($, { action: 'package', run: RUN })).deny).toContain('작업 트리에 커밋하지 않은 변경이 있습니다: src/worker.ts')
+  const refused = await relay($, { action: 'finish', run: RUN })
+  expect(refused.deny).toContain('작업 트리에 커밋하지 않은 변경: src/worker.ts')
+  sim.status = null
+  expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('git status를 읽지 못해')
+  sim.status = ''
+  expect((await relay($, { action: 'finish', run: RUN })).result).toContain('묶음을 끝냈습니다')
+})
+
+test('V1-04 the package carries the commits of every revision, their scope and test changes, the unreported ones and those off the base', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  const old = '4'.repeat(40)
+  const newer = '5'.repeat(40)
+  const silent = '6'.repeat(40)
+  const stray = '7'.repeat(40)
+  sim.commits[old] = { task: 'A-r1', subject: 'Weaken a test', files: ['tests/weakened.test.ts'] }
+  sim.commits[newer] = { task: 'A-r2', subject: 'Fix', files: ['hooks/relay/fix.ts'], offBase: true }
+  sim.commits[silent] = { task: 'A-r2', subject: 'Unreported', files: ['hooks/relay/quiet.ts'] }
+  sim.commits[stray] = { task: 'A-r2', subject: 'Another run', files: ['x.ts'], run: '2026-11-09-other' }
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', commits: old, criteria: ['- C1: fail · tries 1 · red', '- C2: unverified · tries 0 · -'] })
+  await relay($, { action: 'report', run: RUN, task: 'A' })
+  await relay($, TASK_A)
+  sim.files[`${DIR}/tasks/A-r2-report.md`] = report({ commits: newer, criteria: ['- C1: pass · tries 2 · ok', '- C2: pass · tries 0 · ok'] }).replace('# Report A-r1', '# Report A-r2')
+  await relay($, { action: 'report', run: RUN, task: 'A' })
+
+  expect((await relay($, { action: 'package', run: RUN })).result).toContain('담은 작업: A-r2')
+  const text = sim.files[`${DIR}/reviews/V1-package.md`] ?? ''
+  expect(text).toContain('### Commits of every revision of A')
+  expect(text).toContain('#### A-r1 (cancelled: 새 판 A-r2가 이어받음)')
+  expect(text).toContain(`- ${old} Weaken a test`)
+  expect(text).toContain('### Files outside the edit scope (every revision of A): tests/weakened.test.ts (A-r1)')
+  expect(text).toContain('### Test file changes (every revision of A): tests/weakened.test.ts (A-r1)')
+  expect(text).toContain(`- 보고에 없고 꼬리말(Task: A-r2, Run: ${RUN})로 찾은 커밋: ${silent}`)
+  expect(text).not.toContain(stray)
+  expect(text).toContain(`- Base(aaaaaaa)의 자손이 아닌 커밋: ${newer}`)
+  expect(text).toContain(`commit ${old}`)
+  expect(state(sim).packages?.[0]?.tasks).toEqual([{ key: 'A-r2', criteria: ['C1', 'C2'] }])
+})
+
+test('V1-05 dispatched copies the brief as sent; a brief edited after it keeps the package from being made', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  const brief = `${DIR}/tasks/A-r1.md`
+  const copy = `${DIR}/tasks/A-r1.dispatched.md`
+  expect(sim.files[copy]).toBe(sim.files[brief])
+  expect(state(sim).tasks[0]?.dispatchedHash).toBe(state(sim).tasks[0]?.specHash)
+
+  const sent = sim.files[brief] ?? ''
+  sim.files[brief] = sent.replace('tests pass', 'WEAKENED criterion')
+  const refused = await relay($, { action: 'package', run: RUN })
+  expect(refused.deny).toContain('A-r1: 지시서가 보낸 뒤에 바뀌었습니다(dispatched 때와 해시가 다름)')
+  expect(sim.files[`${DIR}/reviews/V1-package.md`]).toBeUndefined()
+
+  // The copy edited instead: refused too. Both as sent: the package shows the copy.
+  sim.files[brief] = sent
+  sim.files[copy] = sent.replace('tests pass', 'WEAKENED criterion')
+  expect((await relay($, { action: 'package', run: RUN })).deny).toContain('보낸 지시서 사본이 없거나 바뀌었습니다')
+  sim.files[copy] = sent
+  await relay($, { action: 'package', run: RUN })
+  expect(sim.files[`${DIR}/reviews/V1-package.md`]).toContain('- C1: tests pass')
+  expect(sim.files[`${DIR}/reviews/V1-package.md`]).not.toContain('WEAKENED')
+})
+
+test('V1-06 a running task holds its files: no new revision, no second dispatch, until it reports or is cancelled stopped', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'old-worker' })
+  expect((await relay($, TASK_A)).deny).toContain('같은 작업의 A-r1(running · old-worker)가 돌고 있습니다')
+  expect((await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'new-worker' })).deny).toContain('A-r1는 running 상태라 running으로 바꾸지 않습니다')
+  expect((await relay($, { ...TASK_A, id: 'B' })).deny).toContain('돌고 있는 A-r1와 겹칩니다')
+  expect(state(sim).tasks.map(task => [taskKeyOf(task), task.status, task.runner])).toEqual([['A-r1', 'running', 'old-worker']])
+
+  await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'replaced', confirmed_stopped: true })
+  expect((await relay($, TASK_A)).result).toContain(`지시서: ${DIR}/tasks/A-r2.md`)
+  // Done is not sent again either.
+  sim.files[`${DIR}/tasks/A-r2-report.md`] = report().replace('# Report A-r1', '# Report A-r2')
+  sim.commits[SHA_A] = { task: 'A-r2', subject: 'x', files: ['hooks/relay/relay.ts'] }
+  await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'w' })
+  await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect((await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'w2' })).deny).toContain('A-r2는 done 상태라')
+})
+
+const taskKeyOf = (task: { id: string; rev: number }) => `${task.id}-r${task.rev}`
+
+test('V1-07 calls made at once each keep their change to the state', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  for (const id of ['A', 'B', 'C']) await relay($, { ...TASK_A, id, edit_scope: [`${id.toLowerCase()}/**`], reads: [] })
+  await Promise.all(['A', 'B', 'C'].map(id => relay($, { action: 'dispatched', run: RUN, task: id, runner: `subagent ${id}` })))
+  expect(state(sim).tasks.map(task => [task.id, task.status, task.runner])).toEqual([
+    ['A', 'running', 'subagent A'],
+    ['B', 'running', 'subagent B'],
+    ['C', 'running', 'subagent C'],
+  ])
+})
+
+test('V1-07 reserveDispatch lets one of two overlapping launches through; launching holds like running; commit or release', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  await relay($, { ...TASK_A, id: 'B', reads: [] })
+  const engine = engineOver(sim)
+  const [first, second] = await Promise.all([reserveDispatch(engine, ROOT, RUN, 'A'), reserveDispatch(engine, ROOT, RUN, 'B')])
+  expect('commit' in first).toBe(true)
+  expect('deny' in second && second.deny).toContain('돌고 있는 A-r1와 겹칩니다')
+  expect(state(sim).tasks.map(task => task.status)).toEqual(['launching', 'ready'])
+  expect((await relay($, TASK_A)).deny).toContain('같은 작업의 A-r1(launching)가 돌고 있습니다')
+  expect((await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'x' })).deny).toContain('launching 상태라')
+
+  if (!('commit' in first)) return
+  await first.release()
+  expect(state(sim).tasks[0]?.status).toBe('ready')
+  const again = await reserveDispatch(engine, ROOT, RUN, 'A')
+  if (!('commit' in again)) throw new Error(again.deny)
+  const committed = await again.commit('subagent ag-1')
+  expect('result' in committed && committed.result).toContain('A-r1: running · subagent ag-1')
+  expect(state(sim).tasks[0]).toMatchObject({ status: 'running', runner: 'subagent ag-1', dispatchedAt: NOON })
+  expect(sim.files[`${DIR}/tasks/A-r1.dispatched.md`]).toBe(sim.files[`${DIR}/tasks/A-r1.md`])
 })

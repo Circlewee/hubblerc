@@ -3,7 +3,8 @@
  * the texts it reads (report, decisions table). No engine calls here; relay.ts does the I/O.
  */
 
-export type TaskStatus = 'ready' | 'running' | 'done' | 'done_with_concerns' | 'needs_context' | 'blocked' | 'cancelled'
+/** `launching`: reserved for a launch under way (the gate hook), counted as running till it is committed or released. */
+export type TaskStatus = 'ready' | 'launching' | 'running' | 'done' | 'done_with_concerns' | 'needs_context' | 'blocked' | 'cancelled'
 
 export type Criterion = { id: string; text: string; command?: string; expectExit?: number }
 
@@ -26,9 +27,17 @@ export type RelayTask = {
   reportedAt: number | null
   /** Fixes made per criterion, counted across revisions. */
   tries: Record<string, number>
+  /** The hash of the brief as sent (its copy is `tasks/<key>.dispatched.md`); absent before a dispatch. */
+  dispatchedHash?: string
+  /** Why it was cancelled, when it was. */
+  cancelReason?: string
 }
 
-export type RelayVerdict = { id: string; at: number; commit: string; path: string; result: 'pass' | 'fail' }
+/** The result recorded: `fail` when any criterion its package asked for is not a pass, whatever the verdict's own result says. */
+export type RelayVerdict = { id: string; at: number; commit: string; path: string; result: 'pass' | 'fail'; reasons?: string[] }
+
+/** What a package handed the verifier: the tasks by revision, the criteria ids each must be judged on, the HEAD it showed. */
+export type RelayPackage = { id: string; at: number; head: string; tasks: { key: string; criteria: string[] }[] }
 
 export type RelayState = {
   version: 1
@@ -42,6 +51,8 @@ export type RelayState = {
   createdAt: number
   tasks: RelayTask[]
   verdicts: RelayVerdict[]
+  /** Absent in a state written before packages were recorded. */
+  packages?: RelayPackage[]
 }
 
 export type RunnerKind = 'claude' | 'codex'
@@ -67,7 +78,7 @@ export const TASK_ID = /^[A-Za-z][A-Za-z0-9_.]{0,19}$/
 const RUN_NAME = /^[a-z0-9-]{1,30}$/
 const RUN = /^\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,30}$/
 const CRITERION_ID = /^[A-Za-z][A-Za-z0-9_.]{0,19}$/
-export const TASK_STATUSES: readonly TaskStatus[] = ['ready', 'running', 'done', 'done_with_concerns', 'needs_context', 'blocked', 'cancelled']
+export const TASK_STATUSES: readonly TaskStatus[] = ['ready', 'launching', 'running', 'done', 'done_with_concerns', 'needs_context', 'blocked', 'cancelled']
 
 export const isRunName = (name: string): boolean => RUN_NAME.test(name) && !name.startsWith('-')
 export const isRun = (run: string): boolean => RUN.test(run)
@@ -90,10 +101,15 @@ export function localTime(at: number): string {
 }
 
 export const taskKey = (task: { id: string; rev: number }): string => `${task.id}-r${task.rev}`
+/** Holding a worker: launched, or a launch reserved. */
+export const isBusy = (task: { status: TaskStatus }): boolean => task.status === 'running' || task.status === 'launching'
+export const isDone = (task: { status: TaskStatus }): boolean => task.status === 'done' || task.status === 'done_with_concerns'
 export const runDir = (root: string, run: string): string => `${root}/${RUN_PREFIX}/${run}`
 export const specFile = (dir: string, key: string): string => `${dir}/tasks/${key}.md`
 export const reportFile = (dir: string, key: string): string => `${dir}/tasks/${key}-report.md`
 export const checksFile = (dir: string, key: string): string => `${dir}/tasks/${key}-checks.md`
+/** The brief as it was sent, copied at the dispatch. */
+export const dispatchedFile = (dir: string, key: string): string => `${dir}/tasks/${key}.dispatched.md`
 
 /** The task a lead names: `A-r2` that revision, `A` the latest one. */
 export function findTask(state: RelayState, name: string): RelayTask | undefined {
@@ -112,6 +128,11 @@ export function latestRevs(tasks: readonly RelayTask[]): RelayTask[] {
   }
 
   return [...latest.values()]
+}
+
+/** What stands for each task id: its latest revision not cancelled (none when all are). */
+export function effectiveTasks(tasks: readonly RelayTask[]): RelayTask[] {
+  return latestRevs(tasks.filter(task => task.status !== 'cancelled'))
 }
 
 // ── Paths ──────────────────────────────────────────────
@@ -198,12 +219,13 @@ export const isTestFile = (path: string): boolean => TEST_DIR.test(path) || TEST
 export type TaskCheck = { denials: string[]; warnings: string[] }
 
 /**
- * What `task` refuses and warns about, against the run as it stands. A running task of another id
+ * What `task` refuses and warns about, against the run as it stands. A running (or launching) task
  * that shares files (my edits with theirs, my reads with their edits, their reads with my edits) or
- * an external target refuses; an earlier done task on the same files whose report the brief does not
- * read first warns. Pure: the gate hook calls it too.
+ * an external target refuses, another revision of the same task included; an earlier done task on
+ * the same files whose report the brief does not read first warns. `rev`, when given, names the
+ * input's own entry, left out. Pure: the gate hook calls it too.
  */
-export function checkTask(state: RelayState, input: Omit<BriefInput, 'title' | 'goal' | 'runnerKind'>): TaskCheck {
+export function checkTask(state: RelayState, input: Omit<BriefInput, 'title' | 'goal' | 'runnerKind'> & { rev?: number }): TaskCheck {
   const denials: string[] = []
   const warnings: string[] = []
   if (input.model.trim() === '') denials.push('model이 비었습니다: 실제 모델 ID를 적으세요.')
@@ -213,7 +235,7 @@ export function checkTask(state: RelayState, input: Omit<BriefInput, 'title' | '
   const repeated = [...new Set(ids.filter((id, at) => ids.indexOf(id) !== at))]
   if (repeated.length > 0) denials.push(`기준 ID가 겹칩니다: ${repeated.join(', ')}`)
 
-  const running = state.tasks.filter(task => task.status === 'running' && task.id !== input.id)
+  const running = state.tasks.filter(task => isBusy(task) && !(task.id === input.id && task.rev === input.rev))
   for (const other of running) {
     const clashes = [
       ...overlaps(input.editScope, other.editScope).map(pair => `edit_scope ${pair}`),
@@ -582,6 +604,8 @@ export function reportMismatches(report: ParsedReport, criteria: readonly Criter
     if (notPassed.length > 0) problems.push(`${report.status}인데 통과하지 않은 기준: ${notPassed.join(', ')}`)
   }
   if (report.status === 'DONE_WITH_CONCERNS' && report.concerns.length === 0) problems.push('DONE_WITH_CONCERNS인데 Concerns가 비었음')
+  // Done is delivered: committed, or nothing to commit. Work left in the tree is not what a verdict sees.
+  if ((report.status === 'DONE' || report.status === 'DONE_WITH_CONCERNS') && report.change === 'uncommitted') problems.push(`${report.status}인데 Change가 uncommitted: 커밋한 뒤 보고해야 함`)
 
   return problems
 }
@@ -615,12 +639,13 @@ export function lastLines(text: string, count = 20): string {
   return lines.slice(-count).join('\n')
 }
 
-export function checksText(key: string, head: string, at: number, outcomes: readonly CheckOutcome[]): string {
+export function checksText(key: string, head: string, at: number, outcomes: readonly CheckOutcome[], notes: readonly string[] = []): string {
   const count = (result: CriterionResult) => outcomes.filter(outcome => outcome.result === result).length
   const parts = [
     `# Checks ${key}`,
     `- Ran: ${localTime(at)} · HEAD ${head}`,
     `- Summary: pass ${count('pass')} · fail ${count('fail')} · unverified ${count('unverified')}`,
+    ...notes.map(note => `- ${note}`),
     '- 워커 보고의 pass는 증거가 아니다: 이 결과가 기준의 결과다.',
   ]
   for (const outcome of outcomes) {
@@ -751,11 +776,77 @@ export function cutBytes(text: string, limit: number): { text: string; isCut: bo
   return { text: new TextDecoder().decode(bytes.slice(0, limit)).replace(/�$/, ''), isCut: true }
 }
 
-export function verifierInstructions(verdictPath: string, schemaPath: string): string {
+/** The criteria ids a package asks to be judged, `<task>-r<n>:<criterion>`. */
+export const requiredCriteria = (pack: RelayPackage): string[] => pack.tasks.flatMap(task => task.criteria.map(id => `${task.key}:${id}`))
+
+/**
+ * A verdict against its package: each criterion the package asked for exactly once (missing or
+ * repeated ones refuse it), others kept. The recorded result is a pass only when the verdict says
+ * pass and every asked criterion passed.
+ */
+export function judgeVerdict(verdict: Verdict, pack: RelayPackage): { problems: string[]; result: 'pass' | 'fail'; reasons: string[] } {
+  const required = requiredCriteria(pack)
+  const problems: string[] = []
+  const reasons: string[] = []
+  const missing = required.filter(id => !verdict.criteria.some(criterion => criterion.id === id))
+  const repeated = required.filter(id => verdict.criteria.filter(criterion => criterion.id === id).length > 1)
+  if (missing.length > 0) problems.push(`꾸러미 ${pack.id}가 묻는 기준이 판정에 없음: ${missing.join(', ')}`)
+  if (repeated.length > 0) problems.push(`판정에 두 번 이상 나온 기준: ${repeated.join(', ')}`)
+  for (const id of required) {
+    const found = verdict.criteria.find(criterion => criterion.id === id)
+    if (found !== undefined && found.result !== 'pass') reasons.push(`${id}: ${found.result}`)
+  }
+  if (verdict.result === 'fail') reasons.unshift('판정 자체가 fail')
+  else if (reasons.length > 0) reasons.unshift('판정은 pass라고 했지만 통과하지 않은 기준이 있음')
+
+  return { problems, result: reasons.length === 0 ? 'pass' : 'fail', reasons }
+}
+
+/**
+ * Why a run may not finish yet, every reason at once: a task holding a worker or waiting, one never
+ * launched, changes not committed, no verdict or one of another commit or a failed one, or a done
+ * task its package did not hold (or done again after it).
+ */
+export function finishProblems(state: RelayState, head: string | undefined, tracked: readonly string[] | undefined): string[] {
+  const reasons: string[] = []
+  const open = state.tasks.filter(task => isBusy(task) || task.status === 'needs_context' || task.status === 'blocked')
+  if (open.length > 0) reasons.push(`끝나지 않은 작업: ${open.map(task => `${taskKey(task)}(${task.status})`).join(', ')}`)
+  const unsent = state.tasks.filter(task => task.status === 'ready')
+  if (unsent.length > 0) reasons.push(`띄우지 않은 작업: ${unsent.map(taskKey).join(', ')}. 띄우지 않을 것은 cancel로 정리하세요.`)
+  if (tracked === undefined) reasons.push('git status를 읽지 못해 작업 트리를 확인하지 못했습니다.')
+  else if (tracked.length > 0) reasons.push(`작업 트리에 커밋하지 않은 변경: ${tracked.join(', ')}`)
+  const last = state.verdicts.at(-1)
+  if (last === undefined) {
+    reasons.push('판정이 없습니다: package → 다른 모델 검증 → verdict 뒤에 끝내세요.')
+
+    return reasons
+  }
+  if (head === undefined || !sameCommit(last.commit, head)) reasons.push(`검증한 판과 지금 판이 다름: 다시 검증하세요(판정 ${last.id}는 ${last.commit.slice(0, 7)}, 지금 HEAD ${head?.slice(0, 7) ?? '미확인'}).`)
+  if (last.result === 'fail') reasons.push(`마지막 판정 ${last.id}가 fail입니다${last.reasons === undefined || last.reasons.length === 0 ? '' : `(${last.reasons.join('; ')})`}.`)
+  const pack = state.packages?.find(other => other.id === last.id)
+  if (pack === undefined) {
+    reasons.push(`판정 ${last.id}의 꾸러미 기록이 없습니다: 다시 package하세요.`)
+
+    return reasons
+  }
+  if (head === undefined || !sameCommit(pack.head, head)) reasons.push(`꾸러미 ${pack.id}은 HEAD ${pack.head.slice(0, 7)}에서 만들었습니다: 지금 판으로 다시 package → 검증 → verdict 하세요.`)
+  const uncovered = effectiveTasks(state.tasks)
+    .filter(isDone)
+    .filter(task => !pack.tasks.some(held => held.key === taskKey(task)) || (task.reportedAt ?? 0) > pack.at)
+  if (uncovered.length > 0) reasons.push(`꾸러미 ${pack.id}에 없거나 그 뒤에 끝난 작업: ${uncovered.map(taskKey).join(', ')}. 다시 package → 검증 → verdict 하세요.`)
+
+  return reasons
+}
+
+export function verifierInstructions(verdictPath: string, schemaPath: string, required: readonly { id: string; text: string }[] = []): string {
   return [
+    '## Criteria to judge',
+    '판정의 criteria에 아래 id를 그대로, 하나에 한 번씩 쓴다(빠지거나 겹치면 판정을 받지 않는다). 묶음의 Done when 같은 다른 항목은 다른 id로 더해도 된다.',
+    ...required.map(criterion => `- ${criterion.id} — ${oneLine(criterion.text)}`),
+    '',
     '## Instructions for the verifier',
     '- 반박하는 자세로 본다: 통과를 확인하려 하지 말고 결함을 찾아 근거를 댄다.',
-    '- 묶음의 Done when과 작업마다의 기준에 pass / fail / unverified를 매기고 증거를 단다: 돌린 명령과 종료 코드, 출력 몇 줄, 파일:줄.',
+    '- 위 기준마다 pass / fail / unverified를 매기고 증거를 단다: 돌린 명령과 종료 코드, 출력 몇 줄, 파일:줄. 하나라도 fail·unverified면 result는 fail이다.',
     '- 증거 없는 pass는 unverified다. 워커 보고의 pass는 증거가 아니다(relay 도구가 직접 돌린 Checks가 증거다).',
     '- 스타일 지적은 빼고 동작·정확성·범위·테스트 약화만 본다.',
     '- 이 작업을 만든 워커와 같은 계열 모델이면 model 칸과 판정에 그렇게 적는다(교차 검증이 아님).',
