@@ -23,6 +23,7 @@ import { layoutOption, showSidebar, startSidebar } from './sidebar/sidebar'
 import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
 import { findTurnForLine, summarize } from './activity/summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
+import { registerRelayTool, serveRelayTool } from './relay/relay'
 import { showToolLines } from './activity/tool-lines'
 
 // The validator reads state sources per file, so each file that reads `turns` declares it.
@@ -44,6 +45,7 @@ export const register: Register = (on, options) => {
     await startEffort($).catch(() => undefined)
     await startSidebar($, layout).catch(() => undefined)
     await startTodos($).catch(() => undefined)
+    await registerRelayTool($).catch(() => undefined)
     await startLikely($).catch(() => undefined)
     await registerLikelyCommand($).catch(() => undefined)
     await startDevice($).catch(() => undefined)
@@ -166,6 +168,7 @@ export const register: Register = (on, options) => {
   trackPrompts(on)
   answerCommands(on, layout)
   serveTodoTool(on)
+  serveRelayTool(on)
   answerLikelyCommand(on)
   controlEffort(on, autoByDefault)
   showBashPurpose(on)

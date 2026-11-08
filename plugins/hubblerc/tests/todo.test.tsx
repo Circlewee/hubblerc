@@ -221,7 +221,7 @@ test("the model's tool lists, adds and sets a status, the answer it runs in on w
   const stored = memoryStore(on, { [KEY]: { items: [item(1, 'pending', { text: '테스트 정리', createdTurn: 4, createdSession: 'old' })], nextId: 2 } })
   await start($)
 
-  expect(standIn.tools.map(tool => tool.name)).toEqual(['user_todos'])
+  expect(standIn.tools.map(tool => tool.name)).toEqual(['user_todos', 'relay'])
   // Short, in English, and plainly not the model's own task list.
   expect(standIn.tools[0]?.description).toMatch(/^The user's own to-do and idea list/)
   expect(standIn.tools[0]?.description.length).toBeLessThan(400)
