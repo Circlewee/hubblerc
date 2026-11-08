@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { findCommits, shellQuote, withAround } from '../hooks/commit/commit-command'
-import { deviceFrom, effortLabel } from '../hooks/commit/trailers'
+import { deviceFrom, effortLabel, hasOwnTrailers } from '../hooks/commit/trailers'
 
 const PROFILE = 'Hardware:\n\n    Hardware Overview:\n\n      Model Name: MacBook Pro\n      Model Identifier: Mac15,6\n      Chip: Apple M3 Pro\n'
 
@@ -141,4 +141,30 @@ test("Claude Code's own attribution lines are dropped from commits and pull requ
   expect((await $.attribution.text({ kind: 'commit', text: 'Co-Authored-By: Claude <noreply@anthropic.com>' })).text).toBe('')
   expect((await $.attribution.text({ kind: 'pr', text: '🤖 Generated with [Claude Code](https://claude.com/claude-code)' })).text).toBe('')
   expect((await $.attribution.text({ kind: 'exemption', text: 'an engine sentence' })).text).toBe('an engine sentence')
+})
+
+test('a commit that names Agent or Session itself is left as written; Task and Run alone are not a signature', async ($, on) => {
+  const seen = standIn(on)
+  await request($)
+  await bash($, "git commit -m x --trailer 'Task: B-r1' --trailer 'Agent: codex' --trailer 'Session: abc'")
+  await bash($, "git commit --trailer='Session: abc' -m x")
+  await bash($, 'git commit -m x --trailer "Agent=codex"')
+  await bash($, "git commit -m x --trailer 'Task: B-r1' --trailer 'Run: 2026-11-09-demo'")
+
+  expect(seen.commands[0]).toBe("git commit -m x --trailer 'Task: B-r1' --trailer 'Agent: codex' --trailer 'Session: abc'")
+  expect(seen.commands[1]).toBe("git commit --trailer='Session: abc' -m x")
+  expect(seen.commands[2]).toBe('git commit -m x --trailer "Agent=codex"')
+  expect(seen.commands[3]).toBe("git commit --trailer 'Agent: claude' --trailer 'Session: session-1' --trailer 'Model: claude-opus-5-5' --trailer 'Effort: xhigh' --trailer 'Device: MacBook Pro (M3 Pro)' -m x --trailer 'Task: B-r1' --trailer 'Run: 2026-11-09-demo'")
+})
+
+test('in a command with two commits, only the one without its own Agent or Session trailer is signed', async ($, on) => {
+  const seen = standIn(on)
+  await request($)
+  await bash($, "git commit -m a --trailer 'Agent: codex' && git commit -m b")
+
+  expect(seen.commands[0]?.startsWith("git commit -m a --trailer 'Agent: codex' && git commit --trailer 'Agent: claude'")).toBe(true)
+  expect(seen.commands[0]?.match(/Agent:/g)).toHaveLength(2)
+  expect(hasOwnTrailers("-m a --trailer 'Agent: codex'")).toBe(true)
+  expect(hasOwnTrailers("-m 'Agent: in a message' --trailer 'Task: A-r1'")).toBe(false)
+  expect(hasOwnTrailers('-m a')).toBe(false)
 })

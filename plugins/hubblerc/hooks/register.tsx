@@ -23,6 +23,7 @@ import { layoutOption, showSidebar, startSidebar } from './sidebar/sidebar'
 import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
 import { findTurnForLine, summarize } from './activity/summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
+import { gateLaunches, unverifiedLine } from './relay/gate'
 import { registerRelayTool, serveRelayTool } from './relay/relay'
 import { showToolLines } from './activity/tool-lines'
 
@@ -107,6 +108,9 @@ export const register: Register = (on, options) => {
       await refreshStatus($).catch(() => undefined)
       await noteFiveHourUsed($, e.turnId).catch(() => undefined)
       await noteShellChanges($, e.turnId).catch(() => undefined)
+      // relay's gate 2: a finished run's work with no verdict at HEAD gets a line beneath the answer.
+      const unverified = e.reason === 'answer' ? await unverifiedLine($).catch(() => undefined) : undefined
+      if (unverified !== undefined) return { ...done, text: unverified }
     }
 
     return done
@@ -177,6 +181,7 @@ export const register: Register = (on, options) => {
   showSidebar(on, layout, autoByDefault)
   showAnswer(on)
   signCommits(on)
+  gateLaunches(on)
 
   // The line that closes a turn ("Baked for 2m 13s") gets the turn's activity on the line under it.
   // Under it, not beside it: the engine's line takes the row's free width and squeezes a sibling to the edge.

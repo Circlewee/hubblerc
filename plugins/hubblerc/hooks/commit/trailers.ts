@@ -36,8 +36,11 @@ export function noteRequest(agentId: string | undefined, model: string, effort: 
 
 export function signCommits(on: On): void {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    // An amend keeps the trailers the commit already has: git would add a second set beside them.
-    const spots = findCommits(e.command)?.filter(spot => !spot.isAmend)
+    // An amend keeps the trailers the commit already has: git would add a second set beside them. A
+    // commit that names Agent or Session itself (a Codex-style brief followed as written) is signed
+    // already: a second set would give the commit two Agent lines.
+    const found = findCommits(e.command)
+    const spots = found?.filter((spot, at) => !spot.isAmend && !hasOwnTrailers(e.command.slice(spot.end, found[at + 1]?.at ?? e.command.length)))
     if (spots === undefined || spots.length === 0) return next(e)
     if (!(await isOnHere($, spots))) return next(e)
 
@@ -51,6 +54,11 @@ export function signCommits(on: On): void {
 
   // The texts the engine asks the model to end a commit or a pull request with: none.
   on('attribution.text', ($, e, next) => (e.kind === 'commit' || e.kind === 'pr' ? { text: '' } : next(e))).catch(($, e, next) => next(e))
+}
+
+/** Whether a commit's own words give an Agent or Session trailer (`--trailer 'Agent: codex'`, `--trailer=Session=…`). */
+export function hasOwnTrailers(words: string): boolean {
+  return /--trailer(?:=|\s+)['"]?\s*(?:Agent|Session)\s*[:=]/i.test(words)
 }
 
 /** The effort as the trailer reads it: an auto pick says so. */
