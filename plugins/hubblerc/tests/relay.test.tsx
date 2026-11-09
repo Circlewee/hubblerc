@@ -93,8 +93,11 @@ function runIn(sim: Sim, argv: readonly string[], stdin = '') {
   }
   if (argv[1] === 'log' && argv.some(arg => arg.includes('trailers:key=Task'))) return out(`${commit?.task ?? ''}\n`)
   if (argv[1] === 'log' && argv.includes('--format=%s')) return out(`${commit?.subject ?? ''}\n`)
+  // Three lines added and one removed in each file the commit changed.
+  if (argv[1] === 'show' && argv.includes('--numstat')) return out((commit?.files ?? []).map(file => `3\t1\t${file}\n`).join(''))
   if (argv[1] === 'show' && argv.includes('--name-only')) return out(`${(commit?.files ?? []).join('\n')}\n`)
-  if (argv[1] === 'show' && argv.includes('--format=fuller')) return out(`commit ${last}\n\n    ${commit?.subject ?? ''}\n\ndiff --git a/x b/x\n`)
+  // A whole diff: the package must not carry it.
+  if (argv[1] === 'show') return out(`commit ${last}\n\ndiff --git a/x b/x\n+DIFF-BODY\n`)
 
   return out('', 1)
 }
@@ -292,7 +295,7 @@ test('start makes the folder, its .gitignore, progress, state and the verdict sc
   expect(sim.files[`${DIR}/progress.md`]).toContain('- Base: aaaaaaa')
   expect(sim.files[`${DIR}/progress.md`]).toContain('<!-- relay:tasks:start -->')
   expect(state(sim)).toMatchObject({ version: 1, run: RUN, base: HEAD_1, lead: 'lead-session-1234', status: 'active', tasks: [], verdicts: [] })
-  expect(JSON.parse(sim.files[`${DIR}/reviews/verdict.schema.json`] ?? '{}').required).toEqual(['commit', 'result', 'model', 'criteria', 'findings'])
+  expect(JSON.parse(sim.files[`${DIR}/reviews/verdict.schema.json`] ?? '{}').required).toEqual(['commit', 'result', 'model', 'criteria', 'findings', 'reviewed_files'])
 
   expect((await relay($, { action: 'start', name: 'demo', goal: 'Again', done_when: ['x'] })).deny).toMatch(/같은 묶음이 이미 있습니다/)
   expect((await relay($, { action: 'start', name: 'Bad Name', goal: 'x', done_when: ['x'] })).deny).toMatch(/소문자/)
@@ -453,7 +456,8 @@ test('package leaves out the rules and the hand-over notes, and carries the chec
   expect(text).not.toContain('## Report format')
   expect(text).not.toContain('Status: DONE | DONE_WITH_CONCERNS')
   expect(text).toContain('Summary: pass 1')
-  expect(text).toContain(`commit ${SHA_A}`)
+  expect(text).toContain(`- ${SHA_A} Add the relay tool`)
+  expect(text).toContain('## Files to review')
   expect(text).toContain('반박하는 자세')
   expect(text).toContain(`${DIR}/reviews/verdict.schema.json`)
 })
@@ -464,7 +468,7 @@ test('finish refuses while the verdict saw another commit, and closes the run wi
   expect((await relay($, { action: 'finish', run: RUN })).deny).toMatch(/판정이 없습니다/)
 
   await relay($, { action: 'package', run: RUN })
-  const verdict = { commit: HEAD_1, result: 'pass', model: 'gpt-5.5-codex', criteria: PASSED, findings: [] }
+  const verdict = { commit: HEAD_1, result: 'pass', model: 'gpt-5.5-codex', criteria: PASSED, findings: [], reviewed_files: ['hooks/relay/relay.ts'] }
   sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify(verdict)
   sim.head = HEAD_2
   expect((await relay($, { action: 'verdict', run: RUN, id: 'V1' })).result).toContain('검증한 판과 지금 판이 다름')
@@ -499,7 +503,7 @@ test('finish refuses a running task and a failed verdict, all reasons at once', 
   await relay($, { action: 'package', run: RUN })
   await relay($, { ...TASK_A, id: 'B', edit_scope: ['docs/**'], reads: [] })
   await relay($, { action: 'dispatched', run: RUN, task: 'B', runner: 'subagent b' })
-  sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({ commit: HEAD_1, result: 'fail', model: 'm', criteria: PASSED, findings: [{ severity: 'high', file: 'a.ts', line: 3, issue: 'x', evidence: 'y' }] })
+  sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({ commit: HEAD_1, result: 'fail', model: 'm', criteria: PASSED, findings: [{ severity: 'high', file: 'a.ts', line: 3, issue: 'x', evidence: 'y' }], reviewed_files: ['hooks/relay/relay.ts'] })
   await relay($, { action: 'verdict', run: RUN, id: 'V1' })
   const refused = await relay($, { action: 'finish', run: RUN })
   expect(refused.deny).toContain('끝나지 않은 작업: B-r1(running)')
@@ -514,6 +518,7 @@ test('a verdict of the wrong form is refused with what is wrong', async ($, on) 
   const refused = await relay($, { action: 'verdict', run: RUN, id: 'V1' })
   expect(refused.deny).toContain("result가 'pass' 또는 'fail'이 아님")
   expect(refused.deny).toContain('criteria[0]')
+  expect(refused.deny).toContain('reviewed_files가 문자열 배열이 아님')
 })
 
 test('pending lists the decisions asked or on hold', async ($, on) => {
@@ -556,9 +561,10 @@ test('spec_text answers a light brief and writes no file', async ($, on) => {
 
 // ── Verdict V1's findings, each reproduced ──────────────────────────────────────────────
 
-/** Writes V<n>'s verdict file and records it. */
-async function verdictOf($: Engine, sim: Sim, id: string, criteria: unknown[], result = 'pass', commit = HEAD_1) {
-  sim.files[`${DIR}/reviews/${id}-verdict.json`] = JSON.stringify({ commit, result, model: 'gpt-5.5-codex', criteria, findings: [] })
+/** Writes V<n>'s verdict file, having read every file its package lists unless told otherwise, and records it. */
+async function verdictOf($: Engine, sim: Sim, id: string, criteria: unknown[], result = 'pass', commit = HEAD_1, reviewed?: string[]) {
+  const listed = state(sim).packages?.find(pack => pack.id === id)?.files ?? []
+  sim.files[`${DIR}/reviews/${id}-verdict.json`] = JSON.stringify({ commit, result, model: 'gpt-5.5-codex', criteria, findings: [], reviewed_files: reviewed ?? listed })
 
   return relay($, { action: 'verdict', run: RUN, id })
 }
@@ -572,7 +578,7 @@ test('V1-01 a verdict is taken only for a package, and must judge each criterion
   const text = sim.files[`${DIR}/reviews/V1-package.md`] ?? ''
   expect(text).toContain('- A-r1:C1 — tests pass')
   expect(text).toContain('- A-r1:C2 — reads well')
-  expect(state(sim).packages).toEqual([{ id: 'V1', at: NOON, head: HEAD_1, tasks: [{ key: 'A-r1', criteria: ['C1', 'C2'] }] }])
+  expect(state(sim).packages).toEqual([{ id: 'V1', at: NOON, head: HEAD_1, tasks: [{ key: 'A-r1', criteria: ['C1', 'C2'] }], files: ['hooks/relay/relay.ts'] }])
 
   expect((await verdictOf($, sim, 'V1', [])).deny).toContain('꾸러미 V1가 묻는 기준이 판정에 없음: A-r1:C1, A-r1:C2')
   expect((await verdictOf($, sim, 'V1', [...PASSED, PASSED[0]])).deny).toContain('판정에 두 번 이상 나온 기준: A-r1:C1')
@@ -715,7 +721,7 @@ test('V1-04 the package carries the commits of every revision, their scope and t
   expect(text).toContain(`- 보고에 없고 꼬리말(Task: A-r2, Run: ${RUN})로 찾은 커밋: ${silent}`)
   expect(text).not.toContain(stray)
   expect(text).toContain(`- Base(aaaaaaa)의 자손이 아닌 커밋: ${newer}`)
-  expect(text).toContain(`commit ${old}`)
+  expect(text).toContain(`git show ${old} -- tests/weakened.test.ts`)
   expect(state(sim).packages?.[0]?.tasks).toEqual([{ key: 'A-r2', criteria: ['C1', 'C2'] }])
 })
 
@@ -799,4 +805,50 @@ test('V1-07 reserveDispatch lets one of two overlapping launches through; launch
   expect('result' in committed && committed.result).toContain('A-r1: running · subagent ag-1')
   expect(state(sim).tasks[0]).toMatchObject({ status: 'running', runner: 'subagent ag-1', dispatchedAt: NOON })
   expect(sim.files[`${DIR}/tasks/A-r1.dispatched.md`]).toBe(sim.files[`${DIR}/tasks/A-r1.md`])
+})
+
+// ── D7: the package lists files to open, the verdict names those it read ──────────────────────────────────────────────
+
+test('D7 the package carries no diff: each commit with its files and line counts, and the git show command for each file', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim, ['hooks/relay/relay.ts', 'hooks/relay/relay-format.ts'])
+  const packed = await relay($, { action: 'package', run: RUN })
+  expect(packed.result).toContain('검토할 파일 2개')
+  const text = sim.files[`${DIR}/reviews/V1-package.md`] ?? ''
+  expect(text).not.toContain('DIFF-BODY')
+  expect(text).not.toContain('diff --git')
+  expect(text).not.toContain('## Diffs')
+  expect(text).toContain(`- ${SHA_A} Add the relay tool\n  - hooks/relay/relay.ts (+3 −1)\n  - hooks/relay/relay-format.ts (+3 −1)`)
+  expect(text).toContain(`diff는 담지 않는다. 각 파일을 아래 명령으로 저장소 루트(${ROOT})에서 열어 본다.`)
+  expect(text).toContain('- hooks/relay/relay.ts — +3 −1, 커밋 1개')
+  expect(text).toContain(`  - \`git show ${SHA_A} -- hooks/relay/relay.ts\` (+3 −1, A-r1)`)
+  expect(text).toContain('열지 않은 파일은 적지 않는다')
+  expect(state(sim).packages?.[0]?.files).toEqual(['hooks/relay/relay-format.ts', 'hooks/relay/relay.ts'])
+})
+
+test('D7 a verdict that leaves out a file to review is refused, naming it; one listing them all is taken', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim, ['hooks/relay/relay.ts', 'hooks/relay/relay-format.ts'])
+  await relay($, { action: 'package', run: RUN })
+  const partial = await verdictOf($, sim, 'V1', PASSED, 'pass', HEAD_1, ['hooks/relay/relay.ts'])
+  expect(partial.deny).toContain('검토하지 않은 파일(reviewed_files에 없음): hooks/relay/relay-format.ts')
+  expect(state(sim).verdicts).toEqual([])
+  const all = await verdictOf($, sim, 'V1', PASSED, 'pass', HEAD_1, ['./hooks/relay/relay-format.ts', 'hooks/relay/relay.ts', 'docs/extra.md'])
+  expect(all.result).toContain('판정 V1: 기록 pass')
+})
+
+test('D7 package writes the current verdict schema into a run started before it changed', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  sim.files[`${DIR}/reviews/verdict.schema.json`] = '{"required":["commit"]}'
+  await relay($, { action: 'package', run: RUN })
+  expect(JSON.parse(sim.files[`${DIR}/reviews/verdict.schema.json`] ?? '{}').required).toContain('reviewed_files')
+})
+
+test('task says the hubblerc gate records a launch, dispatched only when it could not', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  const written = await relay($, TASK_A)
+  expect(written.result).toContain('Orca worker-start·send, 서브에이전트 생성·SendMessage로 띄우면 hubblerc 관문이 검사·기록합니다. 관문이 기록하지 못했다고 하면 dispatched를 부르세요.')
+  expect(written.result).not.toContain('띄운 뒤 dispatched로')
 })

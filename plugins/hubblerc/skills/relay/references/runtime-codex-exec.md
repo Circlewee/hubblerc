@@ -5,12 +5,13 @@ For a different model's verification when there is no Orca. Verification only: C
 ## Run it
 
 1. `package` { run } gives the package path, the verdict path and the schema path.
-2. Run in the background (Bash `run_in_background`), from the repository root:
+2. Run in the background (Bash `run_in_background`), with the repository root as Codex's working root (`-C`): the package lists files and the `git show` commands to open them, and the verifier runs them there.
    ```bash
-   codex exec --sandbox read-only --ephemeral \
+   codex exec -C <repository root> --sandbox read-only --ephemeral \
      --output-schema <schema path> -o <verdict path> \
-     "You are verifying another agent's work. Read the package at <package path> and follow its verifier instructions. Read only. Your final message is the verdict JSON." < /dev/null
+     "You are verifying another agent's work. Read the package at <package path> and follow its verifier instructions: open every file it lists with its git show command, from this repository's root, and name in reviewed_files only the files you opened. Read only. Your final message is the verdict JSON." < /dev/null
    ```
+   - `-C <repository root>` (`--cd`): where its commands run; the package holds no diffs, so without the repository it cannot review.
    - `--sandbox read-only`: it cannot change files. Never pass `--dangerously-bypass-approvals-and-sandbox`, `--approve-for-me` or a writable sandbox for verification.
    - `-o` writes its last message, the verdict, to the file; `--output-schema` holds it to the schema.
    - `< /dev/null` keeps it from waiting on input.

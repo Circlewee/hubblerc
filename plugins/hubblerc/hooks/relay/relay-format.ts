@@ -37,7 +37,14 @@ export type RelayTask = {
 export type RelayVerdict = { id: string; at: number; commit: string; path: string; result: 'pass' | 'fail'; reasons?: string[] }
 
 /** What a package handed the verifier: the tasks by revision, the criteria ids each must be judged on, the HEAD it showed. */
-export type RelayPackage = { id: string; at: number; head: string; tasks: { key: string; criteria: string[] }[] }
+export type RelayPackage = {
+  id: string
+  at: number
+  head: string
+  tasks: { key: string; criteria: string[] }[]
+  /** Every file its commits changed: a verdict must list each in `reviewed_files`. Absent on a package made before files were asked. */
+  files?: string[]
+}
 
 export type RelayState = {
   version: 1
@@ -668,6 +675,8 @@ export type Verdict = {
   model: string
   criteria: { id: string; result: CriterionResult; evidence: string }[]
   findings: { severity: 'high' | 'medium' | 'low'; file?: string | null; line?: number | null; issue: string; evidence: string }[]
+  /** The repository paths the verifier opened and read. */
+  reviewed_files: string[]
 }
 
 /**
@@ -679,7 +688,7 @@ export const VERDICT_SCHEMA = {
   title: 'relay verdict',
   type: 'object',
   additionalProperties: false,
-  required: ['commit', 'result', 'model', 'criteria', 'findings'],
+  required: ['commit', 'result', 'model', 'criteria', 'findings', 'reviewed_files'],
   properties: {
     commit: { type: 'string', description: 'Full SHA of the HEAD that was reviewed' },
     result: { type: 'string', enum: ['pass', 'fail'] },
@@ -711,6 +720,11 @@ export const VERDICT_SCHEMA = {
           evidence: { type: 'string' },
         },
       },
+    },
+    reviewed_files: {
+      type: 'array',
+      items: { type: 'string' },
+      description: "Repository paths of the files you opened and read with the package's git show commands; none you did not open",
     },
   },
 } as const
@@ -750,6 +764,7 @@ export function parseVerdict(text: string): { verdict: Verdict } | { problems: s
         (item.line === undefined || item.line === null || typeof item.line === 'number')
       if (!isForm) problems.push(`findings[${at}]: { severity: high|medium|low, file?, line?, issue, evidence } 형식이 아님`)
     })
+  if (!Array.isArray(value.reviewed_files) || !value.reviewed_files.every((item: unknown) => typeof item === 'string')) problems.push('reviewed_files가 문자열 배열이 아님(열어 본 파일의 저장소 경로)')
 
   return problems.length > 0 ? { problems } : { verdict: value as unknown as Verdict }
 }
@@ -766,15 +781,53 @@ export function sameCommit(a: string, b: string): boolean {
 
 // ── The package ──────────────────────────────────────────────
 
-export const DIFF_LIMIT = 300 * 1024
+/** One file a commit changed, as `git show --numstat` counts it (null: binary). */
+export type FileChange = { sha: string; key: string; path: string; added: number | null; removed: number | null }
 
-/** Text cut to `limit` UTF-8 bytes, and whether it was cut. */
-export function cutBytes(text: string, limit: number): { text: string; isCut: boolean } {
-  const bytes = new TextEncoder().encode(text)
-  if (bytes.length <= limit) return { text, isCut: false }
+/** `git show --numstat --format=` lines: `added<TAB>removed<TAB>path`, `-` for a binary file. */
+export function parseNumstat(text: string): { path: string; added: number | null; removed: number | null }[] {
+  const found: { path: string; added: number | null; removed: number | null }[] = []
+  for (const line of text.split('\n')) {
+    const [added = '', removed = '', ...rest] = line.split('\t')
+    const path = rest.join('\t').trim()
+    if (path === '') continue
+    found.push({ path, added: /^\d+$/.test(added) ? Number(added) : null, removed: /^\d+$/.test(removed) ? Number(removed) : null })
+  }
 
-  return { text: new TextDecoder().decode(bytes.slice(0, limit)).replace(/�$/, ''), isCut: true }
+  return found
 }
+
+const counted = (change: { added: number | null; removed: number | null }): string => (change.added === null ? 'binary' : `+${change.added} −${change.removed ?? 0}`)
+
+/**
+ * The package's list of files to review, in place of the diffs: each file with its commits, their
+ * line counts and the command that shows it, run from the repository root.
+ */
+export function filesToReview(root: string, changes: readonly FileChange[]): string {
+  const paths = [...new Set(changes.map(change => change.path))].sort()
+  const lines = [
+    '## Files to review',
+    `diff는 담지 않는다. 각 파일을 아래 명령으로 저장소 루트(${root})에서 열어 본다.`,
+  ]
+  if (paths.length === 0) lines.push('- 없음(커밋 없음)')
+  for (const path of paths) {
+    const mine = changes.filter(change => change.path === path)
+    const added = mine.reduce((sum, change) => sum + (change.added ?? 0), 0)
+    const removed = mine.reduce((sum, change) => sum + (change.removed ?? 0), 0)
+    const isBinary = mine.some(change => change.added === null)
+    lines.push(`- ${path} — ${isBinary ? 'binary 포함, ' : ''}+${added} −${removed}, 커밋 ${mine.length}개`)
+    for (const change of mine) lines.push(`  - ${inlineCode(`git show ${change.sha} -- ${path}`)} (${counted(change)}, ${change.key})`)
+  }
+
+  return lines.join('\n')
+}
+
+/** One commit's line in a revision's list: its subject, then its files with their counts. */
+export function commitLines(subject: string, files: readonly { path: string; added: number | null; removed: number | null }[]): string[] {
+  return [`- ${subject}`, ...files.map(file => `  - ${file.path} (${counted(file)})`)]
+}
+
+const normalReviewed = (path: string): string => path.trim().replace(/^\.\//, '')
 
 /** The criteria ids a package asks to be judged, `<task>-r<n>:<criterion>`. */
 export const requiredCriteria = (pack: RelayPackage): string[] => pack.tasks.flatMap(task => task.criteria.map(id => `${task.key}:${id}`))
@@ -792,6 +845,9 @@ export function judgeVerdict(verdict: Verdict, pack: RelayPackage): { problems: 
   const repeated = required.filter(id => verdict.criteria.filter(criterion => criterion.id === id).length > 1)
   if (missing.length > 0) problems.push(`꾸러미 ${pack.id}가 묻는 기준이 판정에 없음: ${missing.join(', ')}`)
   if (repeated.length > 0) problems.push(`판정에 두 번 이상 나온 기준: ${repeated.join(', ')}`)
+  const reviewed = new Set((verdict.reviewed_files ?? []).map(normalReviewed))
+  const unread = (pack.files ?? []).filter(path => !reviewed.has(normalReviewed(path)))
+  if (unread.length > 0) problems.push(`검토하지 않은 파일(reviewed_files에 없음): ${unread.join(', ')}`)
   for (const id of required) {
     const found = verdict.criteria.find(criterion => criterion.id === id)
     if (found !== undefined && found.result !== 'pass') reasons.push(`${id}: ${found.result}`)
@@ -848,6 +904,7 @@ export function verifierInstructions(verdictPath: string, schemaPath: string, re
     '- 반박하는 자세로 본다: 통과를 확인하려 하지 말고 결함을 찾아 근거를 댄다.',
     '- 위 기준마다 pass / fail / unverified를 매기고 증거를 단다: 돌린 명령과 종료 코드, 출력 몇 줄, 파일:줄. 하나라도 fail·unverified면 result는 fail이다.',
     '- 증거 없는 pass는 unverified다. 워커 보고의 pass는 증거가 아니다(relay 도구가 직접 돌린 Checks가 증거다).',
+    '- 위 Files to review의 각 파일을 그 명령으로 열어 보고 reviewed_files에 적는다. 열지 않은 파일은 적지 않는다. 목록의 파일이 하나라도 빠지면 판정을 받지 않는다.',
     '- 스타일 지적은 빼고 동작·정확성·범위·테스트 약화만 본다.',
     '- 이 작업을 만든 워커와 같은 계열 모델이면 model 칸과 판정에 그렇게 적는다(교차 검증이 아님).',
     `- 판정은 ${schemaPath} 형식의 JSON으로 ${verdictPath}에 쓴다. 쓸 수 없으면 같은 JSON을 답으로 준다.`,

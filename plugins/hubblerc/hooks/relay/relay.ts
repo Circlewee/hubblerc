@@ -5,12 +5,11 @@ import {
   checkTask,
   checksFile,
   checksText,
-  cutBytes,
+  commitLines,
   decisionRows,
-  DIFF_LIMIT,
   dispatchedFile,
   effectiveTasks,
-  fenced,
+  filesToReview,
   findTask,
   finishProblems,
   isBusy,
@@ -26,6 +25,7 @@ import {
   latestRevs,
   localDate,
   outsideScope,
+  parseNumstat,
   parseReport,
   parseVerdict,
   progressText,
@@ -44,7 +44,7 @@ import {
   withoutSections,
   withTasks,
 } from './relay-format'
-import type { BriefInput, CheckOutcome, Criterion, RelayPackage, RelayState, RelayTask, RunnerKind, TaskStatus } from './relay-format'
+import type { BriefInput, CheckOutcome, Criterion, FileChange, RelayPackage, RelayState, RelayTask, RunnerKind, TaskStatus } from './relay-format'
 
 /**
  * relay's tool: the steps of the lead/worker skill (hubblerc:relay) that have one right answer.
@@ -557,7 +557,8 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
       [
         `지시서: ${specPath}`,
         `보고서 자리: ${reportTo}`,
-        '띄울 때 이 파일을 지시서로 주세요(Orca: --spec-file, 서브에이전트: 프롬프트에 경로와 함께 내용). 띄운 뒤 dispatched로 runner를 알려 주세요.',
+        '띄울 때 이 파일을 지시서로 주세요(Orca: --spec-file, 서브에이전트: 프롬프트에 경로와 함께 내용).',
+        'Orca worker-start·send, 서브에이전트 생성·SendMessage로 띄우면 hubblerc 관문이 검사·기록합니다. 관문이 기록하지 못했다고 하면 dispatched를 부르세요.',
         ...(superseded.length === 0 ? [] : [`앞 판을 취소로 바꿨습니다: ${superseded.join(', ')}(새 판을 워커에게 알리세요).`]),
       ],
       [...checked.warnings, redrawn],
@@ -914,7 +915,7 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     `- Tasks: ${chosen.map(taskKey).join(', ')}`,
     ...(changes.untracked.length === 0 ? [] : [`- Untracked files (not committed, not in this package): ${changes.untracked.join(', ')}`]),
   ]
-  const shas: string[] = []
+  const fileChanges: FileChange[] = []
   const ids = [...new Set(chosen.map(task => task.id))]
   for (const taskId of ids) {
     for (const task of chosen.filter(other => other.id === taskId)) {
@@ -949,12 +950,20 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
       const unreported = (signed.get(key) ?? []).filter(sha => !reported.some(other => sameCommit(other, sha)))
       const all = [...reported, ...unreported]
       const look = await lookAtCommits($, root, rev, all, state.base)
-      for (const sha of all) if (!look.missing.includes(sha) && !shas.includes(sha)) shas.push(sha)
       outside.push(...look.outside.map(file => `${file} (${key})`))
       tests.push(...look.tests.map(file => `${file} (${key})`))
+      // Each commit's files and line counts; the verifier opens them itself (no diff in the package).
+      const listed: string[] = []
+      for (const [at, sha] of all.filter(other => !look.missing.includes(other)).entries()) {
+        if (fileChanges.some(change => change.sha === sha)) continue
+        const shown = await git($, root, ['show', '--numstat', '--no-renames', '--format=', sha]).catch(() => undefined)
+        const files = parseNumstat(shown?.stdout ?? '')
+        fileChanges.push(...files.map(file => ({ sha, key, ...file })))
+        listed.push(...commitLines(look.subjects[at] ?? sha, files))
+      }
       parts.push(
         `#### ${key} (${rev.status}${rev.cancelReason === undefined ? '' : `: ${rev.cancelReason}`})${reportText === undefined ? ' — 보고서 없음' : ''}`,
-        ...(look.subjects.length === 0 ? ['- 커밋 없음'] : look.subjects.map(subject => `- ${subject}`)),
+        ...(listed.length === 0 ? ['- 커밋 없음'] : listed),
         ...(unreported.length === 0 ? [] : [`- 보고에 없고 꼬리말(Task: ${key}, Run: ${state.run})로 찾은 커밋: ${unreported.join(', ')}`]),
         ...(look.missing.length === 0 ? [] : [`- 없는 커밋: ${look.missing.join(', ')}`]),
         ...(look.unsigned.length === 0 ? [] : [`- 꼬리말 Task: ${key}가 없는 커밋: ${look.unsigned.join(', ')}`]),
@@ -967,31 +976,26 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
       `### Test file changes (every revision of ${taskId}): ${tests.length === 0 ? 'none' : tests.join(', ')}`,
     )
   }
-  let diffs = ''
-  for (const sha of shas) {
-    const shown = await git($, root, ['show', '--format=fuller', sha]).catch(() => undefined)
-    diffs += `${shown?.stdout ?? `(git show ${sha} 실패)`}\n`
-  }
-  const cut = cutBytes(diffs, DIFF_LIMIT)
   const at = await $.clock.now()
-  const pack: RelayPackage = { id, at, head, tasks: chosen.map(task => ({ key: taskKey(task), criteria: task.criteria.map(criterion => criterion.id) })) }
+  const files = [...new Set(fileChanges.map(change => change.path))].sort()
+  const pack: RelayPackage = { id, at, head, tasks: chosen.map(task => ({ key: taskKey(task), criteria: task.criteria.map(criterion => criterion.id) })), files }
   const required = chosen.flatMap(task => task.criteria.map(criterion => ({ id: `${taskKey(task)}:${criterion.id}`, text: criterion.text })))
   parts.push(
     '',
-    '## Diffs',
-    shas.length === 0 ? '(커밋 없음)' : fenced(cut.text, 'diff'),
-    ...(cut.isCut ? [`(잘림: diff가 ${DIFF_LIMIT / 1024}KB를 넘어 앞부분만 담았습니다. 나머지는 git show로 직접 보세요.)`] : []),
+    filesToReview(root, fileChanges),
     '',
     verifierInstructions(verdictPath, schemaPath, required),
     '',
   )
   await $.fs.write(packagePath, parts.join('\n'))
+  // A run started before a field was added gets the schema the verdict is now checked against.
+  await $.fs.write(schemaPath, `${JSON.stringify(VERDICT_SCHEMA, null, 2)}\n`)
   state.packages = [...(state.packages ?? []), pack]
   await writeState($, root, state)
 
   return {
     result: withWarnings(
-      [`검증 꾸러미 ${id}: ${packagePath}`, `판정 파일: ${verdictPath}`, `판정 형식: ${schemaPath}`, `담은 작업: ${chosen.map(taskKey).join(', ')} · HEAD ${head.slice(0, 7)}${cut.isCut ? ' · diff 잘림' : ''}`],
+      [`검증 꾸러미 ${id}: ${packagePath}`, `판정 파일: ${verdictPath}`, `판정 형식: ${schemaPath}`, `담은 작업: ${chosen.map(taskKey).join(', ')} · HEAD ${head.slice(0, 7)} · 검토할 파일 ${files.length}개`],
       warnings,
     ),
   }

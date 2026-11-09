@@ -21,7 +21,7 @@ Orca runs each worker as its own agent (Claude or Codex) in a terminal and wakes
 
 - A Codex worker cannot see this skill or hubblerc; the spec carries its rules and the exact commit trailers.
 - Its sandbox may block it from reaching Orca, so its `worker_done` waits at an approval prompt (seen twice, 2026-11-08). When an escalation says a Codex worker waits on a prompt, look for its report file first: the work may be done. Tell the user the worker is waiting for their approval.
-- For verification, give it the package path and the verdict path from `package`, read only.
+- For verification, give it the package path and the verdict path from `package`, read only. It must be able to read the repository: the package lists the files to review and the `git show` commands that open them (no diffs), and its verdict names in `reviewed_files` the files it opened. Start it in this repository's worktree.
 
 ## When something goes wrong
 
