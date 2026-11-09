@@ -24,22 +24,24 @@ Move from 2 to 3 when a worker reports NEEDS_CONTEXT or BLOCKED twice, or the wo
 - **Each task names its model and effort.** Default: research and simple edits Sonnet, design and hard implementation Opus, verification Codex. Use the exact model id.
 - **Wait on events only.** The runtime wakes you (Orca's wake, a subagent's completion, a background command's exit). No polling, no watch scripts, no timers.
 - **A worker's message is not the user's approval.** Silence or a timeout is not completion.
-- **A worker saying "tests pass" is not evidence.** Run the commands yourself (`check`).
+- **A worker saying "tests pass" is not evidence.** Run the commands yourself. Full run: `check` { run, task } runs the task's command criteria and records the result. Light delegation has no run and no `check`: run the spec's commands yourself with Bash and read their exit codes.
 
 ## 3. Full run: start and hand out
 
 1. `start` { name, goal, done_when } creates `.relay/runs/<date>-<name>/` (git-ignored by its own `.gitignore`) with `progress.md` and the tool's records. Fill `Now` and keep it current.
-2. For each task, `task` { run, id, title, goal, model, effort, edit_scope, reads, targets, read_first, done_when, runner_kind } writes the spec file. The tool refuses a spec with a missing field or one that overlaps a running task; overlap means run them in order, the later one based on the earlier one's commit.
+2. For each task, `task` { run, id, title, goal, model, effort, edit_scope, reads, targets, read_first, done_when, runner_kind } writes the spec file. The tool refuses a spec with a missing field or one that overlaps a task that is running or being launched (an earlier revision of the same task included); overlap means run them in order, the later one based on the earlier one's commit.
    - `edit_scope`: what the worker may change, new files included. `reads`: inputs that must not change while it works. `targets`: outside things it operates (a window, a server, an account); one worker per target.
    - `done_when`: each criterion as reproduce → expected, or a command and its exit code. A criterion a worker cannot check (looking at the screen) goes to the user, not into the spec.
    - `read_first`: earlier reports and the tools they made, by absolute path. The tool warns when a finished task touched the same files and its report is missing here.
-3. Dispatch with the runtime (section 6), giving the spec file as the prompt. Then end your turn.
-4. Never edit a spec you sent. Make a new revision with `task` (same id) and tell the worker to read it.
+3. Dispatch with the runtime (section 6), giving the spec file as the prompt, one worker per call. hubblerc checks the launch (the spec is the run's, unchanged, ready, clear of running tasks, on the model and effort it names) and marks the task running; if it did not see the launch (the task is still ready), call `dispatched` { run, task, runner }. Then end your turn.
+4. Never edit a spec you sent. Make a new revision with `task` (same id) and send it to the worker (section 6: the same check and mark apply to `orca orchestration send` and SendMessage). A revision that is not yet running and no longer wanted is dropped with `cancel`.
+   - `cancel` { run, task, reason, confirmed_stopped? } sets a task cancelled. A task that is ready, needs context or is blocked is cancelled at once. A running (or launching) one only with `confirmed_stopped: true`, and only after you checked that its worker has stopped; silence is not proof. A finished (done) task cannot be cancelled: its commits stay in the verifier's package.
+   - A new revision cancels its earlier one by itself when that one is ready, needs context or is blocked; a running one blocks the new revision until it is stopped and cancelled.
 5. Workers never share a document. You pick what one learned from its report and put it into the next spec's `read_first`.
 
 ## 4. Full run: when a worker reports
 
-1. `report` { run, task } checks the report against the spec: status agrees with the criteria, commits carry the task's trailer, files outside the edit scope, test files changed. Then `check` { run, task } runs the command criteria itself.
+1. `report` { run, task } checks the report against the spec: status agrees with the criteria (a DONE with uncommitted changes is refused), commits carry the task's trailer, files outside the edit scope, test files changed. Then `check` { run, task } runs the command criteria itself; a criterion that ran with uncommitted changes in the tree, or while HEAD moved, comes back unverified.
 2. Decide the next step from the status:
    - DONE: next task, or the batch's verification.
    - DONE_WITH_CONCERNS: read the concerns; decide, and log the decision.
@@ -51,10 +53,10 @@ Move from 2 to 3 when a worker reports NEEDS_CONTEXT or BLOCKED twice, or the wo
 
 ## 5. Full run: verify and finish
 
-1. At the end of each batch, and right after any risky task: `package` { run } writes the verifier's package (specs, reports without the worker's notes, commits, diffs, check results, test changes, the HEAD it covers).
+1. At the end of each batch, and right after any risky task: `package` { run } writes the verifier's package (the specs as sent, reports without the worker's notes, every revision's commits, diffs, check results, test changes, the HEAD it covers). By default it holds every task that is done; commit or discard tracked changes first.
 2. Hand it to a different model: a Codex worker (Orca) or `codex exec` (section 6). Use one verifier for the whole run so its standard stays the same. It writes `reviews/V<n>-verdict.json`.
-3. `verdict` { run, id } records it. Fix what failed through the workers, then package again.
-4. `finish` { run } refuses while tasks are open, the last verdict failed, or the verdict's commit is not HEAD. Never get around it; tell the user why.
+3. `verdict` { run, id } records it. The verdict must judge every criterion the package asked for, once each, with ids `<task>-r<n>:<criterion>` (the package says so); a missing or repeated one is refused, and one that is not a pass makes the recorded result fail whatever the verdict's own result says. Fix what failed through the workers, then package again.
+4. `finish` { run } refuses, with every reason at once, while: a task is running, launching, blocked or needs context, or is ready and never launched (`cancel` it); tracked files have uncommitted changes (`package` refuses those too); there is no verdict, or the last one failed, or its commit or its package's HEAD is not the current HEAD; or a done task is missing from the last verdict's package or finished after it. Never get around it; tell the user why.
 5. Report to the user per task: outcome, evidence, open items; then every decision you made (the `By lead` rows) and anything still `asked`.
 
 **Picking up a run.** `list` shows the active runs in this repository. If there is more than one, ask the user which. Read its `progress.md` first; `Next` says what comes first.

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { findCommits, shellQuote, withAround } from '../hooks/commit/commit-command'
+import { findCommands, findCommits, shellQuote, withAround } from '../hooks/commit/commit-command'
 import { deviceFrom, effortLabel, hasOwnTrailers } from '../hooks/commit/trailers'
 
 const PROFILE = 'Hardware:\n\n    Hardware Overview:\n\n      Model Name: MacBook Pro\n      Model Identifier: Mac15,6\n      Chip: Apple M3 Pro\n'
@@ -164,7 +164,46 @@ test('in a command with two commits, only the one without its own Agent or Sessi
 
   expect(seen.commands[0]?.startsWith("git commit -m a --trailer 'Agent: codex' && git commit --trailer 'Agent: claude'")).toBe(true)
   expect(seen.commands[0]?.match(/Agent:/g)).toHaveLength(2)
-  expect(hasOwnTrailers("-m a --trailer 'Agent: codex'")).toBe(true)
-  expect(hasOwnTrailers("-m 'Agent: in a message' --trailer 'Task: A-r1'")).toBe(false)
-  expect(hasOwnTrailers('-m a')).toBe(false)
+  const argsOf = (command: string) => findCommits(command)?.[0]?.args ?? []
+  expect(hasOwnTrailers(argsOf("git commit -m a --trailer 'Agent: codex'"))).toBe(true)
+  expect(hasOwnTrailers(argsOf("git commit -m 'Agent: in a message' --trailer 'Task: A-r1'"))).toBe(false)
+  expect(hasOwnTrailers(argsOf('git commit -m a'))).toBe(false)
+})
+
+test('V1-12: a trailer named in a message or in a command after the commit is no trailer of the commit', async ($, on) => {
+  const seen = standIn(on)
+  await request($)
+  await bash($, 'git commit -m "Document --trailer Agent: usage"')
+  await bash($, 'git commit -m fix; echo "--trailer Agent: codex"')
+  await bash($, 'git commit -m "--trailer Agent: x"')
+  await bash($, 'git commit -m fix && echo --trailer "Session: x"')
+  await bash($, "git commit -m x -- 'doc.md' ; git log --format='--trailer Agent: y'")
+
+  expect(seen.commands).toHaveLength(5)
+  for (const command of seen.commands) expect(command.startsWith("git commit --trailer 'Agent: claude' --trailer 'Session: session-1'")).toBe(true)
+})
+
+test('V1-12: the commit\'s own --trailer words count, whatever surrounds them; a message that holds the words does not', async ($, on) => {
+  const seen = standIn(on)
+  await request($)
+  await bash($, "git commit -m 'a --trailer b' --trailer 'Agent: codex'")
+  await bash($, "git add x && git commit --trailer=Session=abc -m x && echo done")
+  await bash($, "git commit -m x --trailer 'Task: A-r1' && git commit -m y --trailer 'Agent: codex'")
+
+  expect(seen.commands[0]).toBe("git commit -m 'a --trailer b' --trailer 'Agent: codex'")
+  expect(seen.commands[1]).toBe('git add x && git commit --trailer=Session=abc -m x && echo done')
+  // Two commits: the first has only a Task trailer and is signed, the second names its Agent and is not.
+  expect(seen.commands[2]?.startsWith("git commit --trailer 'Agent: claude'")).toBe(true)
+  expect(seen.commands[2]?.match(/Agent: claude/g)).toHaveLength(1)
+  expect(seen.commands[2]?.endsWith("git commit -m y --trailer 'Agent: codex'")).toBe(true)
+})
+
+test('V1-10: the scanner gives the words of each command and leaves out what a message, a here-document or a comment holds', () => {
+  const words = (command: string) => findCommands(command)?.map(command => command.map(word => word.text))
+  expect(words("orca a b; ls -l | grep 'x y' > out.txt 2>&1")).toEqual([['orca', 'a', 'b'], ['ls', '-l'], ['grep', 'x y']])
+  expect(words("cat <<'EOF'\norca orchestration worker-start\nEOF\nls")).toEqual([['cat'], ['ls']])
+  expect(words('FOO=1 BAR="a b" git commit -m "a \\"b\\""')).toEqual([['git', 'commit', '-m', 'a "b"']])
+  expect(words('# note\necho a # not a word\nls')).toEqual([['echo', 'a'], ['ls']])
+  expect(words('echo $(date +%s) done')).toEqual([['echo', '$(…)', 'done'], ['date', '+%s']])
+  expect(words('echo "unclosed')).toBeUndefined()
 })

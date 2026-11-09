@@ -1,30 +1,36 @@
 import type { EngineInterface, On } from 'claude-code'
 
-import { findActiveRuns, markDispatched, repoRoot, sha256 } from './relay'
+import { findCommands } from '../commit/commit-command'
+import type { CommandWord } from '../commit/commit-command'
+import { findActiveRuns, repoRoot, reserveDispatch, sha256 } from './relay'
 import type { ActiveRun } from './relay'
-import { checkTask, sameCommit, taskKey } from './relay-format'
+import { isBusy, sameCommit, taskKey } from './relay-format'
 import type { RelayTask } from './relay-format'
 
 /**
- * relay's gates, as hooks. Gate 1 looks at a worker about to start (`orca orchestration
- * worker-start`, a subagent whose prompt names a run's brief) while a run of this repository is
- * active: the brief must be the run's own, unchanged since it was written, on the model it names,
- * and clear of the tasks running. Gate 2's second half warns at an answer's end when the run holds
- * finished work no other model has verified at the current HEAD.
+ * relay's gates, as hooks. Gate 1 looks at a worker about to start or to be sent a brief (`orca
+ * orchestration worker-start` and `send`, a subagent whose prompt names a run's brief, a SendMessage
+ * to one) while a run of this repository is active: the brief must be the run's own, ready, unchanged
+ * since it was written, on the model it names, and clear of the tasks running. The check and the
+ * claim on the task are one step (reserveDispatch, inside the run's lock), so two launches at once
+ * cannot both pass; the claim becomes `running` when the launch went out and is let go when it did
+ * not. Gate 2's second half warns at an answer's end when the run holds finished work no other model
+ * has verified at the current HEAD.
  *
- * Cost: every Bash and Agent call pays a text test and nothing else. Only a call that names
- * `worker-start` or a run's brief reads the files, and the repository's top folder is asked of git
- * once. No timers, no watching.
+ * Cost: every Bash, Agent and SendMessage call pays a text test and nothing else. Only a call that
+ * names `worker-start` or a run's brief reads the files, and the repository's top folder is asked of
+ * git once. No timers, no watching.
  */
 
 const ORCA_COMMANDS = new Set(['orca', 'orca-dev', 'orca-ide'])
-/** Options of `worker-start` that take no value; every other `--option` takes the word after it. */
+/** Options of `orchestration` commands that take no value; every other `--option` takes the word after it. */
 const FLAGS = new Set(['--json', '--keep-open', '--full'])
 const MODEL_ALIASES = ['opus', 'sonnet', 'haiku', 'fable']
 const GIT_MS = 10_000
+const ONE_AT_A_TIME = '워커는 한 번에 하나씩 띄우세요.'
 
-/** A brief's path in a prompt: `.relay/runs/<run>/tasks/<id>-r<n>.md` (a report or checks file is not one). */
-const BRIEF_PATH = /\.relay\/runs\/(\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,30})\/tasks\/([A-Za-z][A-Za-z0-9_.]{0,19})-r(\d+)\.md(?![\w-])/g
+/** A path to something under `.relay/runs/` in a text, with the characters before it that belong to the path. */
+const RUN_PATH = /[^\s"'`<>()[\]{},;|&]*\.relay\/runs\/[^\s"'`<>()[\]{},;|&]+/g
 
 /** Remembered for the session: the repository's top folder (asked of git once, not on every call). */
 let rootOnce: Promise<string | undefined> | undefined
@@ -37,76 +43,50 @@ function rootOf($: EngineInterface): Promise<string | undefined> {
 
 // ── Reading a command ──────────────────────────────────────────────
 
-/** The words of a command, a list for each simple command (split at `&&`, `||`, `;`, `|`, `&` and newlines outside quotes). */
-export function commandWords(command: string): string[][] {
-  const commands: string[][] = []
-  let words: string[] = []
-  let word = ''
-  let isWord = false
-  let quote: '"' | "'" | undefined
-  const endWord = () => {
-    if (isWord) words.push(word)
-    word = ''
-    isWord = false
-  }
-  const endCommand = () => {
-    endWord()
-    if (words.length > 0) commands.push(words)
-    words = []
-  }
-  for (let i = 0; i < command.length; i += 1) {
-    const ch = command[i] ?? ''
-    if (quote === "'") {
-      if (ch === "'") quote = undefined
-      else word += ch
-    } else if (quote === '"') {
-      if (ch === '"') quote = undefined
-      else if (ch === '\\' && i + 1 < command.length) word += command[(i += 1)] ?? ''
-      else word += ch
-    } else if (ch === "'" || ch === '"') {
-      quote = ch
-      isWord = true
-    } else if (ch === '\\' && i + 1 < command.length) {
-      word += command[(i += 1)] ?? ''
-      isWord = true
-    } else if (ch === ';' || ch === '&' || ch === '|' || ch === '\n') endCommand()
-    else if (/\s/.test(ch)) endWord()
-    else {
-      word += ch
-      isWord = true
-    }
-  }
-  endCommand()
-
-  return commands
+/** An `orca orchestration worker-start` or `send` among a command's commands. */
+export type OrcaCall = {
+  sub: 'worker-start' | 'send'
+  options: Map<string, string | true>
+  /** Every word after the subcommand, unquoted: a brief named in `--body` is among them. */
+  words: string[]
+  /** The folders of the `cd`s that came before it in the same command, in order. */
+  cds: string[]
 }
 
-/** A launch of `orca orchestration worker-start`, and the options it gave. */
-export type OrcaStart = { options: Map<string, string | true> }
-
-/** The `worker-start` among a command's commands, or undefined when the command starts no worker. */
-export function readWorkerStart(command: string): OrcaStart | undefined {
-  for (const words of commandWords(command)) {
-    const first = words.findIndex(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word))
-    const program = words[first]?.split('/').at(-1) ?? ''
-    if (!ORCA_COMMANDS.has(program)) continue
-    const at = words.findIndex((word, i) => i > first && word === 'orchestration' && words[i + 1] === 'worker-start')
-    if (at < 0) continue
-    const options = new Map<string, string | true>()
+/**
+ * The orca launches in a Bash command, read as a shell does (quoted data, here-documents and
+ * comments are no command). Undefined when the command cannot be followed.
+ */
+export function readOrcaCalls(command: string): OrcaCall[] | undefined {
+  const commands = findCommands(command)
+  if (commands === undefined) return undefined
+  const calls: OrcaCall[] = []
+  const cds: string[] = []
+  for (const words of commands) {
+    const first = words[0]
+    if (first === undefined) continue
+    if (first.text === 'cd' && words[1] !== undefined && !words[1].text.startsWith('-')) {
+      cds.push(words[1].text)
+      continue
+    }
+    if (!ORCA_COMMANDS.has(first.text.split('/').at(-1) ?? '')) continue
+    const at = words.findIndex((word, i) => i > 0 && word.text === 'orchestration')
+    const sub = words[at + 1]?.text
+    if (at < 0 || (sub !== 'worker-start' && sub !== 'send')) continue
     const rest = words.slice(at + 2)
+    const options = new Map<string, string | true>()
     for (let i = 0; i < rest.length; i += 1) {
-      const word = rest[i] ?? ''
+      const word = rest[i]?.text ?? ''
       if (!word.startsWith('--')) continue
       const equals = word.indexOf('=')
       if (equals > 0) options.set(word.slice(0, equals), word.slice(equals + 1))
-      else if (FLAGS.has(word) || rest[i + 1] === undefined || (rest[i + 1] ?? '').startsWith('--')) options.set(word, true)
-      else options.set(word, rest[(i += 1)] ?? '')
+      else if (FLAGS.has(word) || rest[i + 1] === undefined || (rest[i + 1]?.text ?? '').startsWith('--')) options.set(word, true)
+      else options.set(word, rest[(i += 1)]?.text ?? '')
     }
-
-    return { options }
+    calls.push({ sub, options, words: rest.map((word: CommandWord) => word.text), cds: [...cds] })
   }
 
-  return undefined
+  return calls
 }
 
 /** Whether two model names are the same: equal, or an alias (`opus`) and an ID that holds it (`claude-opus-5-5`). */
@@ -118,81 +98,27 @@ export function sameModel(asked: string, wanted: string): boolean {
   return a === b || MODEL_ALIASES.some(alias => (a === alias && b.includes(alias)) || (b === alias && a.includes(alias)))
 }
 
-/** The briefs a prompt names: `<run>`, `<id>`, `<rev>` for each, once. */
-export function briefsIn(prompt: string): { run: string; id: string; rev: number }[] {
-  const found = new Map<string, { run: string; id: string; rev: number }>()
-  for (const match of prompt.matchAll(BRIEF_PATH)) {
-    const [, run = '', id = '', rev = '0'] = match
-    found.set(`${run}/${id}-r${rev}`, { run, id, rev: Number(rev) })
+/** A path as an absolute one: relative to `cwd`, with `.`, `..` and repeated `/` taken out. */
+export function resolvePath(path: string, cwd: string | undefined): string {
+  const joined = path.startsWith('/') || cwd === undefined ? path : `${cwd}/${path}`
+  const parts: string[] = []
+  for (const part of joined.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
   }
 
-  return [...found.values()]
+  return `/${parts.join('/')}`
 }
 
-const normalPath = (path: string): string => path.replace(/\/{2,}/g, '/').replace(/(^|\/)\.\//g, '$1')
-
-// ── The checks both launches share ──────────────────────────────────────────────
-
-/** Why a brief may not be launched now: cancelled, overlapping a running task, edited since it was written. */
-async function briefProblems($: EngineInterface, run: ActiveRun, task: RelayTask): Promise<string[]> {
-  const key = taskKey(task)
-  const problems: string[] = []
-  if (task.status === 'cancelled') problems.push(`${key}는 취소된 판입니다(새 판이 이어받음): 새 판의 지시서로 띄우세요.`)
-  const others = { ...run.state, tasks: run.state.tasks.filter(other => other !== task) }
-  problems.push(...checkTask(others, { ...task, readFirst: [] }).denials.filter(reason => reason.startsWith('돌고 있는')))
-  const spec = await $.fs.read(task.specPath).catch(() => undefined)
-  if (typeof spec !== 'string') problems.push(`지시서 파일을 읽지 못했습니다: ${task.specPath}`)
-  else if ((await sha256($, spec)) !== task.specHash) problems.push(`보낸 뒤 고친 지시서입니다(${key}): relay task로 새 판을 만드세요.`)
-
-  return problems
+/** The paths under `.relay/runs/` that a text names, as written (a sentence's closing punctuation cut off). */
+export function runPathsIn(text: string): string[] {
+  return [...text.matchAll(RUN_PATH)].map(match => match[0].replace(/[.:]+$/, ''))
 }
 
-const refused = (key: string, problems: readonly string[]): { deny: string } => ({ deny: [`relay 지시서 ${key}로는 워커를 띄울 수 없습니다:`, ...problems.map(problem => `- ${problem}`)].join('\n') })
-
-// ── Orca ──────────────────────────────────────────────
-
-export type OrcaGate = { deny: string } | { pass: true; mark?: { root: string; run: string; task: string } }
-
-/** Gate 1 for `orca orchestration worker-start` in a Bash command; the caller has tested the command for "worker-start" already. */
-export async function checkOrcaStart($: EngineInterface, command: string): Promise<OrcaGate> {
-  const start = readWorkerStart(command)
-  if (start === undefined) return { pass: true }
-  const root = await rootOf($)
-  if (root === undefined) return { pass: true }
-  const runs = await findActiveRuns($, root)
-  if (runs.length === 0) return { pass: true }
-
-  const option = (name: string): string | undefined => {
-    const value = start.options.get(name)
-
-    return typeof value === 'string' ? value : undefined
-  }
-  const file = option('--spec-file')
-  if (file === undefined || file === '-' || file === '') {
-    if (option('--comment')?.includes('no-relay') === true) return { pass: true }
-
-    return { deny: `relay 묶음 ${runs.map(run => run.run).join(', ')}이 진행 중입니다. 워커는 relay task가 쓴 지시서 파일(--spec-file)로 띄우세요. 이 묶음과 상관없는 워커면 명령에 --comment no-relay를 붙이세요.` }
-  }
-
-  const cwd = await $.session.cwd().catch(() => undefined)
-  const path = normalPath(file.startsWith('/') || cwd === undefined ? file : `${cwd}/${file}`)
-  for (const run of runs) {
-    const task = run.state.tasks.find(other => normalPath(other.specPath) === path)
-    if (task === undefined) continue
-    const key = taskKey(task)
-    const problems = await briefProblems($, run, task)
-    const model = option('--model')
-    if (model === undefined) problems.push(`--model이 없습니다: 지시서의 모델 ${task.model}을 적으세요(안 적으면 워커가 물려받은 모델로 돌아 비용이 커집니다).`)
-    else if (model.trim() !== task.model.trim()) problems.push(`--model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
-    const effort = option('--effort')
-    if (effort === undefined) problems.push(`--effort가 없습니다: 지시서의 effort ${task.effort}를 적으세요.`)
-    else if (effort.trim() !== task.effort.trim()) problems.push(`--effort ${effort}가 지시서의 effort ${task.effort}와 다릅니다.`)
-
-    return problems.length > 0 ? refused(key, problems) : { pass: true, mark: { root, run: run.run, task: key } }
-  }
-
-  // A file that is none of an active run's briefs is other work.
-  return { pass: true }
+/** Whether a text names something that could be a run's brief (`…/tasks/<id>-r<n>.md`): the test before any file is read. */
+export function mayNameBrief(texts: readonly string[]): boolean {
+  return texts.some(text => runPathsIn(text).some(path => /\/tasks\/[^/]*-r\d+\.md$/.test(path)))
 }
 
 /** The dispatch id in what `worker-start` printed (`dispatchId=ctx_…`, or JSON's `"dispatchId": "ctx_…"`). */
@@ -209,30 +135,185 @@ function printed(ran: unknown): string {
   return typeof call?.result?.stdout === 'string' ? call.result.stdout : ''
 }
 
-// ── Subagents ──────────────────────────────────────────────
+const isFailed = (ran: unknown): boolean => {
+  const call = ran as { deny?: unknown; isError?: unknown } | null
 
-export type SpawnGate = { deny: string } | { pass: true; mark?: { root: string; run: string; task: string } }
+  return call === null || call.deny !== undefined || call.isError === true
+}
 
-/** Gate 1 for a subagent about to start. Only a prompt that names an active run's brief is looked at. */
-export async function checkSpawn($: EngineInterface, prompt: string, model: string | undefined): Promise<SpawnGate> {
-  const named = briefsIn(prompt)
-  if (named.length === 0) return { pass: true }
+// ── Finding the brief ──────────────────────────────────────────────
+
+type Named = { run: ActiveRun; task: RelayTask }
+
+/** Every brief of the active runs by its absolute path. */
+function briefsByPath(runs: readonly ActiveRun[]): Map<string, Named> {
+  const known = new Map<string, Named>()
+  for (const run of runs) for (const task of run.state.tasks) known.set(resolvePath(task.specPath, undefined), { run, task })
+
+  return known
+}
+
+/** The briefs of the active runs that the paths in a text name (each path made absolute against `cwd` first). */
+function briefsNamed(texts: readonly string[], runs: readonly ActiveRun[], cwd: string | undefined): Named[] {
+  const known = briefsByPath(runs)
+  const found = new Map<string, Named>()
+  for (const path of texts.flatMap(runPathsIn)) {
+    const named = known.get(resolvePath(path, cwd))
+    if (named !== undefined) found.set(taskKey(named.task), named)
+  }
+
+  return [...found.values()]
+}
+
+/** The brief a launch or a follow-up is for: the one ready brief it names; a brief alone, whatever it is (the claim says why not); else a refusal. */
+function pickBrief(named: readonly Named[]): Named | { deny: string } | undefined {
+  if (named.length === 0) return undefined
+  const ready = named.filter(({ task }) => task.status === 'ready')
+  if (ready.length === 1) return ready[0]
+  if (ready.length > 1) return { deny: `지시서가 둘 이상입니다(${ready.map(({ task }) => taskKey(task)).join(', ')}). ${ONE_AT_A_TIME}` }
+  if (named.length === 1) return named[0]
+
+  return { deny: `ready인 지시서가 없습니다(${named.map(({ task }) => `${taskKey(task)} ${task.status}`).join(', ')}): 새로 보낼 것이면 relay task로 새 판을 만드세요.` }
+}
+
+const refused = (key: string, problems: readonly string[]): { deny: string } => ({ deny: [`relay 지시서 ${key}로는 띄우거나 보낼 수 없습니다:`, ...problems.map(problem => `- ${problem}`)].join('\n') })
+
+/** Why a brief may not go out as it is: changed since it was written, or gone. */
+async function briefProblems($: EngineInterface, task: RelayTask): Promise<string[]> {
+  const spec = await $.fs.read(task.specPath).catch(() => undefined)
+  if (typeof spec !== 'string') return [`지시서 파일을 읽지 못했습니다: ${task.specPath}`]
+
+  return (await sha256($, spec)) === task.specHash ? [] : [`보낸 뒤 고친 지시서입니다(${taskKey(task)}): relay task로 새 판을 만드세요.`]
+}
+
+// ── The claim on a task ──────────────────────────────────────────────
+
+/** A task to claim before the launch, and how the launch is told in the state afterwards. */
+export type Hold = { root: string; run: string; task: string; runnerOf: (receipt: string) => string }
+
+export type Plan = { deny: string } | { pass: true; hold?: Hold }
+
+/**
+ * Claims the task (checked and set in one step), runs the launch, and then makes the claim a
+ * running task or lets it go: a refusal, a failure or an exception leaves the task ready.
+ */
+async function claimed<R>($: EngineInterface, hold: Hold, launch: () => Promise<R>, receipt: (ran: R) => { isOk: boolean; text: string }): Promise<R | { deny: string }> {
+  const held = await reserveDispatch($, hold.root, hold.run, hold.task)
+  if ('deny' in held) return refused(hold.task, [held.deny])
+  let ran: R
+  try {
+    ran = await launch()
+  } catch (error) {
+    await held.release().catch(() => undefined)
+    throw error
+  }
+  const { isOk, text } = receipt(ran)
+  if (isOk) await held.commit(hold.runnerOf(text)).catch(() => undefined)
+  else await held.release().catch(() => undefined)
+
+  return ran
+}
+
+// ── Orca ──────────────────────────────────────────────
+
+const orcaRunner = (id: string | undefined, fallback?: string): string => {
+  if (id !== undefined) return `orca dispatch:${id}`
+  if (fallback !== undefined && fallback !== '') return fallback.startsWith('dispatch:') ? `orca ${fallback}` : `orca dispatch:${fallback}`
+
+  return 'orca (dispatch id 미확인)'
+}
+
+const optionOf = (call: OrcaCall, name: string): string | undefined => {
+  const value = call.options.get(name)
+
+  return typeof value === 'string' ? value : undefined
+}
+
+/** Gate 1 for the orca commands in a Bash command; the caller has tested the command's text already. */
+export async function planOrca($: EngineInterface, command: string): Promise<Plan> {
+  const calls = readOrcaCalls(command)?.filter(call => call.sub === 'worker-start' || mayNameBrief(call.words))
+  if (calls === undefined || calls.length === 0) return { pass: true }
   const root = await rootOf($)
   if (root === undefined) return { pass: true }
   const runs = await findActiveRuns($, root)
-  const marks: { root: string; run: string; task: string }[] = []
-  for (const { run: name, id, rev } of named) {
-    const run = runs.find(other => other.run === name)
-    const task = run?.state.tasks.find(other => other.id === id && other.rev === rev)
-    if (run === undefined || task === undefined) continue
-    const problems = await briefProblems($, run, task)
-    if (model === undefined || model.trim() === '') problems.push(`모델이 지정되지 않았습니다: Agent의 model에 지시서의 모델 ${task.model}을 적으세요(안 적으면 물려받은 모델로 돌아 비용이 커집니다).`)
-    else if (!sameModel(model, task.model)) problems.push(`model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
-    if (problems.length > 0) return refused(taskKey(task), problems)
-    marks.push({ root, run: run.run, task: taskKey(task) })
+  if (runs.length === 0) return { pass: true }
+  const session = await $.session.cwd().catch(() => undefined)
+  const cwdOf = (call: OrcaCall) => call.cds.reduce<string | undefined>((dir, cd) => resolvePath(cd, dir), session)
+
+  // A worker started with no brief of the run is a refusal; one that says no-relay is other work.
+  const isOther = (call: OrcaCall) => call.sub === 'worker-start' && optionOf(call, '--spec-file') === undefined && optionOf(call, '--comment')?.includes('no-relay') === true
+  const sendsBrief = (call: OrcaCall) => call.sub === 'send' && briefsNamed(call.words, runs, cwdOf(call)).length > 0
+  const relevant = calls.filter(call => !isOther(call) && (call.sub === 'worker-start' || sendsBrief(call)))
+  if (relevant.length === 0) return { pass: true }
+  if (relevant.length > 1) return { deny: `한 명령에 워커를 띄우거나 지시서를 보내는 호출이 ${relevant.length}개 있습니다. ${ONE_AT_A_TIME}` }
+  const call = relevant[0]
+  if (call === undefined) return { pass: true }
+  const cwd = cwdOf(call)
+
+  if (call.sub === 'send') {
+    const picked = pickBrief(briefsNamed(call.words, runs, cwd))
+    if (picked === undefined) return { pass: true }
+    if ('deny' in picked) return picked
+    const problems = await briefProblems($, picked.task)
+    if (problems.length > 0) return refused(taskKey(picked.task), problems)
+    const to = optionOf(call, '--to')
+
+    return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), runnerOf: receipt => orcaRunner(dispatchIdIn(receipt), to) } }
   }
 
-  return marks.length === 1 ? { pass: true, mark: marks[0] } : { pass: true }
+  const file = optionOf(call, '--spec-file')
+  if (file === undefined || file === '-' || file === '') {
+    return { deny: `relay 묶음 ${runs.map(run => run.run).join(', ')}이 진행 중입니다. 워커는 relay task가 쓴 지시서 파일(--spec-file)로 띄우세요. 이 묶음과 상관없는 워커면 명령에 --comment no-relay를 붙이세요.` }
+  }
+  // A file that is none of an active run's briefs is other work.
+  const picked = briefsByPath(runs).get(resolvePath(file, cwd))
+  if (picked === undefined) return { pass: true }
+  const task = picked.task
+  const problems = await briefProblems($, task)
+  const model = optionOf(call, '--model')
+  if (model === undefined) problems.push(`--model이 없습니다: 지시서의 모델 ${task.model}을 적으세요(안 적으면 워커가 물려받은 모델로 돌아 비용이 커집니다).`)
+  else if (model.trim() !== task.model.trim()) problems.push(`--model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
+  const effort = optionOf(call, '--effort')
+  if (effort === undefined) problems.push(`--effort가 없습니다: 지시서의 effort ${task.effort}를 적으세요.`)
+  else if (effort.trim() !== task.effort.trim()) problems.push(`--effort ${effort}가 지시서의 effort ${task.effort}와 다릅니다.`)
+  if (problems.length > 0) return refused(taskKey(task), problems)
+
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), runnerOf: receipt => orcaRunner(dispatchIdIn(receipt)) } }
+}
+
+// ── Subagents ──────────────────────────────────────────────
+
+/** Gate 1 for a subagent about to start: only a prompt naming a brief of an active run is looked at. */
+export async function planSpawn($: EngineInterface, prompt: string, model: string | undefined): Promise<Plan> {
+  if (!mayNameBrief([prompt])) return { pass: true }
+  const root = await rootOf($)
+  if (root === undefined) return { pass: true }
+  const runs = await findActiveRuns($, root)
+  const picked = pickBrief(briefsNamed([prompt], runs, await $.session.cwd().catch(() => undefined)))
+  if (picked === undefined) return { pass: true }
+  if ('deny' in picked) return picked
+  const task = picked.task
+  const problems = await briefProblems($, task)
+  if (model === undefined || model.trim() === '') problems.push(`모델이 지정되지 않았습니다: Agent의 model에 지시서의 모델 ${task.model}을 적으세요(안 적으면 물려받은 모델로 돌아 비용이 커집니다).`)
+  else if (!sameModel(model, task.model)) problems.push(`model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
+  if (problems.length > 0) return refused(taskKey(task), problems)
+
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), runnerOf: id => `subagent ${id === '' ? '(agent id 미확인)' : id}` } }
+}
+
+/** Gate 1 for a message to a subagent: one carrying a brief of an active run is a new revision going out. */
+export async function planMessage($: EngineInterface, to: string, message: string): Promise<Plan> {
+  if (!mayNameBrief([message])) return { pass: true }
+  const root = await rootOf($)
+  if (root === undefined) return { pass: true }
+  const runs = await findActiveRuns($, root)
+  const picked = pickBrief(briefsNamed([message], runs, await $.session.cwd().catch(() => undefined)))
+  if (picked === undefined) return { pass: true }
+  if ('deny' in picked) return picked
+  const problems = await briefProblems($, picked.task)
+  if (problems.length > 0) return refused(taskKey(picked.task), problems)
+
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), runnerOf: () => `subagent ${to}` } }
 }
 
 // ── The answer's end ──────────────────────────────────────────────
@@ -247,7 +328,7 @@ export async function unverifiedLine($: EngineInterface): Promise<string | undef
   if (root === undefined) return undefined
   const runs = await findActiveRuns($, root)
   const candidates = runs.filter(({ state }) => {
-    const isOpen = state.tasks.some(task => task.status === 'running' || task.status === 'needs_context' || task.status === 'blocked')
+    const isOpen = state.tasks.some(task => isBusy(task) || task.status === 'needs_context' || task.status === 'blocked')
 
     return !isOpen && state.tasks.some(task => task.status === 'done' || task.status === 'done_with_concerns')
   })
@@ -266,36 +347,43 @@ export async function unverifiedLine($: EngineInterface): Promise<string | undef
 
 // ── Hooks ──────────────────────────────────────────────
 
-/** Gate 1's hooks: Bash (Orca) and the subagent's start. A gate that fails lets the call through. */
+/** Whether a Bash command's text may hold a launch (the text test every Bash call pays). */
+export function mayLaunch(command: string): boolean {
+  return command.includes('worker-start') || (command.includes('send') && command.includes('.relay/runs'))
+}
+
+/** Gate 1's hooks: Bash (Orca), the subagent's start and SendMessage. A gate that fails lets the call through. */
 export function gateLaunches(on: On): void {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     // The text test first: a call that starts no worker costs nothing more.
-    if (!e.command.includes('worker-start')) return next(e)
-    const gate = await checkOrcaStart($, e.command)
-    if ('deny' in gate) return { deny: gate.deny }
+    if (!mayLaunch(e.command)) return next(e)
+    const plan = await planOrca($, e.command)
+    if ('deny' in plan) return { deny: plan.deny }
+    if (plan.hold === undefined) return next(e)
 
-    const ran = await next(e)
-    const { mark } = gate
-    if (mark !== undefined && !('deny' in ran) && !('isError' in ran && ran.isError === true)) {
-      // The receipt names the dispatch; if it is not found the lead marks it by hand.
-      const id = dispatchIdIn(printed(ran))
-      if (id !== undefined) await markDispatched($, mark.root, mark.run, mark.task, `orca dispatch:${id}`).catch(() => undefined)
-    }
+    return claimed($, plan.hold, () => next(e), ran => ({ isOk: !isFailed(ran), text: printed(ran) }))
+  }).catch(($, e, next) => next(e))
 
-    return ran
+  on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
+    const message = typeof e.message === 'string' ? e.message : ''
+    if (!message.includes('.relay/runs/')) return next(e)
+    const plan = await planMessage($, String(e.to), message)
+    if ('deny' in plan) return { deny: plan.deny }
+    if (plan.hold === undefined) return next(e)
+
+    return claimed($, plan.hold, () => next(e), ran => ({ isOk: !isFailed(ran), text: '' }))
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     if (!e.prompt.includes('.relay/runs/')) return next(e)
-    const gate = await checkSpawn($, e.prompt, e.model)
-    if ('deny' in gate) return { deny: gate.deny }
+    const plan = await planSpawn($, e.prompt, e.model)
+    if ('deny' in plan) return { deny: plan.deny }
+    if (plan.hold === undefined) return next(e)
 
-    const started = await next(e)
-    const { mark } = gate
-    if (mark !== undefined && 'agentId' in started && started.agentId !== undefined) {
-      await markDispatched($, mark.root, mark.run, mark.task, `subagent ${started.agentId}`).catch(() => undefined)
-    }
+    return claimed($, plan.hold, () => next(e), started => {
+      const id = 'agentId' in started && typeof started.agentId === 'string' ? started.agentId : ''
 
-    return started
+      return { isOk: !isFailed(started), text: id }
+    })
   }).catch(($, e, next) => next(e))
 }

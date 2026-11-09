@@ -5,15 +5,15 @@ Orca runs each worker as its own agent (Claude or Codex) in a terminal and wakes
 ## Dispatch
 
 - Full run: `orca orchestration worker-start --spec-file <the spec's absolute path> --worktree current --agent <claude|codex> --model <spec's model id> --effort <spec's effort> --task-title "<id>: <title>"`.
-- Light delegation: the same with `--spec "<the text spec_text returned>"`.
+- Light delegation: the same with `--spec "<the text spec_text returned>"`. While a run of this repository is active, hubblerc refuses a `worker-start` that has no spec file of that run: add `--comment no-relay`.
 - The model and effort come from the spec; never leave them to the agent's default (an unpinned worker inherits a costly default).
-- Inside an active run, hubblerc refuses a `worker-start` without a spec file of that run, and one whose spec overlaps a running task. The refusal says why.
-- Record the dispatch: hubblerc marks it from the receipt; if the receipt was not seen, call the tool's `dispatched` { run, task, runner: "orca dispatch:<id>" }.
+- Start one worker per command. Inside an active run, hubblerc refuses a command with more than one `worker-start`, a `worker-start` without a spec file of that run (add `--comment no-relay` for a worker that has nothing to do with the run), one whose spec is not ready, was edited after it was written, or overlaps a task that is running or being launched, and one whose `--model` or `--effort` differs from the spec's or is missing. The refusal says why.
+- Record the dispatch: hubblerc claims the task before the launch and marks it running with `orca dispatch:<id>` from the receipt (`orca (dispatch id 미확인)` if the receipt names none: find the dispatch id with the guide's listing commands and write it in `progress.md`). A failed launch leaves the task ready. `dispatched` { run, task, runner: "orca dispatch:<id>" } only takes a task that is still ready, for a launch hubblerc did not see (it failed open).
 - Then end your turn. Orca wakes you; never poll or run a watch script.
 
 ## Talking to a worker
 
-- A follow-up in the same area, or a new revision of its spec: `orca orchestration send --to dispatch:<id> --subject "<id>-r<n>" --body "Read and follow: <spec path>"`. A finished worker is reopened and remembers its earlier work (seen 2026-11-08).
+- A follow-up in the same area, or a new revision of its spec: make the revision with the tool's `task`, then `orca orchestration send --to dispatch:<id> --subject "<id>-r<n>" --body "Read and follow: <spec path>"`. A finished worker is reopened and remembers its earlier work (seen 2026-11-08). A `send` whose arguments name a spec of the active run gets the same check as a launch (the spec ready, unchanged, clear of running tasks) and hubblerc marks that task running with the dispatch it went to; if it did not, call `dispatched`. A `send` that names no spec of the run goes out untouched.
 - A worker's question arrives as a `question`: answer with `orca orchestration reply --id <message id> --body "…"` when the answer follows from the task or the user's decisions; otherwise ask the user and log the row as `asked`.
 - Never steer a worker through its terminal.
 

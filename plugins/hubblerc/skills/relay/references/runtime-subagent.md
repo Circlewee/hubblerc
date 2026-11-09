@@ -5,13 +5,13 @@ Claude Code's own subagents (the Agent tool). No Orca needed; Claude workers onl
 ## Dispatch
 
 - Call the Agent tool with `model` set to the spec's model (alias or id) and a prompt that starts with the spec's path and then its full text. Full run: the spec file from `task`. Light: the text from `spec_text`.
-- Inside an active run, hubblerc checks an Agent call whose prompt names a spec of that run: it refuses one that overlaps a running task or whose model differs from the spec's. An Agent call naming no spec (a search, a quick question) passes untouched, so keep worker tasks on specs.
+- Name one spec per Agent call. Inside an active run, hubblerc checks an Agent call whose prompt names a spec of that run: it refuses one whose spec is not ready, was edited after it was written, or overlaps a task that is running or being launched, one with no `model` or one that differs from the spec's (an alias such as `sonnet` and an id that holds it are the same), and a prompt that names two ready specs. It claims the task before the start and marks it running as `subagent <agentId>`; a failed start leaves it ready. An Agent call naming no spec (a search, a quick question) passes untouched, so keep worker tasks on specs.
 - Run independent workers in the background and end your turn; each completion wakes you. Several independent calls go in one message so they run together.
 - A subagent's effort cannot be set per call; note in the report what it ran at if known, else "unverified".
 
 ## Follow-ups
 
-- A finished subagent continues from its transcript when you message it by its name or id (SendMessage). Use that for a follow-up in the same area or a new revision of its spec, instead of a fresh subagent that must learn the files again.
+- A finished subagent continues from its transcript when you message it by its name or id (SendMessage). Use that for a follow-up in the same area or a new revision of its spec, instead of a fresh subagent that must learn the files again. Make the revision with the tool's `task` first; a SendMessage whose message names a spec of the active run gets the same check as a start and hubblerc marks that task running as `subagent <to>`; if it did not, call `dispatched`. A message that names no spec of the run goes out untouched.
 - A subagent cannot ask the user. It can send you a message; answer it, or ask the user and log the row as `asked`.
 
 ## Reports

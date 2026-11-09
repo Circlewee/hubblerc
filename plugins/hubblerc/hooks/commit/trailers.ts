@@ -1,7 +1,7 @@
 import type { EngineInterface, On } from 'claude-code'
 
 import { findCommits, shellQuote, withAround } from './commit-command'
-import type { CommitSpot } from './commit-command'
+import type { CommandWord, CommitSpot } from './commit-command'
 
 /**
  * Commit trailers: every `git commit` Claude runs through Bash gets lines a machine reads, naming
@@ -39,8 +39,7 @@ export function signCommits(on: On): void {
     // An amend keeps the trailers the commit already has: git would add a second set beside them. A
     // commit that names Agent or Session itself (a Codex-style brief followed as written) is signed
     // already: a second set would give the commit two Agent lines.
-    const found = findCommits(e.command)
-    const spots = found?.filter((spot, at) => !spot.isAmend && !hasOwnTrailers(e.command.slice(spot.end, found[at + 1]?.at ?? e.command.length)))
+    const spots = findCommits(e.command)?.filter(spot => !spot.isAmend && !hasOwnTrailers(spot.args))
     if (spots === undefined || spots.length === 0) return next(e)
     if (!(await isOnHere($, spots))) return next(e)
 
@@ -56,9 +55,26 @@ export function signCommits(on: On): void {
   on('attribution.text', ($, e, next) => (e.kind === 'commit' || e.kind === 'pr' ? { text: '' } : next(e))).catch(($, e, next) => next(e))
 }
 
-/** Whether a commit's own words give an Agent or Session trailer (`--trailer 'Agent: codex'`, `--trailer=Session=…`). */
-export function hasOwnTrailers(words: string): boolean {
-  return /--trailer(?:=|\s+)['"]?\s*(?:Agent|Session)\s*[:=]/i.test(words)
+/** Options of `git commit` whose next word is their value, never an option of its own (`-m "--trailer …"`). */
+const VALUE_OPTIONS = new Set(['-m', '-F', '-c', '-C', '-t', '--message', '--file', '--author', '--date', '--template', '--reuse-message', '--reedit-message', '--cleanup', '--pathspec-from-file'])
+
+/**
+ * Whether the words of one `git commit` give an Agent or Session trailer: a `--trailer` word followed
+ * by a word that starts `Agent:` or `Session:`, or one `--trailer=Agent: …`. A message (`-m`'s value)
+ * and the commands that follow are not looked at.
+ */
+export function hasOwnTrailers(args: readonly CommandWord[]): boolean {
+  const isOwn = (value: string) => /^\s*(?:Agent|Session)\s*[:=]/i.test(value)
+  for (let at = 0; at < args.length; at += 1) {
+    const text = args[at]?.text ?? ''
+    if (VALUE_OPTIONS.has(text)) at += 1
+    else if (text === '--trailer') {
+      if (isOwn(args[at + 1]?.text ?? '')) return true
+      at += 1
+    } else if (text.startsWith('--trailer=') && isOwn(text.slice('--trailer='.length))) return true
+  }
+
+  return false
 }
 
 /** The effort as the trailer reads it: an auto pick says so. */
