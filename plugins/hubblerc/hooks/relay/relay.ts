@@ -2,6 +2,7 @@ import type { EngineInterface, On, ProcessRunResult } from 'claude-code'
 
 import {
   briefText,
+  carriedTries,
   checkTask,
   checksFile,
   checksText,
@@ -319,19 +320,22 @@ async function lookAtCommits($: EngineInterface, root: string, task: RelayTask, 
   return look
 }
 
-/** Commits since the run's base whose trailers name this run and a revision of `id`, by revision key. */
-async function signedCommits($: EngineInterface, root: string, state: RelayState, id: string): Promise<Map<string, string[]>> {
+/**
+ * Every commit since the run's base whose Run trailer names this run, by each Task trailer value it
+ * carries ('' for none): what a package must show whatever the task's state (a cancel reverts no
+ * code). Undefined when git log fails.
+ */
+async function runCommits($: EngineInterface, root: string, state: RelayState): Promise<Map<string, string[]> | undefined> {
   const found = new Map<string, string[]>()
   const ran = await git($, root, ['log', '--format=%H%x1f%(trailers:key=Task,valueonly,separator=%x2c)%x1f%(trailers:key=Run,valueonly,separator=%x2c)', `${state.base}..HEAD`]).catch(
     () => undefined,
   )
-  if (ran?.exitCode !== 0) return found
+  if (ran?.exitCode !== 0 || ran.isStdoutTruncated) return undefined
   for (const line of ran.stdout.split('\n')) {
     const [sha = '', tasks = '', runs = ''] = line.split('\x1f')
     if (sha.trim() === '' || !runs.split(',').some(run => run.trim() === state.run)) continue
-    for (const key of tasks.split(',').map(task => task.trim())) {
-      if (new RegExp(`^${id.replace(/\./g, '\\.')}-r\\d+$`).test(key)) found.set(key, [...(found.get(key) ?? []), sha.trim()])
-    }
+    const keys = tasks.split(',').map(task => task.trim()).filter(key => key !== '')
+    for (const key of keys.length === 0 ? [''] : keys) found.set(key, [...(found.get(key) ?? []), sha.trim()])
   }
 
   return found
@@ -514,6 +518,7 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
   if (base === undefined) return { deny: 'git rev-parse HEAD가 실패했습니다.' }
 
   const previous = latestRevs(earlier)[0]
+  const carried = carriedTries(previous, brief.criteria)
   const rev = (previous?.rev ?? 0) + 1
   const key = `${brief.id}-r${rev}`
   const dir = runDir(root, state.run)
@@ -547,7 +552,7 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
     specHash: await sha256($, spec),
     dispatchedAt: null,
     reportedAt: null,
-    tries: { ...(previous?.tries ?? {}) },
+    tries: carried.tries,
   }
   state.tasks.push(task)
   const redrawn = await save($, root, state)
@@ -560,6 +565,7 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
         '띄울 때 이 파일을 지시서로 주세요(Orca: --spec-file, 서브에이전트: 프롬프트에 경로와 함께 내용).',
         'Orca worker-start·send, 서브에이전트 생성·SendMessage로 띄우면 hubblerc 관문이 검사·기록합니다. 관문이 기록하지 못했다고 하면 dispatched를 부르세요.',
         ...(superseded.length === 0 ? [] : [`앞 판을 취소로 바꿨습니다: ${superseded.join(', ')}(새 판을 워커에게 알리세요).`]),
+        ...(previous === undefined ? [] : [`tries 이어 받음: ${carried.carried.join(', ') || '없음'} · 0부터 셈: ${carried.fresh.join(', ') || '없음'}`]),
       ],
       [...checked.warnings, redrawn],
     ),
@@ -586,34 +592,52 @@ function overlapWarnings(state: RelayState, task: RelayTask): string[] {
   return checkTask(others, { ...task, readFirst: [] }).denials.filter(reason => reason.startsWith('돌고 있는'))
 }
 
-/**
- * Sets a task running with its runner, and copies the brief as sent beside it (read-only), its
- * hash in the state: what a package later hands the verifier. Inside the run's lock.
- */
-async function startRunning($: EngineInterface, root: string, state: RelayState, task: RelayTask, runner: string): Promise<(string | undefined)[]> {
-  const warnings: (string | undefined)[] = []
-  const spec = await readText($, task.specPath)
-  if (spec === undefined) warnings.push(`지시서 파일이 없습니다: ${task.specPath}`)
-  else {
-    const hash = await sha256($, spec)
-    if (hash !== task.specHash) warnings.push('지시서가 쓴 뒤에 바뀌었습니다. 보낸 지시서는 고치지 말고 task로 새 판을 만드세요.')
-    const copy = dispatchedFile(runDir(root, state.run), taskKey(task))
-    await $.fs.write(copy, spec)
-    await $.process.run(['/bin/chmod', '0444', copy], { timeoutMs: GIT_MS }).catch(() => undefined)
-    task.dispatchedHash = hash
-  }
+/** Writes the read-only copy of the brief as sent (made writable for the write, in case one is there). */
+async function writeSentCopy($: EngineInterface, root: string, state: RelayState, task: RelayTask, text: string): Promise<string> {
+  const copy = dispatchedFile(runDir(root, state.run), taskKey(task))
+  await $.process.run(['/bin/chmod', '0644', copy], { timeoutMs: GIT_MS }).catch(() => undefined)
+  await $.fs.write(copy, text)
+  await $.process.run(['/bin/chmod', '0444', copy], { timeoutMs: GIT_MS }).catch(() => undefined)
+
+  return copy
+}
+
+/** The brief as it stands, and why it is not the one `task` wrote (undefined when it is). */
+async function briefNow($: EngineInterface, task: RelayTask): Promise<{ text: string; hash: string } | { problem: string }> {
+  const text = await readText($, task.specPath)
+  if (text === undefined) return { problem: `지시서 파일이 없습니다: ${task.specPath}` }
+  const hash = await sha256($, text)
+  if (hash !== task.specHash) return { problem: `${taskKey(task)}의 지시서가 task로 쓴 뒤에 바뀌었습니다. 보낸 지시서는 고치지 말고 task로 새 판을 만드세요.` }
+
+  return { text, hash }
+}
+
+/** Running, with its runner and since when; saved. */
+async function setRunning($: EngineInterface, root: string, state: RelayState, task: RelayTask, runner: string): Promise<string | undefined> {
   task.status = 'running'
   task.runner = runner
   task.dispatchedAt = await $.clock.now()
-  warnings.push(await save($, root, state))
+  delete task.blockReason
 
-  return warnings
+  return save($, root, state)
+}
+
+/** A launch whose brief cannot be trusted: blocked, the worker's address kept so the lead can reach it. */
+async function setBlocked($: EngineInterface, root: string, state: RelayState, task: RelayTask, runner: string, reason: string): Promise<{ deny: string }> {
+  task.status = 'blocked'
+  task.runner = runner
+  task.dispatchedAt = await $.clock.now()
+  task.blockReason = reason
+  await save($, root, state)
+
+  return { deny: `${taskKey(task)}를 blocked로 두었습니다: ${reason} 워커(${runner})에게 멈추라고 하고, task로 새 판을 만드세요.` }
 }
 
 /**
- * Notes a task launched: running, where, since when. Only a ready task: one running, launching or
- * finished is refused with why. A brief changed since it was written, or an overlap with a running
- * task, warns (the worker is already out).
+ * Notes a task launched by hand (the gate could not): only a ready task, its brief still the one
+ * `task` wrote; that text is copied as the brief sent. A brief changed since leaves the task blocked
+ * with why: what the worker was handed is not known. An overlap with a running task warns (the
+ * worker is already out).
  */
 export async function markDispatched($: EngineInterface, root: string, run: string, name: string, runner: string): Promise<Answer> {
   return withRunLock(root, run, async () => {
@@ -623,24 +647,33 @@ export async function markDispatched($: EngineInterface, root: string, run: stri
     const task = findTask(state, name)
     if (task === undefined) return { deny: `작업이 없습니다: ${name}(${run})` }
     if (task.status !== 'ready') return { deny: `${taskKey(task)}는 ${task.status} 상태라 running으로 바꾸지 않습니다(ready인 판만). 새로 보낼 것이면 task로 새 판을 만드세요.` }
-    const warnings = [...overlapWarnings(state, task), ...(await startRunning($, root, state, task, runner))]
+    const brief = await briefNow($, task)
+    if ('problem' in brief) return setBlocked($, root, state, task, runner, brief.problem)
+    const overlaps = overlapWarnings(state, task)
+    const copy = await writeSentCopy($, root, state, task, brief.text)
+    task.dispatchedHash = brief.hash
+    const redrawn = await setRunning($, root, state, task, runner)
 
-    return { result: withWarnings([`${taskKey(task)}: running · ${runner}`, `보낸 지시서 사본: ${dispatchedFile(runDir(root, run), taskKey(task))}`], warnings) }
+    return { result: withWarnings([`${taskKey(task)}: running · ${runner}`, `보낸 지시서 사본: ${copy}`], [...overlaps, redrawn]) }
   })
 }
 
 export type Reservation = {
   key: string
-  /** The launch went out: running, with its runner. */
+  /**
+   * The launch went out: running, with its runner. When the brief changed while it was launched,
+   * the task is left blocked and the answer says why (the gate shows it to the lead).
+   */
   commit: (runner: string) => Promise<Answer>
   /** The launch failed: ready again. */
   release: () => Promise<void>
 }
 
 /**
- * For the gate hook, before a launch: inside the run's lock, a ready task that overlaps no running
- * or launching one is set `launching`, which later checks count as running. Then the launch, then
- * `commit(runner)` or `release()`. Two launches at once cannot both pass.
+ * For the gate hook, before a launch: inside the run's lock, a ready task whose brief is still the
+ * one `task` wrote and that overlaps no running or launching task is set `launching`, which later
+ * checks count as running; the brief's text is fixed then and copied as the brief sent. Then the
+ * launch, then `commit(runner)` or `release()`. Two launches at once cannot both pass.
  */
 export async function reserveDispatch($: EngineInterface, root: string, run: string, name: string): Promise<{ deny: string } | Reservation> {
   return withRunLock(root, run, async (): Promise<{ deny: string } | Reservation> => {
@@ -653,6 +686,10 @@ export async function reserveDispatch($: EngineInterface, root: string, run: str
     if (task.status !== 'ready') return { deny: `${key}는 ${task.status} 상태라 띄우지 않습니다(ready인 판만).` }
     const overlaps = overlapWarnings(state, task)
     if (overlaps.length > 0) return { deny: overlaps.join('\n') }
+    const brief = await briefNow($, task)
+    if ('problem' in brief) return { deny: brief.problem }
+    await writeSentCopy($, root, state, task, brief.text)
+    task.dispatchedHash = brief.hash
     task.status = 'launching'
     await save($, root, state)
 
@@ -670,14 +707,19 @@ export async function reserveDispatch($: EngineInterface, root: string, run: str
         withRunLock(root, run, async () => {
           const held = await reserved()
           if (held === undefined) return { deny: `${key}가 launching 상태가 아닙니다: running으로 바꾸지 않았습니다.` }
+          // The brief as fixed at the reservation is what went out; one changed since is not to be trusted.
+          const text = await readText($, held.found.specPath)
+          const hash = text === undefined ? undefined : await sha256($, text)
+          if (hash !== brief.hash) return setBlocked($, root, held.now, held.found, runner, `띄우는 동안 지시서가 바뀌었습니다(예약 때와 해시가 다름: ${held.found.specPath}).`)
 
-          return { result: withWarnings([`${key}: running · ${runner}`], await startRunning($, root, held.now, held.found, runner)) }
+          return { result: withWarnings([`${key}: running · ${runner}`], [await setRunning($, root, held.now, held.found, runner)]) }
         }),
       release: () =>
         withRunLock(root, run, async () => {
           const held = await reserved()
           if (held === undefined) return
           held.found.status = 'ready'
+          delete held.found.dispatchedHash
           await save($, root, held.now)
         }),
     }
@@ -757,14 +799,21 @@ async function snapshot($: EngineInterface, root: string): Promise<Snapshot> {
   return { head: await headSha($, root), changes: await treeChanges($, root) }
 }
 
-/** Why a command's result does not stand for HEAD: the tree not clean of tracked changes before or after it, or HEAD moved. */
+/** The tree's changes as one list, a file git does not know marked so. */
+const uncommittedOf = (changes: TreeChanges): string[] => [...changes.tracked, ...changes.untracked.map(path => `${path} (git이 모름)`)]
+
+/**
+ * Why a command's result does not stand for HEAD: the tree not clean before or after it (a tracked
+ * change, or a file git does not know, which a command may read as if it were committed), or HEAD moved.
+ */
 function snapshotProblems(before: Snapshot, after: Snapshot): string[] {
   const problems: string[] = []
   if (before.changes === undefined || after.changes === undefined) problems.push('git status를 읽지 못해 작업 트리를 확인하지 못함')
   else {
-    if (before.changes.tracked.length > 0) problems.push(`실행 전 추적 파일에 커밋하지 않은 변경: ${before.changes.tracked.join(', ')}`)
-    const appeared = after.changes.tracked.filter(path => !(before.changes?.tracked ?? []).includes(path))
-    if (appeared.length > 0) problems.push(`실행 중 추적 파일이 바뀜: ${appeared.join(', ')}`)
+    const was = uncommittedOf(before.changes)
+    if (was.length > 0) problems.push(`실행 전 커밋하지 않은 변경·git이 모르는 파일: ${was.join(', ')}`)
+    const appeared = uncommittedOf(after.changes).filter(path => !was.includes(path))
+    if (appeared.length > 0) problems.push(`실행 중 생기거나 바뀐 파일: ${appeared.join(', ')}`)
   }
   if (before.head === undefined || after.head === undefined || before.head !== after.head) problems.push(`실행 중 HEAD가 바뀜(${before.head?.slice(0, 7) ?? '미확인'} → ${after.head?.slice(0, 7) ?? '미확인'})`)
 
@@ -813,7 +862,11 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
   }
   const head = before.head ?? '미확인'
   const tree =
-    before.changes === undefined ? '작업 트리: git status 실패' : before.changes.tracked.length === 0 ? '작업 트리(추적 파일): 깨끗함' : `작업 트리(추적 파일): 커밋하지 않은 변경 ${before.changes.tracked.join(', ')}`
+    before.changes === undefined
+      ? '작업 트리: git status 실패'
+      : uncommittedOf(before.changes).length === 0
+        ? '작업 트리: 깨끗함(git이 모르는 파일도 없음)'
+        : `작업 트리: 커밋하지 않은 변경·git이 모르는 파일 ${uncommittedOf(before.changes).join(', ')}`
   const path = checksFile(runDir(root, state.run), key)
   await $.fs.write(path, checksText(key, head, startedAt, outcomes, [tree]))
 
@@ -856,7 +909,9 @@ async function sentBrief($: EngineInterface, root: string, state: RelayState, ta
   const copy = await readText($, copyPath)
   if (copy === undefined || (await sha256($, copy)) !== task.dispatchedHash) return { problem: `${key}: 보낸 지시서 사본이 없거나 바뀌었습니다(${copyPath}).` }
 
-  return { text: copy, ...(task.dispatchedHash === task.specHash ? {} : { note: '보내기 전에 고친 지시서(쓴 때와 해시가 다름)' }) }
+  if (task.dispatchedHash !== task.specHash) return { problem: `${key}: 보낸 지시서 사본이 task로 쓴 원본과 다릅니다(보내기 전에 고친 지시서). 새 판으로 다시 보내세요.` }
+
+  return { text: copy }
 }
 
 async function packageAction($: EngineInterface, root: string, state: RelayState, names: unknown): Promise<Answer> {
@@ -880,8 +935,8 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
 
   const changes = await treeChanges($, root)
   if (changes === undefined) return { deny: 'git status를 읽지 못해 작업 트리를 확인하지 못했습니다: 꾸러미를 만들지 않았습니다.' }
-  if (changes.tracked.length > 0) return { deny: `작업 트리에 커밋하지 않은 변경이 있습니다: ${changes.tracked.join(', ')}. 검증자는 커밋만 봅니다: 커밋하거나 되돌린 뒤 package하세요.` }
-  if (changes.untracked.length > 0) warnings.push(`git이 모르는 파일(꾸러미에 없음): ${changes.untracked.join(', ')}`)
+  const uncommitted = uncommittedOf(changes)
+  if (uncommitted.length > 0) return { deny: `작업 트리에 커밋하지 않은 변경·git이 모르는 파일이 있습니다: ${uncommitted.join(', ')}. 검증자는 커밋만 봅니다: 커밋하거나 치운 뒤 package하세요.` }
   const briefs = new Map<RelayTask, { text: string; note?: string }>()
   const problems: string[] = []
   for (const task of chosen) {
@@ -890,6 +945,8 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     else briefs.set(task, brief)
   }
   if (problems.length > 0) return { deny: ['꾸러미를 만들지 않았습니다:', ...problems.map(problem => `- ${problem}`)].join('\n') }
+  const signed = await runCommits($, root, state)
+  if (signed === undefined) return { deny: `git log가 실패해 이 묶음(Run: ${state.run})의 커밋을 모으지 못했습니다: 꾸러미를 만들지 않았습니다. 다시 package하세요.` }
 
   const dir = runDir(root, state.run)
   const head = (await headSha($, root)) ?? '미확인'
@@ -905,6 +962,69 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
   const verdictPath = `${dir}/reviews/${id}-verdict.json`
   const schemaPath = `${dir}/reviews/verdict.schema.json`
 
+  // Each commit's files once, by two readings that must agree: they decide what the verifier reviews.
+  const fileChanges: FileChange[] = []
+  const filesOf = new Map<string, ReturnType<typeof parseNumstat>>()
+  const listFailures: string[] = []
+  const commitFiles = async (sha: string, key: string) => {
+    const known = filesOf.get(sha)
+    if (known !== undefined) return known
+    const numstat = await git($, root, ['show', '--numstat', '--no-renames', '--format=', sha]).catch(() => undefined)
+    const named = await git($, root, ['show', '--name-only', '--no-renames', '--format=', sha]).catch(() => undefined)
+    const files = parseNumstat(numstat?.stdout ?? '')
+    if (numstat === undefined || numstat.exitCode !== 0 || numstat.isStdoutTruncated) listFailures.push(`${sha}: git show --numstat 실패(${numstat === undefined ? '실행 못 함' : numstat.isStdoutTruncated ? '출력 잘림' : `종료 코드 ${numstat.exitCode}`})`)
+    else if (named === undefined || named.exitCode !== 0 || named.isStdoutTruncated) listFailures.push(`${sha}: git show --name-only 실패`)
+    else {
+      const byName = [...new Set(named.stdout.split('\n').map(line => line.trim()).filter(line => line !== ''))].sort()
+      const byCount = [...new Set(files.map(file => file.path))].sort()
+      if (byName.join('\n') !== byCount.join('\n')) listFailures.push(`${sha}: 바뀐 파일 목록이 서로 다름(numstat: ${byCount.join(', ') || '없음'} / name-only: ${byName.join(', ') || '없음'})`)
+    }
+    filesOf.set(sha, files)
+    fileChanges.push(...files.map(file => ({ sha, key, ...file })))
+
+    return files
+  }
+
+  /** A revision's commits, reported and found by trailer, with their files; its scope and test changes. */
+  const revisionBlock = async (rev: RelayTask) => {
+    const key = taskKey(rev)
+    const reportText = await readText($, reportFile(dir, key))
+    const reported = reportText === undefined ? [] : parseReport(reportText).commits
+    const unreported = (signed.get(key) ?? []).filter(sha => !reported.some(other => sameCommit(other, sha)))
+    const all = [...reported, ...unreported]
+    const look = await lookAtCommits($, root, rev, all, state.base)
+    const listed: string[] = []
+    for (const [at, sha] of all.filter(other => !look.missing.includes(other)).entries()) listed.push(...commitLines(look.subjects[at] ?? sha, await commitFiles(sha, key)))
+    const lines = [
+      `#### ${key} (${rev.status}${rev.cancelReason === undefined ? '' : `: ${rev.cancelReason}`}${rev.blockReason === undefined ? '' : `: ${rev.blockReason}`})${reportText === undefined ? ' — 보고서 없음' : ''}`,
+      ...(listed.length === 0 ? ['- 커밋 없음'] : listed),
+      ...(unreported.length === 0 ? [] : [`- 보고에 없고 꼬리말(Task: ${key}, Run: ${state.run})로 찾은 커밋: ${unreported.join(', ')}`]),
+      ...(look.missing.length === 0 ? [] : [`- 없는 커밋: ${look.missing.join(', ')}`]),
+      ...(look.unsigned.length === 0 ? [] : [`- 꼬리말 Task: ${key}가 없는 커밋: ${look.unsigned.join(', ')}`]),
+      ...(look.offBase.length === 0 ? [] : [`- Base(${state.base.slice(0, 7)})의 자손이 아닌 커밋: ${look.offBase.join(', ')}`]),
+    ]
+
+    return { lines, count: all.length, outside: look.outside.map(file => `${file} (${key})`), tests: look.tests.map(file => `${file} (${key})`) }
+  }
+
+  /** Every revision of a task id: their blocks, then what they changed outside the scope and in tests. */
+  const taskCommits = async (taskId: string, heading: string) => {
+    const blocks = []
+    for (const rev of state.tasks.filter(task => task.id === taskId).sort((a, b) => a.rev - b.rev)) blocks.push(await revisionBlock(rev))
+    const outside = blocks.flatMap(block => block.outside)
+    const tests = blocks.flatMap(block => block.tests)
+    const lines = [
+      '',
+      heading,
+      ...blocks.flatMap(block => block.lines),
+      '',
+      `### Files outside the edit scope (every revision of ${taskId}): ${outside.length === 0 ? 'none' : outside.join(', ')}`,
+      `### Test file changes (every revision of ${taskId}): ${tests.length === 0 ? 'none' : tests.join(', ')}`,
+    ]
+
+    return { lines, count: blocks.reduce((sum, block) => sum + block.count, 0) }
+  }
+
   const parts = [
     `# Verification package ${id}: ${state.run}`,
     '',
@@ -913,9 +1033,7 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     `- HEAD: ${head}`,
     `- Base: ${state.base}`,
     `- Tasks: ${chosen.map(taskKey).join(', ')}`,
-    ...(changes.untracked.length === 0 ? [] : [`- Untracked files (not committed, not in this package): ${changes.untracked.join(', ')}`]),
   ]
-  const fileChanges: FileChange[] = []
   const ids = [...new Set(chosen.map(task => task.id))]
   for (const taskId of ids) {
     for (const task of chosen.filter(other => other.id === taskId)) {
@@ -937,45 +1055,30 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
         checks === undefined ? '(check를 돌리지 않았습니다)' : checks.replace(/^##? /gm, '#### ').trim(),
       )
     }
-
     // Every revision's commits: an earlier one's (cancelled, blocked) stay in HEAD too.
-    const signed = await signedCommits($, root, state, taskId)
-    const outside: string[] = []
-    const tests: string[] = []
-    parts.push('', `### Commits of every revision of ${taskId}`)
-    for (const rev of state.tasks.filter(task => task.id === taskId).sort((a, b) => a.rev - b.rev)) {
-      const key = taskKey(rev)
-      const reportText = await readText($, reportFile(dir, key))
-      const reported = reportText === undefined ? [] : parseReport(reportText).commits
-      const unreported = (signed.get(key) ?? []).filter(sha => !reported.some(other => sameCommit(other, sha)))
-      const all = [...reported, ...unreported]
-      const look = await lookAtCommits($, root, rev, all, state.base)
-      outside.push(...look.outside.map(file => `${file} (${key})`))
-      tests.push(...look.tests.map(file => `${file} (${key})`))
-      // Each commit's files and line counts; the verifier opens them itself (no diff in the package).
-      const listed: string[] = []
-      for (const [at, sha] of all.filter(other => !look.missing.includes(other)).entries()) {
-        if (fileChanges.some(change => change.sha === sha)) continue
-        const shown = await git($, root, ['show', '--numstat', '--no-renames', '--format=', sha]).catch(() => undefined)
-        const files = parseNumstat(shown?.stdout ?? '')
-        fileChanges.push(...files.map(file => ({ sha, key, ...file })))
-        listed.push(...commitLines(look.subjects[at] ?? sha, files))
-      }
-      parts.push(
-        `#### ${key} (${rev.status}${rev.cancelReason === undefined ? '' : `: ${rev.cancelReason}`})${reportText === undefined ? ' — 보고서 없음' : ''}`,
-        ...(listed.length === 0 ? ['- 커밋 없음'] : listed),
-        ...(unreported.length === 0 ? [] : [`- 보고에 없고 꼬리말(Task: ${key}, Run: ${state.run})로 찾은 커밋: ${unreported.join(', ')}`]),
-        ...(look.missing.length === 0 ? [] : [`- 없는 커밋: ${look.missing.join(', ')}`]),
-        ...(look.unsigned.length === 0 ? [] : [`- 꼬리말 Task: ${key}가 없는 커밋: ${look.unsigned.join(', ')}`]),
-        ...(look.offBase.length === 0 ? [] : [`- Base(${state.base.slice(0, 7)})의 자손이 아닌 커밋: ${look.offBase.join(', ')}`]),
-      )
-    }
-    parts.push(
-      '',
-      `### Files outside the edit scope (every revision of ${taskId}): ${outside.length === 0 ? 'none' : outside.join(', ')}`,
-      `### Test file changes (every revision of ${taskId}): ${tests.length === 0 ? 'none' : tests.join(', ')}`,
-    )
+    parts.push(...(await taskCommits(taskId, `### Commits of every revision of ${taskId}`)).lines)
   }
+
+  // The run's other commits: tasks outside this package (cancelled, blocked, not chosen) and commits
+  // signed for the run with no known task. A cancel reverts no code: what is in HEAD is reviewed.
+  const other: string[] = []
+  for (const taskId of [...new Set(state.tasks.map(task => task.id))].filter(taskId => !ids.includes(taskId))) {
+    const found = await taskCommits(taskId, `### Task ${taskId} (not in this package)`)
+    if (found.count > 0) other.push(...found.lines)
+  }
+  const knownKeys = new Set(state.tasks.map(taskKey))
+  const loose = [...signed.entries()].filter(([key]) => !knownKeys.has(key)).flatMap(([key, shas]) => shas.map(sha => ({ key, sha })))
+  if (loose.length > 0) {
+    other.push('', `### Commits signed Run: ${state.run} with no known task`)
+    for (const { key, sha } of loose) {
+      const subject = await git($, root, ['log', '-1', '--format=%s', sha]).catch(() => undefined)
+      other.push(...commitLines(`${sha} ${subject?.stdout.trim() ?? ''}`.trim() + (key === '' ? ' (Task 꼬리말 없음)' : ` (Task: ${key})`), await commitFiles(sha, key === '' ? '?' : key)))
+    }
+  }
+  if (other.length > 0) parts.push('', '## Other commits of this run', '이 꾸러미의 작업 밖이지만 이 묶음의 커밋이다. 취소는 코드를 되돌리지 않는다: 이 파일들도 검토한다.', ...other)
+
+  if (listFailures.length > 0) return { deny: ['커밋이 바꾼 파일 목록을 확실히 읽지 못해 꾸러미를 만들지 않았습니다(검토할 파일이 빠질 수 있음). 다시 package하세요:', ...listFailures.map(failure => `- ${failure}`)].join('\n') }
+
   const at = await $.clock.now()
   const files = [...new Set(fileChanges.map(change => change.path))].sort()
   const pack: RelayPackage = { id, at, head, tasks: chosen.map(task => ({ key: taskKey(task), criteria: task.criteria.map(criterion => criterion.id) })), files }
@@ -1056,7 +1159,7 @@ async function pendingAction($: EngineInterface, root: string, state: RelayState
 async function finishAction($: EngineInterface, root: string, state: RelayState): Promise<Answer> {
   const head = await headSha($, root)
   const changes = await treeChanges($, root)
-  const reasons = finishProblems(state, head, changes?.tracked)
+  const reasons = finishProblems(state, head, changes === undefined ? undefined : uncommittedOf(changes))
   if (reasons.length > 0) return { deny: ['묶음을 끝내지 않았습니다:', ...reasons.map(reason => `- ${reason}`)].join('\n') }
 
   const last = state.verdicts.at(-1)
@@ -1075,5 +1178,5 @@ async function finishAction($: EngineInterface, root: string, state: RelayState)
     ...byLead.map(row => `- ${row.id} · ${row.decision} — ${row.why} — 틀렸을 때: ${row.cost}`),
   ]
 
-  return { result: withWarnings(lines, [changes !== undefined && changes.untracked.length > 0 ? `git이 모르는 파일이 남았습니다: ${changes.untracked.join(', ')}` : undefined, redrawn]) }
+  return { result: withWarnings(lines, [redrawn]) }
 }

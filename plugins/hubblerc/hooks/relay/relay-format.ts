@@ -31,6 +31,8 @@ export type RelayTask = {
   dispatchedHash?: string
   /** Why it was cancelled, when it was. */
   cancelReason?: string
+  /** Why the tool set it blocked itself (a brief changed while it was launched), when it did. */
+  blockReason?: string
 }
 
 /** The result recorded: `fail` when any criterion its package asked for is not a pass, whatever the verdict's own result says. */
@@ -135,6 +137,30 @@ export function latestRevs(tasks: readonly RelayTask[]): RelayTask[] {
   }
 
   return [...latest.values()]
+}
+
+/** Whether two criteria ask the same: the same text, command and expected exit. */
+export const sameCriterion = (a: Criterion, b: Criterion): boolean =>
+  a.text === b.text && (a.command ?? '') === (b.command ?? '') && (a.command === undefined ? true : (a.expectExit ?? 0) === (b.expectExit ?? 0))
+
+/**
+ * The tries a new revision starts with: a criterion asked the same as in the revision before keeps
+ * its count; one changed, or new, starts at 0 (its earlier failures were at another task).
+ */
+export function carriedTries(previous: RelayTask | undefined, criteria: readonly Criterion[]): { tries: Record<string, number>; carried: string[]; fresh: string[] } {
+  const tries: Record<string, number> = {}
+  const carried: string[] = []
+  const fresh: string[] = []
+  for (const criterion of criteria) {
+    const before = previous?.criteria.find(other => other.id === criterion.id)
+    const count = previous?.tries[criterion.id]
+    if (before !== undefined && sameCriterion(before, criterion)) {
+      if (count !== undefined) tries[criterion.id] = count
+      carried.push(`${criterion.id}(${count ?? 0})`)
+    } else fresh.push(before === undefined ? `${criterion.id}(새 기준)` : `${criterion.id}(기준 글이 바뀜)`)
+  }
+
+  return { tries, carried, fresh }
 }
 
 /** What stands for each task id: its latest revision not cancelled (none when all are). */
@@ -905,6 +931,7 @@ export function verifierInstructions(verdictPath: string, schemaPath: string, re
     '- 위 기준마다 pass / fail / unverified를 매기고 증거를 단다: 돌린 명령과 종료 코드, 출력 몇 줄, 파일:줄. 하나라도 fail·unverified면 result는 fail이다.',
     '- 증거 없는 pass는 unverified다. 워커 보고의 pass는 증거가 아니다(relay 도구가 직접 돌린 Checks가 증거다).',
     '- 위 Files to review의 각 파일을 그 명령으로 열어 보고 reviewed_files에 적는다. 열지 않은 파일은 적지 않는다. 목록의 파일이 하나라도 빠지면 판정을 받지 않는다.',
+    '- 취소는 코드를 되돌리지 않는다: 취소되거나 막힌 작업·판의 커밋도 HEAD에 남아 있으면 검토 대상이다(Other commits of this run 절 포함).',
     '- 스타일 지적은 빼고 동작·정확성·범위·테스트 약화만 본다.',
     '- 이 작업을 만든 워커와 같은 계열 모델이면 model 칸과 판정에 그렇게 적는다(교차 검증이 아님).',
     `- 판정은 ${schemaPath} 형식의 JSON으로 ${verdictPath}에 쓴다. 쓸 수 없으면 같은 JSON을 답으로 준다.`,
