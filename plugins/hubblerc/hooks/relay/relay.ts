@@ -14,6 +14,8 @@ import {
   findTask,
   finishProblems,
   isBusy,
+  LIVE_BLOCKED,
+  statusLabel,
   isByLead,
   isCriterionId,
   isDone,
@@ -508,7 +510,7 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
   // A worker still holds the task: a new revision would free its files while it writes them.
   const holding = earlier.filter(isBusy)
   if (holding.length > 0) {
-    const named = holding.map(task => `${taskKey(task)}(${task.status}${task.runner === null ? '' : ` · ${task.runner}`})`).join(', ')
+    const named = holding.map(task => `${taskKey(task)}(${statusLabel(task)}${task.runner === null ? '' : ` · ${task.runner}`})`).join(', ')
 
     return { deny: `같은 작업의 ${named}가 돌고 있습니다: 먼저 report를 받거나, 워커가 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.` }
   }
@@ -530,7 +532,7 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
   // A new revision takes over: an earlier one not running and not done is never to be reported on.
   const superseded: string[] = []
   for (const task of earlier) {
-    if (task.status === 'ready' || task.status === 'needs_context' || task.status === 'blocked') {
+    if (!isBusy(task) && (task.status === 'ready' || task.status === 'needs_context' || task.status === 'blocked')) {
       task.status = 'cancelled'
       task.cancelReason = `새 판 ${key}가 이어받음`
       superseded.push(taskKey(task))
@@ -618,19 +620,26 @@ async function setRunning($: EngineInterface, root: string, state: RelayState, t
   task.runner = runner
   task.dispatchedAt = await $.clock.now()
   delete task.blockReason
+  delete task.workerLive
 
   return save($, root, state)
 }
 
-/** A launch whose brief cannot be trusted: blocked, the worker's address kept so the lead can reach it. */
+/**
+ * A launch whose brief cannot be trusted: blocked, the worker's address kept so the lead can reach
+ * it, and the task still holding its files (the worker went out and may be at work).
+ */
 async function setBlocked($: EngineInterface, root: string, state: RelayState, task: RelayTask, runner: string, reason: string): Promise<{ deny: string }> {
   task.status = 'blocked'
   task.runner = runner
   task.dispatchedAt = await $.clock.now()
   task.blockReason = reason
+  task.workerLive = true
   await save($, root, state)
 
-  return { deny: `${taskKey(task)}를 blocked로 두었습니다: ${reason} 워커(${runner})에게 멈추라고 하고, task로 새 판을 만드세요.` }
+  return {
+    deny: `${taskKey(task)}를 blocked로 두었습니다(${LIVE_BLOCKED}): ${reason} 워커(${runner})는 떠 있을 수 있어 이 작업이 파일을 계속 점유합니다. 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주고, 그다음 task로 새 판을 만드세요.`,
+  }
 }
 
 /**
@@ -736,11 +745,13 @@ async function cancelAction($: EngineInterface, root: string, state: RelayState,
   if (task.status === 'cancelled') return { deny: `${key}는 이미 취소됐습니다.` }
   if (isDone(task)) return { deny: `${key}는 끝난 작업(${task.status})이라 취소하지 않습니다: 그 커밋은 검증 꾸러미에 들어갑니다.` }
   if (isBusy(task) && input.confirmed_stopped !== true) {
-    return { deny: `${key}는 ${task.status} 상태입니다${task.runner === null ? '' : `(${task.runner})`}: 워커가 멈춘 것을 확인한 뒤 confirmed_stopped: true를 주세요.` }
+    return { deny: `${key}는 ${statusLabel(task)} 상태입니다${task.runner === null ? '' : `(${task.runner})`}: 워커가 멈춘 것을 확인한 뒤 confirmed_stopped: true를 주세요.` }
   }
-  const was = task.status
+  const was = statusLabel(task)
+  const wasBusy = isBusy(task)
   task.status = 'cancelled'
-  task.cancelReason = isBusy({ status: was }) ? `${reason} (워커 멈춤 확인됨)` : reason
+  delete task.workerLive
+  task.cancelReason = wasBusy ? `${reason} (워커 멈춤 확인됨)` : reason
   const redrawn = await save($, root, state)
 
   return { result: withWarnings([`${key}: ${was} → cancelled · ${task.cancelReason}`], [redrawn]) }
@@ -774,6 +785,9 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
   if (spec === undefined || (await sha256($, spec)) !== (task.dispatchedHash ?? task.specHash)) warnings.push('지시서가 보낸 뒤에 바뀌었거나 없습니다: 워커가 본 지시서와 다를 수 있습니다.')
 
   const status: TaskStatus = mismatches.length > 0 || report.status === null ? 'blocked' : STATUS_OF[report.status]
+  // The worker reported: it is no longer out (a mismatch is its report to fix, not a live worker).
+  const wasLive = task.workerLive === true
+  delete task.workerLive
   task.status = status
   task.reportedAt = await $.clock.now()
   warnings.push(await save($, root, state))
@@ -781,6 +795,7 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
   const summary = report.criteria.map(criterion => `${criterion.id} ${criterion.result}${criterion.tries === null ? '' : ` (tries ${criterion.tries})`}`).join(', ')
   const lines = [
     `${key}: 보고 ${report.status ?? '없음'} → 상태 ${status}`,
+    ...(wasLive ? ['띄운 뒤 막혀 있던 작업의 워커가 보고했습니다: 이제 점유하지 않습니다(보고대로 처리).'] : []),
     `보고서: ${path}`,
     `기준(워커 보고, 증거 아님): ${summary === '' ? '없음' : summary}`,
     `커밋: ${report.commits.length === 0 ? '없음' : report.commits.join(', ')}`,

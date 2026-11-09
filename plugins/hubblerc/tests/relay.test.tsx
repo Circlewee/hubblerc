@@ -550,7 +550,7 @@ test('V1-05b dispatched by hand on a brief changed after task wrote it leaves th
   await relay($, { ...TASK_A, id: 'B', edit_scope: ['other/**'], reads: [] })
   sim.files[`${DIR}/tasks/A-r1.md`] += '\nedited by hand\n'
   const sent = await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
-  expect(sent.deny).toContain('A-r1를 blocked로 두었습니다: A-r1의 지시서가 task로 쓴 뒤에 바뀌었습니다')
+  expect(sent.deny).toContain('A-r1를 blocked로 두었습니다(띄운 뒤 막힘: 지시서가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)): A-r1의 지시서가 task로 쓴 뒤에 바뀌었습니다')
   expect(state(sim).tasks[0]).toMatchObject({ status: 'blocked', runner: 'subagent a' })
   expect(state(sim).tasks[0]?.blockReason).toContain('task로 쓴 뒤에 바뀌었습니다')
   expect(sim.files[`${DIR}/tasks/A-r1.dispatched.md`]).toBeUndefined()
@@ -938,7 +938,7 @@ test('V1-05b the brief is fixed when a launch is reserved; one changed during th
 
   sim.files[brief] = sent.replace('tests pass', 'WEAKENED criterion')
   const committed = await held.commit('orca dispatch:ctx_1')
-  expect('deny' in committed && committed.deny).toContain('A-r1를 blocked로 두었습니다: 띄우는 동안 지시서가 바뀌었습니다')
+  expect('deny' in committed && committed.deny).toContain('A-r1를 blocked로 두었습니다(띄운 뒤 막힘: 지시서가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)): 띄우는 동안 지시서가 바뀌었습니다')
   expect(state(sim).tasks[0]).toMatchObject({ status: 'blocked', runner: 'orca dispatch:ctx_1' })
   expect(sim.files[`${DIR}/tasks/A-r1.dispatched.md`]).toBe(sent)
 
@@ -1002,4 +1002,70 @@ test('tries carry over to a new revision only for a criterion asked the same; a 
   // The same command with another expected exit is another criterion.
   const third = await relay($, { ...TASK_A, done_when: [{ text: 'tests pass', command: 'make test', expect_exit: 1 }] })
   expect(third.result).toContain('0부터 셈: C1(기준 글이 바뀜)')
+})
+
+// ── Verdict V3: a task blocked after its launch still holds its files ──────────────────────────────────────────────
+
+/** Task A launched and blocked by the tool on commit (its brief changed while it was launched); B written on the same files. */
+async function liveBlockedA($: Engine, sim: Sim, withB = true) {
+  await begin($, sim)
+  await relay($, TASK_A)
+  if (withB) await relay($, { ...TASK_A, id: 'B', reads: [] })
+  const engine = engineOver(sim)
+  const held = await reserveDispatch(engine, ROOT, RUN, 'A')
+  if (!('commit' in held)) throw new Error(held.deny)
+  sim.files[`${DIR}/tasks/A-r1.md`] += '\nchanged while launching\n'
+
+  return { engine, held }
+}
+
+test('V3-01 a launch blocked after it went out keeps its files: an overlapping launch at the same time is refused', async ($, on) => {
+  const sim = standIn(on)
+  const { engine, held } = await liveBlockedA($, sim)
+  // Both starts issued at once: A's commit (blocked) and B's claim; the lock orders them, A first.
+  const [committed, second] = await Promise.all([held.commit('orca dispatch:ctx_live_A'), reserveDispatch(engine, ROOT, RUN, 'B')])
+  expect('deny' in committed && committed.deny).toContain('워커(orca dispatch:ctx_live_A)는 떠 있을 수 있어 이 작업이 파일을 계속 점유합니다')
+  expect('deny' in second && second.deny).toContain('돌고 있는 A-r1와 겹칩니다')
+  expect(state(sim).tasks.map(task => [task.id, task.status, task.runner, task.workerLive])).toEqual([
+    ['A', 'blocked', 'orca dispatch:ctx_live_A', true],
+    ['B', 'ready', null, undefined],
+  ])
+  // Later too, and through the tool's own overlap check; the Tasks table says what to do.
+  expect('deny' in (await reserveDispatch(engine, ROOT, RUN, 'B'))).toBe(true)
+  expect((await relay($, { ...TASK_A, id: 'C', reads: [] })).deny).toContain('돌고 있는 A-r1와 겹칩니다')
+  expect(sim.files[`${DIR}/progress.md`]).toContain('| A-r1 | Add the tool | orca dispatch:ctx_live_A | blocked (띄운 뒤 막힘: 지시서가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) |')
+  expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('A-r1(blocked (띄운 뒤 막힘')
+})
+
+test('V3-01 a task blocked after its launch takes no new revision until its worker is confirmed stopped and cancelled', async ($, on) => {
+  const sim = standIn(on)
+  const { held } = await liveBlockedA($, sim, false)
+  await held.commit('orca dispatch:ctx_still_alive')
+  const revision = await relay($, TASK_A)
+  expect(revision.deny).toContain('같은 작업의 A-r1(blocked (띄운 뒤 막힘: 지시서가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) · orca dispatch:ctx_still_alive)가 돌고 있습니다')
+  expect(state(sim).tasks.map(task => [taskKeyOf(task), task.status])).toEqual([['A-r1', 'blocked']])
+
+  await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'replace worker', confirmed_stopped: true })
+  expect((await relay($, TASK_A)).result).toContain(`지시서: ${DIR}/tasks/A-r2.md`)
+})
+
+test('V3-01 a task blocked after its launch is cancelled only with confirmed_stopped; a report from its worker is taken as usual', async ($, on) => {
+  const sim = standIn(on)
+  const { held } = await liveBlockedA($, sim, false)
+  await held.commit('orca dispatch:ctx_still_alive')
+  const refused = await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'replace worker' })
+  expect(refused.deny).toContain('A-r1는 blocked (띄운 뒤 막힘: 지시서가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) 상태입니다(orca dispatch:ctx_still_alive): 워커가 멈춘 것을 확인한 뒤 confirmed_stopped: true를 주세요')
+  expect(state(sim).tasks[0]?.status).toBe('blocked')
+
+  // The worker reports after all: its report is checked as any other, and the task holds nothing more.
+  sim.commits[SHA_A] = { task: 'A-r1', subject: 'Add', files: ['hooks/relay/relay.ts'] }
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report()
+  const reported = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(reported.result).toContain('A-r1: 보고 DONE → 상태 done')
+  expect(reported.result).toContain('띄운 뒤 막혀 있던 작업의 워커가 보고했습니다')
+  expect(state(sim).tasks[0]?.workerLive).toBeUndefined()
+  // A worker's own BLOCKED report frees its files: that worker stopped.
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', criteria: ['- C1: fail · tries 1 · red', '- C2: unverified · tries 0 · -'] })
+  await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect((await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'gave up' })).result).toContain('A-r1: blocked → cancelled · gave up')
 })

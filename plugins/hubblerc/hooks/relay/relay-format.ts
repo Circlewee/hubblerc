@@ -33,6 +33,12 @@ export type RelayTask = {
   cancelReason?: string
   /** Why the tool set it blocked itself (a brief changed while it was launched), when it did. */
   blockReason?: string
+  /**
+   * Blocked by the tool after its launch went out: the worker may still be at work, so the task
+   * holds its files and targets as a running one does until the worker reports or is cancelled
+   * with `confirmed_stopped`. A worker's own BLOCKED report never sets it (that worker stopped).
+   */
+  workerLive?: true
 }
 
 /** The result recorded: `fail` when any criterion its package asked for is not a pass, whatever the verdict's own result says. */
@@ -111,7 +117,14 @@ export function localTime(at: number): string {
 
 export const taskKey = (task: { id: string; rev: number }): string => `${task.id}-r${task.rev}`
 /** Holding a worker: launched, or a launch reserved. */
-export const isBusy = (task: { status: TaskStatus }): boolean => task.status === 'running' || task.status === 'launching'
+export const isBusy = (task: { status: TaskStatus; workerLive?: true }): boolean =>
+  task.status === 'running' || task.status === 'launching' || (task.status === 'blocked' && task.workerLive === true)
+
+/** Blocked after launch, its worker perhaps still out: what the lead does next. */
+export const LIVE_BLOCKED = '띄운 뒤 막힘: 지시서가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)'
+
+/** A task's status as a person reads it: a blocked task whose worker may be at work says so. */
+export const statusLabel = (task: { status: TaskStatus; workerLive?: true }): string => (task.status === 'blocked' && task.workerLive === true ? `blocked (${LIVE_BLOCKED})` : task.status)
 export const isDone = (task: { status: TaskStatus }): boolean => task.status === 'done' || task.status === 'done_with_concerns'
 export const runDir = (root: string, run: string): string => `${root}/${RUN_PREFIX}/${run}`
 export const specFile = (dir: string, key: string): string => `${dir}/tasks/${key}.md`
@@ -516,7 +529,7 @@ export function tasksTable(tasks: readonly RelayTask[]): string {
   return [
     '| ID | What | Runner | Status |',
     '|---|---|---|---|',
-    ...tasks.map(task => `| ${taskKey(task)} | ${cell(task.title)} | ${cell(task.runner ?? '-')} | ${task.status} |`),
+    ...tasks.map(task => `| ${taskKey(task)} | ${cell(task.title)} | ${cell(task.runner ?? '-')} | ${cell(statusLabel(task))} |`),
   ].join('\n')
 }
 
@@ -892,7 +905,7 @@ export function judgeVerdict(verdict: Verdict, pack: RelayPackage): { problems: 
 export function finishProblems(state: RelayState, head: string | undefined, tracked: readonly string[] | undefined): string[] {
   const reasons: string[] = []
   const open = state.tasks.filter(task => isBusy(task) || task.status === 'needs_context' || task.status === 'blocked')
-  if (open.length > 0) reasons.push(`끝나지 않은 작업: ${open.map(task => `${taskKey(task)}(${task.status})`).join(', ')}`)
+  if (open.length > 0) reasons.push(`끝나지 않은 작업: ${open.map(task => `${taskKey(task)}(${statusLabel(task)})`).join(', ')}`)
   const unsent = state.tasks.filter(task => task.status === 'ready')
   if (unsent.length > 0) reasons.push(`띄우지 않은 작업: ${unsent.map(taskKey).join(', ')}. 띄우지 않을 것은 cancel로 정리하세요.`)
   if (tracked === undefined) reasons.push('git status를 읽지 못해 작업 트리를 확인하지 못했습니다.')
