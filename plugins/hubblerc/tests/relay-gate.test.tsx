@@ -28,6 +28,8 @@ type Sim = {
   hold: Promise<void> | undefined
   /** The launch throws. */
   isLaunchThrowing: boolean
+  /** Runs while a launch is out (inside the tool below the plugin): how a brief is changed during the launch. */
+  whileLaunching: (() => void) | undefined
   /** What the gate costs: reads of anything under .relay, and git asked for the top folder. */
   relayReads: string[]
   relayExists: string[]
@@ -40,7 +42,7 @@ type Sim = {
 
 /** Stands for the engine beneath the plugin: files in memory, a repository, a Bash tool that prints a receipt, a subagent start. */
 function standIn(on: On): Sim {
-  const sim: Sim = { files: {}, head: HEAD_1, commands: [], spawned: [], receipt: RECEIPT, isLaunchFailed: false, hold: undefined, isLaunchThrowing: false, relayReads: [], relayExists: [], relayLists: [], toplevelAsks: 0, headAsks: 0, ownGit: [] }
+  const sim: Sim = { files: {}, head: HEAD_1, commands: [], spawned: [], receipt: RECEIPT, isLaunchFailed: false, hold: undefined, isLaunchThrowing: false, whileLaunching: undefined, relayReads: [], relayExists: [], relayLists: [], toplevelAsks: 0, headAsks: 0, ownGit: [] }
   const isDir = (path: string) => Object.keys(sim.files).some(file => file.startsWith(`${path}/`))
   on('session.id', () => ({ value: 'lead-session-1234' }))
   on('session.cwd', () => ({ value: ROOT }))
@@ -90,14 +92,17 @@ function standIn(on: On): Sim {
     return out('', 1)
   })
   on('tool.call', async (_, e) => {
+    if (e.tool === 'Agent') return { result: { status: 'async_launched', agentId: 'ag-1' } as never }
     if (e.tool === 'SendMessage') {
       sim.commands.push(`SendMessage ${String(e.to)}: ${String(e.message)}`)
+      sim.whileLaunching?.()
 
       return { result: {} as never }
     }
     if (e.tool === 'Bash') {
       sim.commands.push(String((e as { command?: unknown }).command))
       await sim.hold
+      sim.whileLaunching?.()
       if (sim.isLaunchThrowing) throw new Error('the Bash tool broke')
       if (sim.isLaunchFailed) return { isError: true as const, result: 'Exit code 1', text: 'Exit code 1' }
 
@@ -109,6 +114,7 @@ function standIn(on: On): Sim {
   on('agent.spawn', async (_, e) => {
     sim.spawned.push({ prompt: e.prompt, model: e.model })
     await sim.hold
+    sim.whileLaunching?.()
 
     return { model: e.model ?? 'inherited-model', agentId: `ag-${sim.spawned.length}` }
   })
@@ -156,8 +162,8 @@ async function bash($: Engine, command: string): Promise<{ deny?: string }> {
 }
 
 /** A subagent start as the Agent tool makes it: the prompt, the description and the model it gave (none: left to the agent's own). */
-async function spawn($: Engine, prompt: string, description: string, model?: string): Promise<{ deny?: string; agentId?: string }> {
-  const input = { tool_use_id: 'toolu_1', prompt, description, subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', ...(model === undefined ? {} : { model }) }
+async function spawn($: Engine, prompt: string, description: string, model?: string, toolUseId = 'toolu_1'): Promise<{ deny?: string; agentId?: string }> {
+  const input = { tool_use_id: toolUseId, prompt, description, subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', ...(model === undefined ? {} : { model }) }
 
   return (await $.agent.spawn(input as never)) as { deny?: string; agentId?: string }
 }
@@ -174,9 +180,10 @@ test('worker-start and send are found in an orca, orca-dev or orca-ide command w
   expect(start?.options.get('--json')).toBe(true)
   expect(start?.options.get('--effort')).toBe('high')
   expect(start?.options.get('--comment')).toBe('no-relay: other')
-  expect(start?.cds).toEqual(['/x'])
+  expect(start?.shifts).toBe(true)
   const [send] = readOrcaCalls('orca orchestration send --to dispatch:ctx_1 --body "Read and follow: /a b/c.md"') ?? []
   expect(send?.sub).toBe('send')
+  expect(send?.shifts).toBe(false)
   expect(send?.options.get('--to')).toBe('dispatch:ctx_1')
   expect(send?.words).toContain('Read and follow: /a b/c.md')
   expect(readOrcaCalls('orca-ide orchestration worker-start --spec-file x')).toHaveLength(1)
@@ -584,7 +591,7 @@ test('V1-08: two worker-starts in one command are refused, the second one hidden
   expect((await bash($, `${other}; ${other}`)).deny).toBeUndefined()
 })
 
-test('V1-09: the brief by a .. path, a relative one after a cd, or a // one is still the run\'s brief, so its model and effort are checked', async ($, on) => {
+test('V1-09: the brief by a .. path or a // one is still the run\'s brief, so its model and effort are checked', async ($, on) => {
   const sim = standIn(on)
   await newRun($)
   const a = await newTask($, 'A')
@@ -592,7 +599,6 @@ test('V1-09: the brief by a .. path, a relative one after a cd, or a // one is s
 
   expect((await bash($, `orca orchestration worker-start --spec-file ${dotdot}`)).deny).toContain('--model이 없습니다')
   expect((await bash($, `orca orchestration worker-start --spec-file ${DIR}//tasks/./A-r1.md`)).deny).toContain('--model이 없습니다')
-  expect((await bash($, `cd ${DIR}/tasks && orca orchestration worker-start --spec-file A-r1.md --model claude-opus-5-5 --effort high`)).deny).toContain('--model claude-opus-5-5')
   expect((await bash($, `orca orchestration worker-start --spec-file .relay/runs/${RUN}/../${RUN}/tasks/A-r1.md --model x --effort high`)).deny).toContain('--model x')
   expect((await spawn($, `Follow ${DIR}/tasks/../tasks/A-r1.md.`, 'A', 'opus')).deny).toContain('model opus')
   expect((await spawn($, `Follow .relay/runs/${RUN}/../${RUN}/tasks/A-r1.md.`, 'A')).deny).toContain('모델이 지정되지 않았습니다')
@@ -602,6 +608,110 @@ test('V1-09: the brief by a .. path, a relative one after a cd, or a // one is s
   expect((await bash($, launch(dotdot))).deny).toBeUndefined()
   expect(state(sim).tasks[0]?.status).toBe('running')
   expect(a).toContain('A-r1.md')
+})
+
+test('V1-09b: where the command may have moved the working folder (a subshell\'s cd, cd, pushd, $( )), a relative path to a brief is refused; an absolute one is checked as always', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A')
+  const relative = `.relay/runs/${RUN}/tasks/A-r1.md`
+  const flags = '--model claude-sonnet-5-5 --effort high'
+  const start = (spec: string) => `orca orchestration worker-start --spec-file ${spec} ${flags}`
+
+  for (const command of [`(cd /tmp); ${start(relative)}`, `cd /tmp && ${start(relative)}`, `pushd /tmp >/dev/null; ${start(relative)}`, `cd ${DIR}/tasks && ${start('A-r1.md')}`, start(`$(pwd)/${relative}`), `(cd /tmp && true); ${start(relative)}`, `${start(relative)}; cd /tmp`]) {
+    const refused = await bash($, command)
+    expect(refused.deny).toContain('지시서는 절대 경로로 주세요')
+  }
+  expect(sim.commands).toEqual([])
+  expect(state(sim).tasks[0]?.status).toBe('ready')
+
+  // The same brief by its absolute path is the run's brief wherever the command stands: its checks apply.
+  expect((await bash($, `(cd /tmp); orca orchestration worker-start --spec-file ${a}`)).deny).toContain('--model이 없습니다')
+  expect((await bash($, `cd /tmp && ${start(a)}`)).deny).toBeUndefined()
+  expect(state(sim).tasks[0]?.status).toBe('running')
+
+  // Without such syntax a relative path is read against the session's folder, as before.
+  const b = await newTask($, 'B', { edit_scope: ['other/**'] })
+  expect(b).toContain('B-r1.md')
+  expect((await bash($, start(`.relay/runs/${RUN}/tasks/B-r1.md`))).deny).toBeUndefined()
+  expect(state(sim).tasks[1]?.status).toBe('running')
+})
+
+test('V1-09b: a relative brief in an orca send beside a cd or a subshell is refused; a report path or an absolute brief is not', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A')
+  const send = (body: string) => `orca orchestration send --to dispatch:ctx_1 --body "${body}"`
+
+  expect((await bash($, `(cd /tmp); ${send(`Read .relay/runs/${RUN}/tasks/A-r1.md`)}`)).deny).toContain('지시서는 절대 경로로 주세요')
+  expect((await bash($, `cd /tmp && ${send(`Read .relay/runs/${RUN}/tasks/A-r1.md`)}`)).deny).toContain('지시서는 절대 경로로 주세요')
+  expect(sim.commands).toEqual([])
+  expect((await bash($, `cd /tmp && ${send(`See .relay/runs/${RUN}/tasks/A-r1-report.md`)}`)).deny).toBeUndefined()
+  expect((await bash($, `(cd /tmp); ${send(`Read ${a}`)}`)).deny).toBeUndefined()
+  expect(state(sim).tasks[0]?.status).toBe('running')
+})
+
+test('V1-07b: a brief changed while the worker was being started leaves the task blocked, and the lead reads why after the tool result', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A')
+  sim.whileLaunching = () => {
+    sim.files[a] = `${sim.files[a]}\nWEAKENED criterion`
+  }
+
+  const ran = (await $.tool.call({ tool: 'Bash', command: launch(a), description: '워커' } as never)) as { deny?: string; context?: string[]; text?: string }
+  expect(ran.deny).toBeUndefined()
+  expect(ran.text).toContain('dispatchId=ctx_abc123')
+  expect(ran.context).toHaveLength(1)
+  expect(ran.context?.[0]).toContain('⚠ relay: A-r1를 blocked로 두었습니다')
+  expect(ran.context?.[0]).toContain('띄우는 동안 지시서가 바뀌었습니다')
+  expect(ran.context?.[0]).toContain('orca dispatch:ctx_abc123')
+  const task = state(sim).tasks[0]
+  expect(task?.status).toBe('blocked')
+  expect(task?.runner).toBe('orca dispatch:ctx_abc123')
+})
+
+test('V1-07b: the same note follows a SendMessage and an Agent call; a launch that recorded cleanly adds none', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A', { edit_scope: ['area-a/**'] })
+  const b = await newTask($, 'B', { edit_scope: ['area-b/**'] })
+  const c = await newTask($, 'C', { edit_scope: ['area-c/**'] })
+  const message = (to: string, text: string) => $.tool.call({ tool: 'SendMessage', to, message: text } as never) as Promise<{ deny?: string; context?: string[] }>
+  // The engine starts the subagent inside the Agent call; the test starts it, then lets the call answer.
+  const agent = async (prompt: string, toolUseId: string) => {
+    const spawned = await spawn($, prompt, 'B', 'sonnet', toolUseId)
+    const answered = (await $.tool.call({ tool: 'Agent', tool_use_id: toolUseId, prompt, description: 'B', model: 'sonnet' } as never)) as { deny?: string; context?: string[]; result?: { agentId?: string } }
+
+    return { ...answered, deny: spawned.deny ?? answered.deny, spawnedId: spawned.agentId }
+  }
+
+  const clean = await message('worker-1', `Read ${c}.`)
+  expect(clean.deny).toBeUndefined()
+  expect(clean.context).toBeUndefined()
+  expect(state(sim).tasks[2]?.status).toBe('running')
+
+  sim.whileLaunching = () => {
+    sim.files[a] = `${sim.files[a]}\nchanged`
+  }
+  const sent = await message('worker-1', `Read ${a}.`)
+  expect(sent.context?.[0]).toContain('⚠ relay: A-r1를 blocked로 두었습니다')
+  expect(sent.context?.[0]).toContain('subagent worker-1')
+
+  sim.whileLaunching = () => {
+    sim.files[b] = `${sim.files[b]}\nchanged`
+  }
+  const started = await agent(`Follow ${b}.`, 'toolu_b')
+  expect(started.deny).toBeUndefined()
+  expect(started.spawnedId).toBe('ag-1')
+  expect(started.context?.[0]).toContain('⚠ relay: B-r1를 blocked로 두었습니다')
+  expect(started.context?.[0]).toContain('subagent ag-1')
+  expect(state(sim).tasks.map(task => task.status)).toEqual(['blocked', 'blocked', 'running'])
+
+  // The note is for that call alone.
+  sim.whileLaunching = undefined
+  const plain = await agent('Search the repository for the word relay.', 'toolu_plain')
+  expect(plain.context).toBeUndefined()
 })
 
 test('V1-10: a here-document or a message that holds the words of a launch is no launch; a real launch beside them is checked', async ($, on) => {

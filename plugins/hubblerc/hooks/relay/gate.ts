@@ -49,8 +49,12 @@ export type OrcaCall = {
   options: Map<string, string | true>
   /** Every word after the subcommand, unquoted: a brief named in `--body` is among them. */
   words: string[]
-  /** The folders of the `cd`s that came before it in the same command, in order. */
-  cds: string[]
+  /**
+   * Whether the command holds anything that can move the working folder away from the session's
+   * (`cd`, `pushd`, `popd`, a parenthesis or `$( )`, a backtick): a relative path in it then points
+   * nowhere sure.
+   */
+  shifts: boolean
 }
 
 /**
@@ -61,14 +65,11 @@ export function readOrcaCalls(command: string): OrcaCall[] | undefined {
   const commands = findCommands(command)
   if (commands === undefined) return undefined
   const calls: OrcaCall[] = []
-  const cds: string[] = []
+  // The shell's scope is not followed (a subshell's cd stays in it): any such syntax counts for the whole command.
+  const shifts = /[(`]/.test(command) || commands.some(words => ['cd', 'pushd', 'popd'].includes(words[0]?.text ?? ''))
   for (const words of commands) {
     const first = words[0]
     if (first === undefined) continue
-    if (first.text === 'cd' && words[1] !== undefined && !words[1].text.startsWith('-')) {
-      cds.push(words[1].text)
-      continue
-    }
     if (!ORCA_COMMANDS.has(first.text.split('/').at(-1) ?? '')) continue
     const at = words.findIndex((word, i) => i > 0 && word.text === 'orchestration')
     const sub = words[at + 1]?.text
@@ -83,7 +84,7 @@ export function readOrcaCalls(command: string): OrcaCall[] | undefined {
       else if (FLAGS.has(word) || rest[i + 1] === undefined || (rest[i + 1]?.text ?? '').startsWith('--')) options.set(word, true)
       else options.set(word, rest[(i += 1)]?.text ?? '')
     }
-    calls.push({ sub, options, words: rest.map((word: CommandWord) => word.text), cds: [...cds] })
+    calls.push({ sub, options, words: rest.map((word: CommandWord) => word.text), shifts })
   }
 
   return calls
@@ -119,6 +120,11 @@ export function runPathsIn(text: string): string[] {
 /** Whether a text names something that could be a run's brief (`…/tasks/<id>-r<n>.md`): the test before any file is read. */
 export function mayNameBrief(texts: readonly string[]): boolean {
   return texts.some(text => runPathsIn(text).some(path => /\/tasks\/[^/]*-r\d+\.md$/.test(path)))
+}
+
+/** The relative paths in a text that look like a run's brief (`…/tasks/<id>-r<n>.md` under `.relay/runs/`). */
+export function relativeBriefPaths(texts: readonly string[]): string[] {
+  return texts.flatMap(runPathsIn).filter(path => !path.startsWith('/') && /\/tasks\/[^/]*-r\d+\.md$/.test(path))
 }
 
 /** The dispatch id in what `worker-start` printed (`dispatchId=ctx_…`, or JSON's `"dispatchId": "ctx_…"`). */
@@ -193,13 +199,25 @@ export type Hold = { root: string; run: string; task: string; runnerOf: (receipt
 
 export type Plan = { deny: string } | { pass: true; hold?: Hold }
 
+/** What the lead should read after a launch: the claim could not become `running`, or became it with warnings. */
+function noteOf(key: string, committed: { result: string } | { deny: string } | Error): string | undefined {
+  if (committed instanceof Error) return `⚠ relay: ${key}를 running으로 기록하지 못했습니다(${committed.message}). 띄우기는 끝났으니 dispatched로 직접 기록하세요.`
+  if ('deny' in committed) return `⚠ relay: ${committed.deny}`
+  const warnings = committed.result.split('\n경고:\n')[1]
+  if (warnings === undefined) return undefined
+
+  return `⚠ relay: ${key} 기록에 경고가 있습니다 — ${warnings.split('\n').map(line => line.replace(/^- /, '')).filter(line => line !== '').join(' / ')}`
+}
+
 /**
  * Claims the task (checked and set in one step), runs the launch, and then makes the claim a
- * running task or lets it go: a refusal, a failure or an exception leaves the task ready.
+ * running task or lets it go: a refusal, a failure or an exception leaves the task ready. The launch
+ * is over by then, so what the record said about it (blocked because the brief changed while it went
+ * out, warnings) comes back as a note for the lead to read, never as a refusal.
  */
-async function claimed<R>($: EngineInterface, hold: Hold, launch: () => Promise<R>, receipt: (ran: R) => { isOk: boolean; text: string }): Promise<R | { deny: string }> {
+async function claimed<R>($: EngineInterface, hold: Hold, launch: () => Promise<R>, receipt: (ran: R) => { isOk: boolean; text: string }): Promise<{ refused: string } | { ran: R; note: string | undefined }> {
   const held = await reserveDispatch($, hold.root, hold.run, hold.task)
-  if ('deny' in held) return refused(hold.task, [held.deny])
+  if ('deny' in held) return { refused: refused(hold.task, [held.deny]).deny }
   let ran: R
   try {
     ran = await launch()
@@ -208,11 +226,27 @@ async function claimed<R>($: EngineInterface, hold: Hold, launch: () => Promise<
     throw error
   }
   const { isOk, text } = receipt(ran)
-  if (isOk) await held.commit(hold.runnerOf(text)).catch(() => undefined)
-  else await held.release().catch(() => undefined)
+  if (!isOk) {
+    await held.release().catch(() => undefined)
 
-  return ran
+    return { ran, note: undefined }
+  }
+  const committed = await held.commit(hold.runnerOf(text)).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))))
+
+  return { ran, note: noteOf(hold.task, committed) }
 }
+
+/** A tool result with the note added to what the model reads after it (`context`). */
+function withNote<R>(ran: R, note: string | undefined): R {
+  if (note === undefined || isFailed(ran)) return ran
+  const call = ran as unknown as { context?: readonly string[] }
+
+  return { ...ran, context: [...(call.context ?? []), note] }
+}
+
+/** Notes for subagents started, by the Agent call that started them: the spawn cannot carry one, its tool result can. */
+const spawnNotes = new Map<string, string>()
+const MAX_NOTES = 20
 
 // ── Orca ──────────────────────────────────────────────
 
@@ -237,18 +271,25 @@ export async function planOrca($: EngineInterface, command: string): Promise<Pla
   if (root === undefined) return { pass: true }
   const runs = await findActiveRuns($, root)
   if (runs.length === 0) return { pass: true }
-  const session = await $.session.cwd().catch(() => undefined)
-  const cwdOf = (call: OrcaCall) => call.cds.reduce<string | undefined>((dir, cd) => resolvePath(cd, dir), session)
+  const cwd = await $.session.cwd().catch(() => undefined)
 
   // A worker started with no brief of the run is a refusal; one that says no-relay is other work.
   const isOther = (call: OrcaCall) => call.sub === 'worker-start' && optionOf(call, '--spec-file') === undefined && optionOf(call, '--comment')?.includes('no-relay') === true
-  const sendsBrief = (call: OrcaCall) => call.sub === 'send' && briefsNamed(call.words, runs, cwdOf(call)).length > 0
+  const sendsBrief = (call: OrcaCall) => call.sub === 'send' && briefsNamed(call.words, runs, cwd).length > 0
+
+  // Where the command may have moved the working folder, a relative path to a brief points nowhere sure: absolute ones only.
+  for (const call of calls) {
+    const file = optionOf(call, '--spec-file')
+    const relative = call.sub === 'worker-start' ? (file !== undefined && file !== '-' && file !== '' && !file.startsWith('/') ? [file] : []) : relativeBriefPaths(call.words)
+    if (call.shifts && relative.length > 0) {
+      return { deny: `지시서는 절대 경로로 주세요: 명령에 cd·pushd·괄호·$( ) 같은 위치를 바꿀 수 있는 구문이 있어 상대 경로(${relative[0]})가 어느 지시서인지 알 수 없습니다.` }
+    }
+  }
   const relevant = calls.filter(call => !isOther(call) && (call.sub === 'worker-start' || sendsBrief(call)))
   if (relevant.length === 0) return { pass: true }
   if (relevant.length > 1) return { deny: `한 명령에 워커를 띄우거나 지시서를 보내는 호출이 ${relevant.length}개 있습니다. ${ONE_AT_A_TIME}` }
   const call = relevant[0]
   if (call === undefined) return { pass: true }
-  const cwd = cwdOf(call)
 
   if (call.sub === 'send') {
     const picked = pickBrief(briefsNamed(call.words, runs, cwd))
@@ -360,8 +401,9 @@ export function gateLaunches(on: On): void {
     const plan = await planOrca($, e.command)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
+    const out = await claimed($, plan.hold, () => next(e), ran => ({ isOk: !isFailed(ran), text: printed(ran) }))
 
-    return claimed($, plan.hold, () => next(e), ran => ({ isOk: !isFailed(ran), text: printed(ran) }))
+    return 'refused' in out ? { deny: out.refused } : withNote(out.ran, out.note)
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
@@ -370,8 +412,9 @@ export function gateLaunches(on: On): void {
     const plan = await planMessage($, String(e.to), message)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
+    const out = await claimed($, plan.hold, () => next(e), ran => ({ isOk: !isFailed(ran), text: '' }))
 
-    return claimed($, plan.hold, () => next(e), ran => ({ isOk: !isFailed(ran), text: '' }))
+    return 'refused' in out ? { deny: out.refused } : withNote(out.ran, out.note)
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
@@ -379,11 +422,27 @@ export function gateLaunches(on: On): void {
     const plan = await planSpawn($, e.prompt, e.model)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
-
-    return claimed($, plan.hold, () => next(e), started => {
+    const out = await claimed($, plan.hold, () => next(e), started => {
       const id = 'agentId' in started && typeof started.agentId === 'string' ? started.agentId : ''
 
       return { isOk: !isFailed(started), text: id }
     })
+    if ('refused' in out) return { deny: out.refused }
+    if (out.note !== undefined) {
+      spawnNotes.set(e.tool_use_id, out.note)
+      if (spawnNotes.size > MAX_NOTES) spawnNotes.delete(spawnNotes.keys().next().value ?? '')
+    }
+
+    return out.ran
+  }).catch(($, e, next) => next(e))
+
+  // The Agent call whose start left a note: the note goes with the call's result.
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const ran = await next(e)
+    const note = spawnNotes.get(e.tool_use_id)
+    if (note === undefined) return ran
+    spawnNotes.delete(e.tool_use_id)
+
+    return withNote(ran, note)
   }).catch(($, e, next) => next(e))
 }
