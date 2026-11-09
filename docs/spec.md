@@ -296,7 +296,7 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - `aside exec`를 쓸 때: Aside 쪽 별도 에이전트가 돈다(비용은 CLI로 안 보임). 출력(공개 페이지 1개에 19KB)은 파일로 돌려 컨텍스트에는 끝의 답만 넣는다. hubblerc 쪽 비용은 없다.
 - 실측(Orca 탭 비교)은 생략: 주기 작업·프로세스가 없다.
 
-### 커밋 꼬리말·relay (2026-11-08 설계, 구현 전)
+### 커밋 꼬리말·relay (2026-11-08 설계, 2026-11-10 구현, 실측 전)
 F12·F13 모두 새 타이머·폴링·감시를 두지 않는다. 늘어나는 일은 모든 Bash 호출에서 `git commit`인지 글자로 보기(F12), 모든 Bash·서브에이전트 호출에서 진행 중인 relay 묶음 폴더가 있는지 보기(F13 관문 1), 세션 시작 때 기종 읽기 한 번(0.26초). 구현 뒤 쉬는 세션 비용을 실측해 이 절을 갱신한다.
 
 ### 기능을 더할 때 점검 (2026-10-28 사용자 요청)
@@ -439,7 +439,7 @@ Claude가 만든 커밋에 어느 세션·모델·effort·기기에서 했는지
 - 자원: 새 타이머 없음. 모든 Bash 호출에서 `git commit`인지 글자로 보는 정도. 기종 읽기는 세션당 한 번.
 - 구현: hooks/commit/commit-command.ts(명령에서 커밋 위치 찾기, 순수), hooks/commit/trailers.ts(tool.call Bash 훅·attribution.text 훅·기종 읽기), effort.ts가 요청마다 모델·effort를 noteRequest로 알림. commit 앞에는 아무것도 넣지 않는다: 처음엔 고친 커밋(--amend)의 꼬리말 중복을 막으려고 -c trailer.ifexists=replace를 넣었으나, 명령이 git -c … commit이 되어 Bash(git commit:*) 허용 규칙과 앞부분이 안 맞아 claude -p에서 커밋이 승인 필요로 막혔다 [확인: 2026-11-09 시험]. 그래서 --amend 커밋에는 꼬리말을 붙이지 않는다(원래 커밋의 꼬리말이 남음). 실제 세션 확인: 이 기능이 올라간 세션의 커밋에 Agent·Session·Model·Effort(auto · medium)·Device가 붙었다 [확인: 2026-11-09 임시 저장소].
 
-### F13. relay: 리드·워커 오케스트레이션 스킬 (2026-11-06~08 사용자와 설계, 구현 전, 할 일 id 2)
+### F13. relay: 리드·워커 오케스트레이션 스킬 (2026-11-06~08 사용자와 설계, 2026-11-09~10 1차 구현·Codex 검증 V4 pass, 할 일 id 2)
 큰 작업을 워커들에게 나눠 돌리고, 다른 모델(Codex)로 검증하고, 긴 작업을 다른 세션이 이어받게 하는 스킬 `hubblerc:relay`. 작은 일도 느리지 않게 하는 것이 같은 무게의 목표다.
 - 이름: relay(사용자 결정). Orca가 깐 사용자 스킬 `orchestration`과 구분하려고 다른 이름을 골랐다. 같은 이름의 Claude Code 플러그인이 여럿 있다(steviepee/relay, farzeenzehra/vibe-plugins의 relay, innestic/claude-relay 등) [확인: 플러그인 목록 캐시]. 이 맥에는 없고 `hubblerc:` 이름공간이라 기술 충돌은 없다. 같이 깔면 자동 호출이 헷갈릴 수 있다 [추정].
 - 근거: 사용자의 이전 리드·워커 운영 회고(비공개 저장소, 여기엔 일반화한 교훈만), 공개 구현 조사(obra/superpowers subagent-driven-development, Anthropic multi-agent research·long-running harness·C compiler, oh-my-claudecode, openai/codex-plugin-cc, BMAD, spec-kit, fivetaku/kkirikkiri 등), 리드 역할·교차 모델 검증 문헌. 2026-11-06~08 조사.
@@ -473,6 +473,14 @@ Claude가 만든 커밋에 어느 세션·모델·effort·기기에서 했는지
 - 나중 후보: likely(API 키가 있을 때)로 위험 작업·직접 여부 판정. likely 2차 검토(11-12) 뒤에.
 - 시험할 것: 자동 호출(`claude plugin eval`은 사용자 스킬을 안 불러 Orca 스킬과의 혼동은 재현 못 함 → 실제 환경 `claude -p --permission-mode default`로 어떤 스킬이 불리는지), 관문 1이 관계없는 서브에이전트·Bash를 막지 않는지, 작은 묶음 하나 실제로 돌리기.
 - 자원: 새 타이머·폴링 없음. 기다림은 실행 환경의 이벤트(Orca 깨움, 서브에이전트 완료 알림, Bash 백그라운드 종료)로만. 관문 1 훅은 모든 Bash·서브에이전트 호출에서 진행 중인 묶음 폴더가 있는지만 먼저 본다.
+- 1차 구현(2026-11-09~10, relay 자신으로 진행 — 앞 묶음은 도구가 없어 손으로, 뒤 묶음 `2026-11-09-relay-gates`는 도구로):
+  - 커밋: b1883fa 스킬(C), bda4a69 도구(A), 81db49e 관문(B), 8ba84f3·0e1277c·9314285·45c8f4a 도구 수정, c97afc6·d956323 관문·스킬 수정. 테스트 365개.
+  - 파일: `skills/relay/SKILL.md` + `references/runtime-{orca,subagent,codex-exec}.md`, `hooks/relay/relay.ts`·`relay-format.ts`(도구 `mcp__hubblerc__relay`: start·list·task·spec_text·dispatched·report·check·package·verdict·pending·cancel·finish), `hooks/relay/gate.ts`(관문), 커밋 꼬리말의 셸 해석기 `hooks/commit/commit-command.ts`를 관문도 씀.
+  - 설계에서 바뀐 것(구현 중 사용자 결정): 지시서는 리드가 칸을 넘기면 도구가 씀 / 진행 기록의 Tasks 표는 state.json에서 도구가 다시 그림 / 관문 1은 서브에이전트가 지시서를 가리킬 때만(Orca worker-start는 지시서 없으면 거절, `--comment no-relay`로 우회) / 검증 꾸러미는 diff 없이 커밋·바뀐 파일·줄 수·볼 명령만, 판정에 `reviewed_files` 필수(빠지면 거절) / 판정 criteria id는 `<작업>-r<n>:<기준>` / tries는 기준 글이 같을 때만 판을 넘어 누적 / 저장소 어디든 git이 모르는 파일이 있으면 package·finish 거절(.relay·무시 파일 제외).
+  - 검증: 같은 Codex 워커가 V1 fail(high 9·medium 4) → V2 fail(high 5) → V3 fail(high 1, 리드 지시서가 만든 점유 회귀) → V4 pass(기준 27, 지적 0). 검증자는 실제 훅·함수를 메모리 엔진에 연결한 재현 스크립트로 결함을 하나씩 재현했다. 주요 지적: 판정이 기준을 빠뜨려도 끝남, 미커밋·미추적 작업을 완료로 받음, 앞 판·취소 작업의 커밋이 꾸러미에서 빠짐, 띄운 뒤 고친 지시서, 새 판이 살아 있는 워커의 점유를 풂, 동시 띄우기, heredoc 속 글자를 명령으로 오인, 서브셸 cd, 파일 목록 읽기 실패를 0개로 처리.
+  - 실제 세션에서 확인 [확인: 2026-11-09~10]: start가 폴더·`.gitignore`(`*`)를 만들고 git status 깨끗, task가 양식대로 지시서를 씀, report가 범위 밖 파일·테스트 변경·tries 감소를 잡음, check가 명령을 직접 돌림, Orca `send`로 새 판을 보내면 관문이 예약(launching) → 영수증의 dispatchId로 running 기록, 답변 끝 "⚠ relay … 검증되지 않은 판" 줄이 답변 아래에 보임, finish가 보류 결정과 리드 결정을 모아 줌.
+  - 아직 확인 못 함: "⚠ relay:" 결과 줄이 모델에게 보이는지(서브에이전트·SendMessage 경로), 서브에이전트 관문의 실제 동작, 자동 호출(스킬 설명만으로 고르는지, Orca `orchestration` 스킬과 헷갈리지 않는지), 워커 세션이 배포판이라 워커 커밋엔 자동 꼬리말 없음(배포 뒤 해결), 쉬는 세션 비용 실측.
+  - 1차 완성 뒤 할 것(할 일 id 9·10): MCP 도구 vs CLI 비교(사용자 목적: 직접 상태 보기·도구 검색 불편·의존도 낮추기), 동작 방식·흐름 정리(다이어그램 + 글). 개선 메모: 같은 워커에게 보낼 때도 "앞 보고서를 read_first에" 경고가 뜸, Codex 워커의 worker_done이 샌드박스 승인 창에 매번 걸림(결과 파일로 진행).
 
 ## 후보 (아직 결정 안 함)
 - 오늘 누적 비용·작업 시간 (`$.store`로 세션 넘어 누적)
