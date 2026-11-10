@@ -5,7 +5,8 @@ import type { AgentSeen, ModelLimit, RunningCall, UsageSnapshot } from '../../ty
 import { parseGitStatus } from './git'
 import { bashPurpose } from '../activity/bash-purpose'
 import { addFiveHourPoint } from './forecast'
-import { parseModelLimits, USAGE_URL } from './model-limits'
+import { MODEL_LIMITS_GAP_MS, MODEL_LIMITS_KEY, parseModelLimits, readSharedModelLimits, refusalWaitMs, USAGE_URL } from './model-limits'
+import type { SharedModelLimits } from './model-limits'
 import { isSidebarShown } from '../shared/pane'
 import { isRecord } from '../shared/values'
 import { refreshTodos } from '../todo/todo'
@@ -39,8 +40,6 @@ const TITLE_ROW = '"type":"custom-title"'
 /** How much of the transcript's end a periodic read of the name looks through. */
 const TITLE_TAIL_BYTES = 262_144
 const MAX_RUNNING = 50
-/** The usage endpoint is asked at most this often, and only as an answer ends: an idle session asks nothing. */
-const MODEL_LIMITS_GAP_MS = 5 * 60_000
 
 type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
 
@@ -54,13 +53,17 @@ let statusTimer: Timer | null = null
 let statusTimerMs = 0
 let wakeStatus: (() => void) | null = null
 /**
- * The weekly limits of single models as the usage endpoint last gave them, and when it was last
- * asked (the wall clock; never, at session.start). The module's: `refreshStatus` writes the
- * snapshot whole, so each one carries these.
+ * The weekly limits of single models as the usage endpoint last gave them (to this session or to
+ * another: the store's record), when it may be asked next (the wall clock) and how many times in a
+ * row it refused. The module's: `refreshStatus` writes the snapshot whole, so each one carries the
+ * limits.
  */
 let modelLimits: ModelLimit[] = []
-let lastModelLimitsAt = Number.NEGATIVE_INFINITY
-/** No sign-in the usage endpoint takes (an API key, a gateway), or it refused the sign-in (403): not asked again this session. */
+let nextModelLimitsAt = 0
+let modelLimitsRefusals = 0
+/** The sidebar has shown once this session and the limits were looked for: after that only as an answer ends. */
+let hasLookedForModelLimits = false
+/** No sign-in the usage endpoint takes (an API key, a gateway): not asked this session. */
 let isModelLimitsOff = false
 
 /**
@@ -75,8 +78,14 @@ let isModelLimitsOff = false
  */
 export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
-  lastModelLimitsAt = Number.NEGATIVE_INFINITY
+  hasLookedForModelLimits = false
   isModelLimitsOff = false
+  modelLimits = []
+  nextModelLimitsAt = 0
+  modelLimitsRefusals = 0
+  // What the store holds of the models' limits, before the first snapshot: a restart or a reload
+  // draws them at once and asks the endpoint nothing.
+  await takeSharedModelLimits($).catch(() => undefined)
   // The last answer still open (a reload while it ran): read once here, then kept by noteAnswering.
   isAnswering = await read($, turns)
     .then(list => list.at(-1)?.durationMs === null)
@@ -103,7 +112,7 @@ export async function startStatus($: EngineInterface): Promise<void> {
       await refreshStatus($).catch(() => undefined)
       if (await isSidebarShown($).catch(() => false)) {
         // Once, when the sidebar first shows: after that only as an answer ends.
-        if (lastModelLimitsAt === Number.NEGATIVE_INFINITY) void refreshModelLimits($).catch(() => undefined)
+        if (!hasLookedForModelLimits) void refreshModelLimits($).catch(() => undefined)
         await refreshSessionName($).catch(() => undefined)
         // Another session's to-dos (the same project) show within the half minute.
         await refreshTodos($).catch(() => undefined)
@@ -197,32 +206,74 @@ export async function refreshStatus($: EngineInterface): Promise<void> {
 /**
  * Reads the weekly limits of single models (Fable's) from the usage endpoint `/usage` reads, with
  * the session's own sign-in (`$.session.authorize()`: the token stays with the engine). Only the
- * sidebar draws them, so only while it shows; only under a subscription's sign-in; and no sooner
- * than `MODEL_LIMITS_GAP_MS` after the last ask, answered or not. Without such a sign-in, or once
- * the endpoint refuses it (403), nothing is asked for the rest of the session. Called as an answer
- * ends (not awaited there: the request takes up to a second) and once when the sidebar first shows.
+ * sidebar draws them, so only while it shows, and only under a subscription's sign-in. Called as
+ * an answer ends (not awaited there: the request takes up to a second) and once when the sidebar
+ * first shows.
+ *
+ * The endpoint limits how often an account asks (429), and the engine's own `/usage` shares that
+ * allowance. So the sessions ask as one: what an ask learned and when the next may go are kept in
+ * the store, a session whose turn it is not takes the record and makes no request, and a refusal
+ * (429, 403) is left alone for what the endpoint names, or the gap doubled each time, an hour at most.
  */
 export async function refreshModelLimits($: EngineInterface): Promise<void> {
   if (isModelLimitsOff) return
   const now = await $.clock.now()
-  if (now - lastModelLimitsAt < MODEL_LIMITS_GAP_MS) return
+  if (now < nextModelLimitsAt) {
+    hasLookedForModelLimits = true
+
+    return
+  }
   // No request is made for the handle.
   const auth = await $.session.authorize()
   if (auth === null || auth.kind !== 'bearer') {
-    lastModelLimitsAt = now
     isModelLimitsOff = true
 
     return
   }
-  // Closed, the gap is not spent: the first answer after it shows asks.
+  // Closed, nothing is spent: the first answer after it shows looks.
   if (!(await isSidebarShown($))) return
-  lastModelLimitsAt = now
+  hasLookedForModelLimits = true
+  // Another session may have asked since: its answer, and its turn, stand.
+  await takeSharedModelLimits($)
+  if (now < nextModelLimitsAt) return showModelLimits($)
+
+  // The turn is taken in the store before the request goes, so a session ending an answer meanwhile waits.
+  nextModelLimitsAt = now + MODEL_LIMITS_GAP_MS
+  await shareModelLimits($)
   const response = await $.http.fetch(USAGE_URL, { auth: auth.handle })
-  // A sign-in the endpoint does not take. A 401 may be a token about to be refreshed: asked again.
-  if (response.status === 403) isModelLimitsOff = true
-  const found = response.ok ? parseModelLimits(response.text) : null
-  if (found === null || JSON.stringify(found) === JSON.stringify(modelLimits)) return
-  modelLimits = found
+  if (response.status === 429 || response.status === 403) {
+    modelLimitsRefusals += 1
+    nextModelLimitsAt = now + refusalWaitMs(response.headers, modelLimitsRefusals)
+  } else if (response.ok) {
+    modelLimitsRefusals = 0
+    modelLimits = parseModelLimits(response.text) ?? modelLimits
+  }
+  await shareModelLimits($)
+  await showModelLimits($)
+}
+
+/**
+ * The store's record of the models' limits, taken as this session's; with none, or a store that
+ * cannot be read, the session goes by what it holds itself.
+ */
+async function takeSharedModelLimits($: EngineInterface): Promise<void> {
+  const shared = readSharedModelLimits(await $.store.get(MODEL_LIMITS_KEY).catch(() => undefined))
+  if (shared === null) return
+  modelLimits = shared.limits
+  nextModelLimitsAt = shared.nextAt
+  modelLimitsRefusals = shared.refusals
+}
+
+/** This session's record into the store for the others; a store that refuses the write leaves each session asking for itself. */
+async function shareModelLimits($: EngineInterface): Promise<void> {
+  const record: SharedModelLimits = { limits: modelLimits, nextAt: nextModelLimitsAt, refusals: modelLimitsRefusals }
+  await $.store.set(MODEL_LIMITS_KEY, record).catch(() => undefined)
+}
+
+/** The limits into the snapshot the sidebar reads, when they differ from what it holds. */
+async function showModelLimits($: EngineInterface): Promise<void> {
+  const shown = (await read($, usage))?.modelLimits ?? []
+  if (JSON.stringify(shown) === JSON.stringify(modelLimits)) return
   await update($, usage, figures => (figures === null ? figures : withModelLimits(figures)))
 }
 

@@ -1,8 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
+import type { On } from 'claude-code'
 
 import { statusParts } from '../hooks/status/band-format'
-import { parseModelLimits } from '../hooks/status/model-limits'
+import { MODEL_LIMITS_KEY, parseModelLimits, readSharedModelLimits, refusalWaitMs } from '../hooks/status/model-limits'
 import { NOW, standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
 
@@ -28,9 +29,24 @@ function showSidebar(standIn: StandIn): void {
   standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
 }
 
-async function answer($: Engine, turnId: string): Promise<void> {
+/** An answer from start to end, and a millisecond after: the ask its end sets off is not awaited there. */
+async function answer($: Engine, turnId: string, standIn: StandIn): Promise<void> {
   await $.turn.start({ text: '질문', turnId })
   await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId, durationMs: 1000 })
+  await standIn.clock.advance(1)
+}
+
+/** The plugin's store, kept where the test can see it: what the sessions share. */
+function memoryStore(on: On, entries: Record<string, unknown> = {}): Record<string, unknown> {
+  const stored: Record<string, unknown> = { ...entries }
+  on('store.get', (_, e) => ({ value: stored[e.key] }))
+  on('store.set', (_, e) => {
+    stored[e.key] = e.value
+
+    return { value: undefined }
+  })
+
+  return stored
 }
 
 async function fableLine($: Engine): Promise<string | undefined> {
@@ -80,23 +96,24 @@ test("wide, a model's weekly limit is a line beneath 7d, every label padded to i
 
 test("as an answer ends, the sidebar showing, Fable's week is read with the session's sign-in, at most once in five minutes", async ($, on) => {
   const standIn = standInForEngine(on)
+  memoryStore(on)
   standIn.signIn = 'bearer'
   standIn.usageAnswer = { status: 200, body: usageBody(2) }
   await start($)
   showSidebar(standIn)
   expect(standIn.usageCalls).toEqual([])
 
-  await answer($, 't1')
+  await answer($, 't1', standIn)
   expect(standIn.usageCalls).toEqual([{ auth: 'handle-1' }])
   expect(await fableLine($)).toBe('Fable ')
 
   // Within five minutes, another answer asks nothing; after, it asks again and the line follows.
   standIn.usageAnswer = { status: 200, body: usageBody(9) }
   await standIn.clock.advance(4 * MIN)
-  await answer($, 't2')
+  await answer($, 't2', standIn)
   expect(standIn.usageCalls.length).toBe(1)
   await standIn.clock.advance(MIN)
-  await answer($, 't3')
+  await answer($, 't3', standIn)
   expect(standIn.usageCalls.length).toBe(2)
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   expect((await pane.find({ type: 'Text', text: /^ +9%$/ }))?.text).toBe('  9%')
@@ -105,13 +122,14 @@ test("as an answer ends, the sidebar showing, Fable's week is read with the sess
   // An answer that cannot be read, or refused, keeps what was known.
   standIn.usageAnswer = { status: 500, body: 'no' }
   await standIn.clock.advance(5 * MIN)
-  await answer($, 't4')
+  await answer($, 't4', standIn)
   expect(standIn.usageCalls.length).toBe(3)
   expect(await fableLine($)).toBe('Fable ')
 })
 
 test('an idle session asks the usage endpoint once, when the sidebar first shows, and never again', async ($, on) => {
   const standIn = standInForEngine(on)
+  memoryStore(on)
   standIn.signIn = 'bearer'
   standIn.usageAnswer = { status: 200, body: usageBody(2) }
   await start($)
@@ -128,37 +146,109 @@ test('with the sidebar closed, or no subscription sign-in, the usage endpoint is
   const standIn = standInForEngine(on)
   standIn.signIn = 'bearer'
   await start($)
-  await answer($, 't1')
+  await answer($, 't1', standIn)
   await standIn.clock.advance(10 * MIN)
   expect(standIn.usageCalls).toEqual([])
 
   standIn.signIn = 'api-key'
   showSidebar(standIn)
-  await answer($, 't2')
+  await answer($, 't2', standIn)
   await standIn.clock.advance(10 * MIN)
   expect(standIn.usageCalls).toEqual([])
   expect(await fableLine($)).toBeUndefined()
 })
 
-test('a sign-in the usage endpoint refuses (403) is not asked with again this session; what was known stays', async ($, on) => {
+test('a refusing endpoint (429, 403) is left alone for what it names, else the gap doubled each time, an hour at most; what was known stays', async ($, on) => {
+  expect(refusalWaitMs({ 'retry-after': '1800' }, 1)).toBe(30 * MIN)
+  expect(refusalWaitMs({ 'retry-after': '10' }, 1)).toBe(5 * MIN)
+  expect(refusalWaitMs({ 'retry-after': '86400' }, 1)).toBe(HOUR)
+  expect([1, 2, 3, 4, 5].map(refusals => refusalWaitMs({}, refusals) / MIN)).toEqual([5, 10, 20, 40, 60])
+
   const standIn = standInForEngine(on)
+  memoryStore(on)
   standIn.signIn = 'bearer'
   standIn.usageAnswer = { status: 200, body: usageBody(2) }
   await start($)
   showSidebar(standIn)
-  await answer($, 't1')
+  await answer($, 't1', standIn)
   expect(standIn.usageCalls.length).toBe(1)
 
-  standIn.usageAnswer = { status: 403, body: 'no' }
+  // Refused with a wait named: nothing asked till it is up, however many answers end.
+  standIn.usageAnswer = { status: 429, body: 'no', headers: { 'retry-after': '1800' } }
   await standIn.clock.advance(5 * MIN)
-  await answer($, 't2')
+  await answer($, 't2', standIn)
   expect(standIn.usageCalls.length).toBe(2)
-  // Answering again later, it is still not asked.
-  standIn.usageAnswer = { status: 200, body: usageBody(9) }
-  await standIn.clock.advance(HOUR)
-  await answer($, 't3')
+  await standIn.clock.advance(29 * MIN)
+  await answer($, 't3', standIn)
   expect(standIn.usageCalls.length).toBe(2)
   expect(await fableLine($)).toBe('Fable ')
+
+  // Refused again with none named (a 403), the second in a row: ten minutes.
+  standIn.usageAnswer = { status: 403, body: 'no' }
+  await standIn.clock.advance(MIN)
+  await answer($, 't4', standIn)
+  expect(standIn.usageCalls.length).toBe(3)
+  await standIn.clock.advance(9 * MIN)
+  await answer($, 't5', standIn)
+  expect(standIn.usageCalls.length).toBe(3)
+  standIn.usageAnswer = { status: 200, body: usageBody(9) }
+  await standIn.clock.advance(MIN)
+  await answer($, 't6', standIn)
+  expect(standIn.usageCalls.length).toBe(4)
+})
+
+test('the sessions ask as one: what another asked within the gap is drawn with no request, at a restart at once', async ($, on) => {
+  const standIn = standInForEngine(on)
+  standIn.signIn = 'bearer'
+  standIn.usageAnswer = { status: 200, body: usageBody(9) }
+  // Another session asked two minutes ago: its record is in the store.
+  const stored = memoryStore(on, { [MODEL_LIMITS_KEY]: { limits: [{ name: 'Fable', percent: 4, resetsAt: WEEK_RESET }], nextAt: NOW + 3 * MIN, refusals: 0 } })
+  await start($)
+  showSidebar(standIn)
+
+  // Drawn from the record as the session starts, before any answer.
+  expect(await fableLine($)).toBe('Fable ')
+  await standIn.clock.advance(MIN)
+  await answer($, 't1', standIn)
+  expect(standIn.usageCalls).toEqual([])
+
+  // Meanwhile the other session asked again and was refused for an hour: this one waits with it.
+  stored[MODEL_LIMITS_KEY] = { limits: [{ name: 'Fable', percent: 5, resetsAt: WEEK_RESET }], nextAt: NOW + 63 * MIN, refusals: 3 }
+  await standIn.clock.advance(5 * MIN)
+  await answer($, 't2', standIn)
+  await standIn.clock.advance(30 * MIN)
+  await answer($, 't3', standIn)
+  expect(standIn.usageCalls).toEqual([])
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await pane.find({ type: 'Text', text: /^ +5%$/ }))?.text).toBe('  5%')
+  await pane.unmount()
+
+  // Its wait up, this session's answer asks, and leaves the record for the others.
+  await standIn.clock.advance(30 * MIN)
+  await answer($, 't4', standIn)
+  expect(standIn.usageCalls.length).toBe(1)
+  const left = readSharedModelLimits(stored[MODEL_LIMITS_KEY])
+  expect(left?.limits).toEqual([{ name: 'Fable', percent: 9, resetsAt: WEEK_RESET }])
+  expect(left?.refusals).toBe(0)
+  // The next ask five minutes after this one (the answer's end, a millisecond back).
+  expect(left?.nextAt).toBe(standIn.clock.now() - 1 + 5 * MIN)
+})
+
+test('a store that can be neither read nor written leaves the session asking for itself, at its own gap', async ($, on) => {
+  const standIn = standInForEngine(on)
+  on('store.get', () => ({ deny: 'store unreadable' }))
+  on('store.set', () => ({ deny: 'store over 4 MiB' }))
+  standIn.signIn = 'bearer'
+  standIn.usageAnswer = { status: 200, body: usageBody(2) }
+  await start($)
+  showSidebar(standIn)
+
+  await answer($, 't1', standIn)
+  expect(standIn.usageCalls.length).toBe(1)
+  expect(await fableLine($)).toBe('Fable ')
+  await standIn.clock.advance(4 * MIN)
+  await answer($, 't2', standIn)
+  expect(standIn.usageCalls.length).toBe(1)
 })
 
 test("a model's weekly limit is coloured by its pace, as 7d is: running out before the reset, it is marked", () => {

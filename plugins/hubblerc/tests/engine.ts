@@ -38,7 +38,7 @@ export type StandIn = {
    * what the usage endpoint answers; and every ask of it, with the handle it carried.
    */
   signIn: 'bearer' | 'api-key' | null
-  usageAnswer: { status: number; body: unknown }
+  usageAnswer: { status: number; body: unknown; headers?: Record<string, string> }
   usageCalls: { auth: string | undefined }[]
   /** Every `git status` the plugin ran, its argv. */
   gitStatusArgs: string[][]
@@ -184,9 +184,9 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     }
     if (e.url === 'https://api.anthropic.com/api/oauth/usage') {
       standIn.usageCalls.push({ auth: e.init?.auth })
-      const { status, body } = standIn.usageAnswer
+      const { status, body, headers = {} } = standIn.usageAnswer
 
-      return { value: { status, ok: status >= 200 && status < 300, headers: {}, text: typeof body === 'string' ? body : JSON.stringify(body) } }
+      return { value: { status, ok: status >= 200 && status < 300, headers, text: typeof body === 'string' ? body : JSON.stringify(body) } }
     }
     standIn.fetches += 1
 
