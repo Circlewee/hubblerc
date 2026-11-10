@@ -60,6 +60,8 @@ let wakeStatus: (() => void) | null = null
  */
 let modelLimits: ModelLimit[] = []
 let lastModelLimitsAt = Number.NEGATIVE_INFINITY
+/** No sign-in the usage endpoint takes (an API key, a gateway), or it refused the sign-in (403): not asked again this session. */
+let isModelLimitsOff = false
 
 /**
  * At session.start (a reload included): forget the calls the previous copy was watching, read
@@ -74,6 +76,7 @@ let lastModelLimitsAt = Number.NEGATIVE_INFINITY
 export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
   lastModelLimitsAt = Number.NEGATIVE_INFINITY
+  isModelLimitsOff = false
   // The last answer still open (a reload while it ran): read once here, then kept by noteAnswering.
   isAnswering = await read($, turns)
     .then(list => list.at(-1)?.durationMs === null)
@@ -195,16 +198,19 @@ export async function refreshStatus($: EngineInterface): Promise<void> {
  * Reads the weekly limits of single models (Fable's) from the usage endpoint `/usage` reads, with
  * the session's own sign-in (`$.session.authorize()`: the token stays with the engine). Only the
  * sidebar draws them, so only while it shows; only under a subscription's sign-in; and no sooner
- * than `MODEL_LIMITS_GAP_MS` after the last ask, answered or not. Called as an answer ends (not
- * awaited there: the request takes up to a second) and once when the sidebar first shows.
+ * than `MODEL_LIMITS_GAP_MS` after the last ask, answered or not. Without such a sign-in, or once
+ * the endpoint refuses it (403), nothing is asked for the rest of the session. Called as an answer
+ * ends (not awaited there: the request takes up to a second) and once when the sidebar first shows.
  */
 export async function refreshModelLimits($: EngineInterface): Promise<void> {
+  if (isModelLimitsOff) return
   const now = await $.clock.now()
   if (now - lastModelLimitsAt < MODEL_LIMITS_GAP_MS) return
-  // No request is made for the handle; without a subscription's, not looked at again for the gap.
+  // No request is made for the handle.
   const auth = await $.session.authorize()
   if (auth === null || auth.kind !== 'bearer') {
     lastModelLimitsAt = now
+    isModelLimitsOff = true
 
     return
   }
@@ -212,6 +218,8 @@ export async function refreshModelLimits($: EngineInterface): Promise<void> {
   if (!(await isSidebarShown($))) return
   lastModelLimitsAt = now
   const response = await $.http.fetch(USAGE_URL, { auth: auth.handle })
+  // A sign-in the endpoint does not take. A 401 may be a token about to be refreshed: asked again.
+  if (response.status === 403) isModelLimitsOff = true
   const found = response.ok ? parseModelLimits(response.text) : null
   if (found === null || JSON.stringify(found) === JSON.stringify(modelLimits)) return
   modelLimits = found

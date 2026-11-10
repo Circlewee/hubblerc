@@ -186,7 +186,7 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
   const bar: BarStyle = { cells: !shape.bars ? 0 : isWide ? wide : BAR_CELLS, isWide, labelCells }
 
   const context = input.usage?.contextPercent
-  parts.push(context === undefined ? [{ text: 'ctx –', dim: true }] : usagePart('ctx', context, [], bar, input.palette))
+  parts.push(context === undefined ? [{ text: isWide ? `${'ctx '.padEnd(labelCells)}–` : 'ctx –', dim: true }] : usagePart('ctx', context, [], bar, input.palette))
 
   // Left out by the engine while it hands other windows (a subscription with no 5-hour figure now):
   // a dim dash, not a line gone, as ctx does. With no window at all (an API key) there is no line.
@@ -197,7 +197,11 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
     const step = weekStep(sevenDay.percent, sevenDay.resetsAt, input.now)
     parts.push(usagePart('7d', sevenDay.percent, sevenDayTail, isWide ? bar : { cells: 0, isWide }, input.palette, step))
   }
-  for (const line of modelLines) parts.push(usagePart(line.limit.name, line.limit.percent, line.tail, bar, input.palette))
+  // Coloured by its pace as 7d is: a week's limit, resetting with the week where it names no reset.
+  for (const line of modelLines) {
+    const step = weekStep(line.limit.percent, line.limit.resetsAt ?? sevenDay?.resetsAt, input.now)
+    parts.push(usagePart(line.limit.name, line.limit.percent, line.tail, bar, input.palette, step))
+  }
 
   const where: Segment[] = []
   if (shape.projectName || input.git === null) where.push({ text: input.project })

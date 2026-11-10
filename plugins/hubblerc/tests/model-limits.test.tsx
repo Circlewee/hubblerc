@@ -139,3 +139,41 @@ test('with the sidebar closed, or no subscription sign-in, the usage endpoint is
   expect(standIn.usageCalls).toEqual([])
   expect(await fableLine($)).toBeUndefined()
 })
+
+test('a sign-in the usage endpoint refuses (403) is not asked with again this session; what was known stays', async ($, on) => {
+  const standIn = standInForEngine(on)
+  standIn.signIn = 'bearer'
+  standIn.usageAnswer = { status: 200, body: usageBody(2) }
+  await start($)
+  showSidebar(standIn)
+  await answer($, 't1')
+  expect(standIn.usageCalls.length).toBe(1)
+
+  standIn.usageAnswer = { status: 403, body: 'no' }
+  await standIn.clock.advance(5 * MIN)
+  await answer($, 't2')
+  expect(standIn.usageCalls.length).toBe(2)
+  // Answering again later, it is still not asked.
+  standIn.usageAnswer = { status: 200, body: usageBody(9) }
+  await standIn.clock.advance(HOUR)
+  await answer($, 't3')
+  expect(standIn.usageCalls.length).toBe(2)
+  expect(await fableLine($)).toBe('Fable ')
+})
+
+test("a model's weekly limit is coloured by its pace, as 7d is: running out before the reset, it is marked", () => {
+  const input = { model: 'claude-opus-5-5', effort: 'high', isOverridden: false, project: 'p', git: null, now: NOW, barColumns: 50 }
+  const line = (resetsAt: string | undefined, weekReset: string) =>
+    statusParts({ ...input, usage: { contextPercent: 20, sevenDay: { percent: 10, resetsAt: weekReset }, modelLimits: [{ name: 'Fable', percent: 40, ...(resetsAt === undefined ? {} : { resetsAt }) }] } }, Number.POSITIVE_INFINITY)
+      .map(part => part.map(segment => segment.text).join(''))
+      .find(text => text.startsWith('Fable'))
+
+  // Two days in at 40%: 140% by the reset.
+  const early = new Date(NOW + 5 * 24 * HOUR).toISOString()
+  expect(line(early, early)?.endsWith(' 40%!')).toBe(true)
+  // With no reset of its own, the week's.
+  expect(line(undefined, early)?.endsWith(' 40%!')).toBe(true)
+  // Six days in at 40%: under half by the reset.
+  const late = new Date(NOW + 24 * HOUR).toISOString()
+  expect(line(late, late)?.endsWith(' 40%')).toBe(true)
+})
