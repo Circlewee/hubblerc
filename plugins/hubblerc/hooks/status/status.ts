@@ -1,10 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, SessionUsage, Timer, ToolCallResult } from 'claude-code'
 
-import type { AgentSeen, RunningCall, UsageSnapshot } from '../../types'
+import type { AgentSeen, ModelLimit, RunningCall, UsageSnapshot } from '../../types'
 import { parseGitStatus } from './git'
 import { bashPurpose } from '../activity/bash-purpose'
 import { addFiveHourPoint } from './forecast'
+import { parseModelLimits, USAGE_URL } from './model-limits'
 import { isSidebarShown } from '../shared/pane'
 import { isRecord } from '../shared/values'
 import { refreshTodos } from '../todo/todo'
@@ -38,6 +39,8 @@ const TITLE_ROW = '"type":"custom-title"'
 /** How much of the transcript's end a periodic read of the name looks through. */
 const TITLE_TAIL_BYTES = 262_144
 const MAX_RUNNING = 50
+/** The usage endpoint is asked at most this often, and only as an answer ends: an idle session asks nothing. */
+const MODEL_LIMITS_GAP_MS = 5 * 60_000
 
 type CallInput = { tool: string; tool_use_id?: string; agentId?: string }
 
@@ -50,6 +53,13 @@ let isAnswering = false
 let statusTimer: Timer | null = null
 let statusTimerMs = 0
 let wakeStatus: (() => void) | null = null
+/**
+ * The weekly limits of single models as the usage endpoint last gave them, and when it was last
+ * asked (the wall clock; never, at session.start). The module's: `refreshStatus` writes the
+ * snapshot whole, so each one carries these.
+ */
+let modelLimits: ModelLimit[] = []
+let lastModelLimitsAt = Number.NEGATIVE_INFINITY
 
 /**
  * At session.start (a reload included): forget the calls the previous copy was watching, read
@@ -63,6 +73,7 @@ let wakeStatus: (() => void) | null = null
  */
 export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
+  lastModelLimitsAt = Number.NEGATIVE_INFINITY
   // The last answer still open (a reload while it ran): read once here, then kept by noteAnswering.
   isAnswering = await read($, turns)
     .then(list => list.at(-1)?.durationMs === null)
@@ -88,6 +99,8 @@ export async function startStatus($: EngineInterface): Promise<void> {
       lastSlow = now
       await refreshStatus($).catch(() => undefined)
       if (await isSidebarShown($).catch(() => false)) {
+        // Once, when the sidebar first shows: after that only as an answer ends.
+        if (lastModelLimitsAt === Number.NEGATIVE_INFINITY) void refreshModelLimits($).catch(() => undefined)
         await refreshSessionName($).catch(() => undefined)
         // Another session's to-dos (the same project) show within the half minute.
         await refreshTodos($).catch(() => undefined)
@@ -176,6 +189,39 @@ export async function refreshStatus($: EngineInterface): Promise<void> {
   if (log !== null) await update($, fiveHourLog, () => log)
   const info = await readGit($, cwd)
   await update($, git, () => info)
+}
+
+/**
+ * Reads the weekly limits of single models (Fable's) from the usage endpoint `/usage` reads, with
+ * the session's own sign-in (`$.session.authorize()`: the token stays with the engine). Only the
+ * sidebar draws them, so only while it shows; only under a subscription's sign-in; and no sooner
+ * than `MODEL_LIMITS_GAP_MS` after the last ask, answered or not. Called as an answer ends (not
+ * awaited there: the request takes up to a second) and once when the sidebar first shows.
+ */
+export async function refreshModelLimits($: EngineInterface): Promise<void> {
+  const now = await $.clock.now()
+  if (now - lastModelLimitsAt < MODEL_LIMITS_GAP_MS) return
+  // No request is made for the handle; without a subscription's, not looked at again for the gap.
+  const auth = await $.session.authorize()
+  if (auth === null || auth.kind !== 'bearer') {
+    lastModelLimitsAt = now
+
+    return
+  }
+  // Closed, the gap is not spent: the first answer after it shows asks.
+  if (!(await isSidebarShown($))) return
+  lastModelLimitsAt = now
+  const response = await $.http.fetch(USAGE_URL, { auth: auth.handle })
+  const found = response.ok ? parseModelLimits(response.text) : null
+  if (found === null || JSON.stringify(found) === JSON.stringify(modelLimits)) return
+  modelLimits = found
+  await update($, usage, figures => (figures === null ? figures : withModelLimits(figures)))
+}
+
+function withModelLimits(figures: UsageSnapshot): UsageSnapshot {
+  const { modelLimits: _before, ...rest } = figures
+
+  return modelLimits.length === 0 ? rest : { ...rest, modelLimits }
 }
 
 /** Reads the subagent list again; true while one is running or pending. */
@@ -274,6 +320,7 @@ function snapshot(figures: SessionUsage): UsageSnapshot {
     ...(fiveHour === undefined ? {} : { fiveHour }),
     ...(sevenDay === undefined ? {} : { sevenDay }),
     limits: figures.rateLimits.map(limit => ({ kind: limit.kind, percent: limit.percentUsed })),
+    ...(modelLimits.length === 0 ? {} : { modelLimits }),
   }
 }
 

@@ -33,6 +33,13 @@ export type StandIn = {
   latestVersion: string
   /** How many times the plugin asked the npm registry. */
   fetches: number
+  /**
+   * The session's sign-in as `$.session.authorize()` holds it (null: none, as with an API provider);
+   * what the usage endpoint answers; and every ask of it, with the handle it carried.
+   */
+  signIn: 'bearer' | 'api-key' | null
+  usageAnswer: { status: number; body: unknown }
+  usageCalls: { auth: string | undefined }[]
   /** Every `git status` the plugin ran, its argv. */
   gitStatusArgs: string[][]
   /** What `git diff --numstat` answers (`added\tremoved\tpath` lines); a test may change it. */
@@ -108,7 +115,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), modelId: 'claude-opus-5-5', panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, gitStatusArgs: [], gitNumstat: '', sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), modelId: 'claude-opus-5-5', panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, signIn: null, usageAnswer: { status: 200, body: {} }, usageCalls: [], gitStatusArgs: [], gitNumstat: '', sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -173,10 +180,17 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
 
       return { value: { status: answer.status, ok: answer.status >= 200 && answer.status < 300, headers: {}, text: JSON.stringify(answer.body) } }
     }
+    if (e.url === 'https://api.anthropic.com/api/oauth/usage') {
+      standIn.usageCalls.push({ auth: e.init?.auth })
+      const { status, body } = standIn.usageAnswer
+
+      return { value: { status, ok: status >= 200 && status < 300, headers: {}, text: typeof body === 'string' ? body : JSON.stringify(body) } }
+    }
     standIn.fetches += 1
 
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: '@anthropic-ai/claude-code', version: standIn.latestVersion }) } }
   })
+  on('session.authorize', () => ({ value: standIn.signIn === null ? null : { handle: 'handle-1', kind: standIn.signIn } }))
   on('session.version', () => ({ value: { version: '2.1.310', base: '2.1.310' } }))
   on('fs.exists', (_, e) => ({ value: standIn.existing.includes(e.path) || standIn.files[e.path] !== undefined || Object.keys(standIn.files).some(path => path.startsWith(`${e.path}/`)) }))
   on('process.run', (_, e) => {

@@ -119,8 +119,8 @@ const WIDE_BAR_MAX = 20
 const WIDE_LABEL_CELLS = 4
 const WIDE_PERCENT_CELLS = 5
 
-/** How a usage part is drawn: how many cells its bar takes (0, none) and in what style. */
-type BarStyle = { cells: number; isWide: boolean }
+/** How a usage part is drawn: how many cells its bar takes (0, none), in what style, and (wide) the cells its label pads to. */
+type BarStyle = { cells: number; isWide: boolean; labelCells?: number }
 
 type StatusShape = { bars: boolean; sevenDay: boolean; projectName: boolean }
 
@@ -174,10 +174,16 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
   const sevenDay = input.usage?.sevenDay
   // Wide, 7d says when it resets too (`↻ 3d4h`).
   const sevenDayTail = isWide ? resetSegments(sevenDay?.resetsAt, input.now, true) : []
-  // One width for every bar, from what the longest line leaves it.
-  const tail = Math.max(segmentsWidth(fiveHourTail), segmentsWidth(sevenDayTail))
-  const wide = Math.min(WIDE_BAR_MAX, Math.max(WIDE_BAR_MIN, (input.barColumns ?? 0) - WIDE_LABEL_CELLS - WIDE_PERCENT_CELLS - tail))
-  const bar: BarStyle = { cells: !shape.bars ? 0 : isWide ? wide : BAR_CELLS, isWide }
+  // Wide, a line for each weekly limit of a single model (Fable's) beneath 7d: one still running,
+  // its reset said only when it is not 7d's.
+  const modelLines = (isWide ? (input.usage?.modelLimits ?? []) : [])
+    .filter(limit => limit.resetsAt === undefined || !(Date.parse(limit.resetsAt) <= input.now))
+    .map(limit => ({ limit, tail: resetsWith(limit.resetsAt, sevenDay?.resetsAt) ? [] : resetSegments(limit.resetsAt, input.now, true) }))
+  // One width for every label and every bar: the longest name, and what the longest line leaves.
+  const labelCells = Math.max(WIDE_LABEL_CELLS, ...modelLines.map(line => cellWidth(line.limit.name) + 1))
+  const tail = Math.max(segmentsWidth(fiveHourTail), segmentsWidth(sevenDayTail), ...modelLines.map(line => segmentsWidth(line.tail)))
+  const wide = Math.min(WIDE_BAR_MAX, Math.max(WIDE_BAR_MIN, (input.barColumns ?? 0) - labelCells - WIDE_PERCENT_CELLS - tail))
+  const bar: BarStyle = { cells: !shape.bars ? 0 : isWide ? wide : BAR_CELLS, isWide, labelCells }
 
   const context = input.usage?.contextPercent
   parts.push(context === undefined ? [{ text: 'ctx –', dim: true }] : usagePart('ctx', context, [], bar, input.palette))
@@ -185,12 +191,13 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
   // Left out by the engine while it hands other windows (a subscription with no 5-hour figure now):
   // a dim dash, not a line gone, as ctx does. With no window at all (an API key) there is no line.
   if (fiveHour !== undefined) parts.push(usagePart('5h', fiveHour.percent, fiveHourTail, bar, input.palette))
-  else if ((input.usage?.limits?.length ?? 0) > 0) parts.push([{ text: isWide ? '5h  –' : '5h –', dim: true }])
+  else if ((input.usage?.limits?.length ?? 0) > 0) parts.push([{ text: isWide ? `${'5h '.padEnd(labelCells)}–` : '5h –', dim: true }])
 
   if (shape.sevenDay && sevenDay !== undefined) {
     const step = weekStep(sevenDay.percent, sevenDay.resetsAt, input.now)
     parts.push(usagePart('7d', sevenDay.percent, sevenDayTail, isWide ? bar : { cells: 0, isWide }, input.palette, step))
   }
+  for (const line of modelLines) parts.push(usagePart(line.limit.name, line.limit.percent, line.tail, bar, input.palette))
 
   const where: Segment[] = []
   if (shape.projectName || input.git === null) where.push({ text: input.project })
@@ -210,7 +217,7 @@ function usagePart(name: string, percent: number, tail: readonly Segment[], bar:
   const isHigh = bar.isWide || percent >= 60
   const isBold = bar.isWide ? step >= 2 : percent >= 60
   // Wide, the labels pad to one width so the bars start in one column.
-  const part: Segment[] = [{ text: bar.isWide ? `${name} `.padEnd(WIDE_LABEL_CELLS) : `${name} `, dim: true }]
+  const part: Segment[] = [{ text: bar.isWide ? `${name} `.padEnd(bar.labelCells ?? WIDE_LABEL_CELLS) : `${name} `, dim: true }]
   if (bar.cells > 0) {
     // A thick fill in the level's color over a faint thin line; wide, the empty cells dashed.
     const filled = barFill(percent, bar.cells)
@@ -232,6 +239,11 @@ function resetSegments(resetsAt: string | undefined, now: number, isWide = false
   const reset = countdown(resetsAt, now, isWide)
 
   return reset === '' ? [] : [{ text: isWide ? ` ↻ ${reset}` : ` ↻${reset}`, dim: true }]
+}
+
+/** Two resets under a minute apart: one window's, said once (a model's weekly limit resets with 7d). */
+function resetsWith(resetsAt: string | undefined, other: string | undefined): boolean {
+  return resetsAt !== undefined && other !== undefined && Math.abs(Date.parse(resetsAt) - Date.parse(other)) < 60_000
 }
 
 function segmentsWidth(segments: readonly Segment[]): number {

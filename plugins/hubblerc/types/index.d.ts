@@ -109,6 +109,9 @@ export type AgentSeen = {
 
 export type RateWindow = { percent: number; resetsAt?: string }
 
+/** A weekly limit that counts one model alone (`/usage`'s "Current week (Fable)"), by the name the usage endpoint gives the model. */
+export type ModelLimit = { name: string; percent: number; resetsAt?: string }
+
 /** A reading of the 5-hour window, kept when it moved: what the burn-out forecast paces from. */
 export type FiveHourPoint = { at: number; percent: number; resetsAt?: string }
 
@@ -119,6 +122,8 @@ export type UsageSnapshot = {
   sevenDay?: RateWindow
   /** Every rate-limit window the engine handed over, as it named them: what `/effort-log` lists to tell a window the engine left out. */
   limits?: { kind: string; percent: number }[]
+  /** The weekly limits of single models, read from the usage endpoint (`status/model-limits.ts`); absent when none is known. */
+  modelLimits?: ModelLimit[]
 }
 
 /** The machine the session runs on and the engine's version, read once as the session starts; a field absent when it could not be read. */

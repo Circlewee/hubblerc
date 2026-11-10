@@ -20,7 +20,7 @@ import { restoreTurns } from './activity/restore'
 import { checkSetup } from './system/setup'
 import { resendPicture } from './sidebar/picture'
 import { layoutOption, showSidebar, startSidebar } from './sidebar/sidebar'
-import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
+import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshModelLimits, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
 import { findTurnForLine, summarize } from './activity/summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
 import { gateLaunches, unverifiedLine } from './relay/gate'
@@ -106,6 +106,8 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined) {
       void noteTurnDone($, e.turnId).catch(() => undefined)
       await refreshStatus($).catch(() => undefined)
+      // Not awaited: a request to the usage endpoint, at most one every five minutes.
+      void refreshModelLimits($).catch(() => undefined)
       await noteFiveHourUsed($, e.turnId).catch(() => undefined)
       await noteShellChanges($, e.turnId).catch(() => undefined)
       // relay's gate 2: a finished run's work with no verdict at HEAD gets a line beneath the answer.
