@@ -4,7 +4,8 @@ import type { On } from 'claude-code'
 
 import { checkTask, decisionRows, globsOverlap, isPending, isTestFile, parseReport, pathMatches, reportMismatches, withoutSections } from '../hooks/relay/relay-format'
 import type { RelayState } from '../hooks/relay/relay-format'
-import { reserveDispatch } from '../hooks/relay/relay'
+import { registerRelayTool, reserveDispatch } from '../hooks/relay/relay'
+import { callLine, resultView } from '../hooks/relay/relay-view'
 import { standInForEngine, start } from './engine'
 
 const ROOT = '/repo/work'
@@ -1068,4 +1069,179 @@ test('V3-01 a task blocked after its launch is cancelled only with confirmed_sto
   sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', criteria: ['- C1: fail · tries 1 · red', '- C2: unverified · tries 0 · -'] })
   await relay($, { action: 'report', run: RUN, task: 'A' })
   expect((await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'gave up' })).result).toContain('A-r1: blocked → cancelled · gave up')
+})
+
+// ── The conversation's lines: relay's calls and results, one line each ──────────────────────────────
+
+/** A call run through the real tool, then said as the conversation says it. */
+async function said($: Engine, input: Record<string, unknown>): Promise<{ call: string; result: string; problem: boolean }> {
+  const answer = await relay($, input)
+  const body = answer.result ?? answer.deny ?? ''
+  const view = resultView(body, answer.deny !== undefined)
+
+  return { call: callLine(input, body), result: view?.line ?? '(unread)', problem: view?.isProblem ?? false }
+}
+
+test('all twelve actions are said as the table says, read from the real tool’s words', async ($, on) => {
+  const sim = standIn(on)
+  const lines: string[][] = []
+  const note = async (input: Record<string, unknown>) => {
+    const out = await said($, input)
+    lines.push([out.call, out.result])
+
+    return out
+  }
+
+  await note({ action: 'list' })
+  await note({ action: 'start', name: 'demo', goal: 'Ship relay, the lead-and-workers tool that is long enough to be cut', done_when: ['all checks pass'] })
+  await note({ action: 'list', run: RUN })
+  await note({ action: 'pending', run: RUN })
+  const { action: _, run: __, ...fields } = TASK_A
+  const preview = await relay($, { action: 'spec_text', ...fields })
+  await note({ action: 'spec_text', ...fields })
+  await note(TASK_A)
+  await note({ action: 'dispatched', run: RUN, task: 'A', runner: 'subagent worker-a-with-a-long-name-here' })
+  await note({ ...TASK_A, id: 'B', edit_scope: ['plugins/other/**'], reads: [], title: 'Docs' })
+  await note({ action: 'cancel', run: RUN, task: 'B', reason: 'not needed after all, the docs are fine as they stand today' })
+  sim.commits[SHA_A] = { task: 'A-r1', subject: 'Add the relay tool', files: ['hooks/relay/relay.ts'] }
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report()
+  await note({ action: 'report', run: RUN, task: 'A' })
+  sim.commands['make test'] = { exitCode: 0, stdout: 'ok' }
+  await note({ action: 'check', run: RUN, task: 'A' })
+  await note({ ...TASK_A, id: 'C', title: 'Next' })
+  await note({ action: 'cancel', run: RUN, task: 'C', reason: 'later' })
+  await note({ action: 'package', run: RUN })
+  sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({
+    commit: HEAD_1,
+    result: 'pass',
+    model: 'gpt-5.5-codex',
+    criteria: PASSED,
+    findings: [{ severity: 'medium', file: 'a.ts', line: 3, issue: 'x', evidence: 'y' }],
+    reviewed_files: ['hooks/relay/relay.ts'],
+  })
+  await note({ action: 'verdict', run: RUN, id: 'V1' })
+  sim.files[`${DIR}/progress.md`] = (sim.files[`${DIR}/progress.md`] ?? '').replace(
+    '|---|---|---|---|---|---|\n',
+    '|---|---|---|---|---|---|\n| D2 | deploy | d | e | user | asked |\n| D3 | rename | f | g | lead | on hold |\n',
+  )
+  await note({ action: 'pending', run: RUN })
+  await note({ action: 'finish', run: RUN })
+
+  const previewLines = preview.result?.trimEnd().split('\n').length ?? 0
+  expect(lines).toEqual([
+    ['relay 묶음 목록', '진행 중 0'],
+    ['relay 시작 · demo · Ship relay, the lead-and-worke…', '폴더 만듦'],
+    ['relay 묶음 목록', '진행 중 1'],
+    ['relay 기다리는 결정', '없음'],
+    ['relay 지시서 미리보기 A', `미리보기 ${previewLines}줄`],
+    ['relay 지시서 A-r1 · Add the tool · opus-5-5/high · 기준 2', '씀'],
+    ['relay 띄움 기록 A → subagent worker-a-with-a…', 'running'],
+    ['relay 지시서 B-r1 · Docs · opus-5-5/high · 기준 2', '씀'],
+    ['relay 취소 B · not needed after all, the docs…', 'ready → cancelled'],
+    ['relay 보고 확인 A', 'DONE · 범위 밖 0 · 테스트 변경 0 · 경고 0'],
+    ['relay 완료 검사 A', 'pass 1 · fail 0 · 미확인 1 · 0 ms · 트리 깨끗함'],
+    ['relay 지시서 C-r1 · Next · opus-5-5/high · 기준 2', expect.stringMatching(/^씀 · 경고 1: 같은 범위를 고친 A-r1가 끝났습니다/)],
+    ['relay 취소 C · later', 'ready → cancelled'],
+    ['relay 검증 꾸러미 · 전체', 'V1 · 검토 파일 1'],
+    ['relay 판정 V1', 'pass · 기준 2/2 · 지적 high 0, medium 1 · 커밋 aaaaaaa'],
+    ['relay 기다리는 결정', '2개: D2, D3'],
+    ['relay 묶음 끝내기', '끝냄 · 판정 V1 · 보류 결정 2'],
+  ])
+})
+
+test('a package names its tasks; a report with scope or test trouble and a dirty tree say so; no size is shown', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
+  sim.commits[SHA_A] = { task: 'A-r1', subject: 'Add', files: ['hooks/relay/relay.ts', 'elsewhere/x.ts', 'tests/relay.test.tsx'] }
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report()
+  const reported = await said($, { action: 'report', run: RUN, task: 'A' })
+  expect(reported.result).toMatch(/^DONE · 범위 밖 1 · 테스트 변경 1 · 경고 \d+$/)
+
+  sim.status = ' M hooks/relay/relay.ts\n?? new.ts'
+  sim.commands['make test'] = { exitCode: 1, stdout: 'red' }
+  const checked = await said($, { action: 'check', run: RUN, task: 'A' })
+  expect(checked.result).toBe('pass 0 · fail 0 · 미확인 2 · 0 ms · 트리 변경 2개')
+
+  sim.status = ''
+  const packed = await said($, { action: 'package', run: RUN, tasks: ['A', 'A-r1'] })
+  expect(packed.call).toBe('relay 검증 꾸러미 · A, A-r1')
+  expect(packed.result).toMatch(/^V1 · 검토 파일 \d+$/)
+})
+
+test('a refusal says its first reason, a failure of the tool says so, and a text no reading fits is its first line cut', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  const refused = await said($, { action: 'finish', run: RUN })
+  expect(refused.problem).toBe(true)
+  expect(refused.result).toMatch(/^거절: 판정이 없습니다/)
+  const bad = await said($, { action: 'cancel', run: RUN, task: 'Z', reason: 'x' })
+  expect(bad.result).toBe('거절: 작업이 없습니다: Z')
+  const noRun = await said($, { action: 'task', run: 'nope' })
+  expect(noRun.result).toMatch(/^거절: run은 start가 돌려준/)
+
+  expect(resultView('relay 도구가 실패했습니다: Error: boom', true)).toMatchObject({ line: 'relay 실패: Error: boom', isProblem: true })
+  const odd = resultView(`something new\n${'x'.repeat(200)}`, false)
+  expect(odd).toMatchObject({ line: 'something new', isProblem: false })
+  expect(resultView(`${'y'.repeat(200)}\nmore`, false)?.line).toBe(`${'y'.repeat(120)}…`)
+  expect(resultView({ content: [{ type: 'text', text: '진행 중인 묶음 2개:\n- a' }] }, false)?.line).toBe('진행 중 2')
+  expect(resultView(undefined, false)).toBeUndefined()
+})
+
+test('a gate warning in a result is kept whole as a notice', () => {
+  const view = resultView('A-r1: running · subagent x\n⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침', false)
+  expect(view).toEqual({ line: 'running', isProblem: false, notices: ['⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침'] })
+})
+
+// ── Registered in the list only while a run is not finished ──────────────────────────────────────
+
+/** The engine over the stand-in, with a listing of the files in memory and a tool.register that notes its specs. */
+function engineRecording(sim: Sim, registered: Record<string, unknown>[]) {
+  const base = engineOver(sim) as unknown as { fs: Record<string, unknown> }
+  const names = (path: string) => {
+    const found = new Map<string, 'file' | 'dir'>()
+    for (const file of Object.keys(sim.files)) {
+      if (!file.startsWith(`${path}/`)) continue
+      const [name = '', ...rest] = file.slice(path.length + 1).split('/')
+      found.set(name, rest.length > 0 ? 'dir' : 'file')
+    }
+
+    return [...found].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: 0, isLink: false }))
+  }
+
+  return {
+    ...base,
+    fs: { ...base.fs, list: async (path: string) => names(path) },
+    tool: {
+      register: async (spec: Record<string, unknown>) => {
+        registered.push(spec)
+      },
+    },
+  } as never
+}
+
+test('the tool is listed outright while a run is not finished, and stays behind the search otherwise', async ($, on) => {
+  const sim = standIn(on)
+  const registered: Record<string, unknown>[] = []
+  const engine = engineRecording(sim, registered)
+
+  await registerRelayTool(engine)
+  expect(registered).toHaveLength(1)
+  expect(registered[0]?.name).toBe('relay')
+  expect('isDeferred' in (registered[0] ?? {})).toBe(false)
+
+  await begin($, sim)
+  await registerRelayTool(engine)
+  expect(registered[1]?.isDeferred).toBe(false)
+
+  state(sim).status = 'finished'
+  sim.files[`${DIR}/state.json`] = JSON.stringify({ ...state(sim), status: 'finished' })
+  await registerRelayTool(engine)
+  expect('isDeferred' in (registered[2] ?? {})).toBe(false)
+
+  // Outside a git folder, or with the read failing, it is registered as before.
+  const outside = { ...(engine as unknown as Record<string, unknown>), process: { run: async () => ({ exitCode: 128, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }) } } as never
+  await registerRelayTool(outside)
+  expect('isDeferred' in (registered[3] ?? {})).toBe(false)
 })

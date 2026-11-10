@@ -25,6 +25,7 @@ import { findTurnForLine, summarize } from './activity/summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
 import { gateLaunches, unverifiedLine } from './relay/gate'
 import { registerRelayTool, serveRelayTool } from './relay/relay'
+import { showRelayLines } from './relay/relay-view'
 import { showToolLines } from './activity/tool-lines'
 
 // The validator reads state sources per file, so each file that reads `turns` declares it.
@@ -179,6 +180,7 @@ export const register: Register = (on, options) => {
   controlEffort(on, autoByDefault)
   showBashPurpose(on)
   showToolLines(on)
+  showRelayLines(on)
   showBand(on, layout, autoByDefault)
   showSidebar(on, layout, autoByDefault)
   showAnswer(on)

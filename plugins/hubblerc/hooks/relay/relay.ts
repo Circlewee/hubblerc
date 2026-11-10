@@ -119,9 +119,20 @@ const INPUT_SCHEMA = {
   required: ['action'],
 } as const
 
-/** At session.start: the model's tool. */
+/** How long session start waits to learn whether this folder holds a run still active. */
+const START_LOOK_MS = 3000
+
+/**
+ * At session.start: the model's tool. Where the repository holds a run not yet finished, the tool
+ * is listed with the rest (`isDeferred: false`), so the lead need not search for it; otherwise it
+ * stays behind ToolSearch as before. Decided here once: the tool list changing mid-session voids
+ * the prompt cache. Not a git folder, or a read that fails, is the second case.
+ */
 export async function registerRelayTool($: EngineInterface): Promise<void> {
-  await $.tool.register({ name: TOOL_NAME, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> }).catch(() => undefined)
+  const root = await repoRoot($, START_LOOK_MS).catch(() => undefined)
+  const active = root === undefined ? [] : await findActiveRuns($, root).catch(() => [])
+  const spec = { name: TOOL_NAME, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> }
+  await $.tool.register(active.length === 0 ? spec : { ...spec, isDeferred: false }).catch(() => undefined)
 }
 
 export function serveRelayTool(on: On): void {
@@ -170,8 +181,8 @@ async function git($: EngineInterface, root: string, args: readonly string[]): P
 }
 
 /** The working repository's top folder, from the session's working directory; undefined outside git. */
-export async function repoRoot($: EngineInterface): Promise<string | undefined> {
-  const ran = await $.process.run(['git', 'rev-parse', '--show-toplevel'], { timeoutMs: GIT_MS }).catch(() => undefined)
+export async function repoRoot($: EngineInterface, timeoutMs = GIT_MS): Promise<string | undefined> {
+  const ran = await $.process.run(['git', 'rev-parse', '--show-toplevel'], { timeoutMs }).catch(() => undefined)
   const root = ran?.exitCode === 0 ? ran.stdout.trim() : ''
 
   return root === '' ? undefined : root
