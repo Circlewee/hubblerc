@@ -1,4 +1,4 @@
-import type { EngineInterface, On } from 'claude-code'
+import type { AgentSpawnInput, EngineInterface, On } from 'claude-code'
 
 import { findCommands } from '../commit/commit-command'
 import type { CommandWord } from '../commit/commit-command'
@@ -14,8 +14,10 @@ import type { RelayTask } from './relay-format'
  * since it was written, on the model it names, and clear of the tasks running. The check and the
  * claim on the task are one step (reserveDispatch, inside the run's lock), so two launches at once
  * cannot both pass; the claim becomes `running` when the launch went out and is let go when it did
- * not. Gate 2's second half warns at an answer's end when the run holds finished work no other model
- * has verified at the current HEAD.
+ * not. A SendMessage to a finished subagent resumes it inside the call (an `agent.spawn` carrying
+ * `resume`): that resume is the send's own and is not checked a second time. Gate 2's second half
+ * warns at an answer's end when the run holds finished work no other model has verified at the
+ * current HEAD.
  *
  * Cost: every Bash, Agent and SendMessage call pays a text test and nothing else. Only a call that
  * names `worker-start` or a run's brief reads the files, and the repository's top folder is asked of
@@ -147,6 +149,48 @@ const isFailed = (ran: unknown): boolean => {
   return call === null || call.deny !== undefined || call.isError === true
 }
 
+const MAX_WHY = 300
+
+/** A text on one line, cut at `MAX_WHY` characters. */
+const oneLine = (text: string): string => {
+  const line = text.replace(/\s+/g, ' ').trim()
+
+  return line.length > MAX_WHY ? `${line.slice(0, MAX_WHY - 1)}…` : line
+}
+
+/** A tool record as an object: the object itself, or a JSON object's text (what the model reads). */
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
+  if (typeof value !== 'string' || !value.trimStart().startsWith('{')) return undefined
+  try {
+    const parsed: unknown = JSON.parse(value)
+
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Why a launch or a send did not go, as what answered it says; undefined when it went. A refusal
+ * (`deny`, from a hook beneath or the engine), an error core reported (`isError`), or a record the
+ * tool answered without error that says it did not go: SendMessage answers `{ success: false,
+ * message }` (seen 2026-11-11 when a resume was declined; its record is `unknown` in the engine
+ * types), and `{ isDelivered: false, reason }` is how `session.send` says so, should it come through.
+ */
+function failureOf(ran: unknown): string | undefined {
+  if (ran === null || typeof ran !== 'object') return '결과가 없습니다'
+  const call = ran as { deny?: unknown; isError?: unknown; text?: unknown; result?: unknown }
+  if (typeof call.deny === 'string') return oneLine(call.deny)
+  const text = typeof call.text === 'string' ? call.text : undefined
+  if (call.isError === true) return oneLine(text ?? (typeof call.result === 'string' ? call.result : '도구가 오류로 끝났습니다'))
+  const record = recordOf(call.result) ?? recordOf(text)
+  if (record === undefined || (record.success !== false && record.isDelivered !== false)) return undefined
+  const why = [record.message, record.reason, record.error].find(value => typeof value === 'string' && value !== '')
+
+  return oneLine(typeof why === 'string' ? why : (text ?? 'success: false'))
+}
+
 // ── Finding the brief ──────────────────────────────────────────────
 
 type Named = { run: ActiveRun; task: RelayTask }
@@ -194,10 +238,25 @@ async function briefProblems($: EngineInterface, task: RelayTask): Promise<strin
 
 // ── The claim on a task ──────────────────────────────────────────────
 
-/** A task to claim before the launch, and how the launch is told in the state afterwards. */
-export type Hold = { root: string; run: string; task: string; runnerOf: (receipt: string) => string }
+/**
+ * A task to claim before the launch, and how the launch is told in the state afterwards: `brief` is
+ * the brief's path as the state holds it, `act` whether a worker is started or a brief sent to one.
+ */
+export type Hold = { root: string; run: string; task: string; brief: string; act: 'launch' | 'send'; runnerOf: (receipt: string) => string }
 
 export type Plan = { deny: string } | { pass: true; hold?: Hold }
+
+/** How a launch went, as its receipt reads it: the text the runner is told by, or why it did not go (no note without one). */
+type Receipt = { isOk: true; text: string } | { isOk: false; why?: string }
+
+/** What the lead reads when a launch or a send failed and its claim was let go (or could not be). */
+function failedNote(hold: Hold, why: string, isLetGo: boolean): string {
+  const act = hold.act === 'send' ? '보내기' : '띄우기'
+  if (!isLetGo) return `⚠ relay: ${hold.task} ${act}가 실패했는데 예약을 풀지 못했습니다(${why}). relay list로 상태를 보고, launching으로 남았으면 cancel로 정리하세요.`
+  const then = hold.act === 'send' ? '원인을 고쳐 다시 보내거나 새 서브에이전트로 띄우세요' : '원인을 고쳐 다시 띄우세요'
+
+  return `⚠ relay: ${hold.task} ${act}가 실패해 ready로 되돌렸습니다(${why}). running으로 기록하지 않았으니 dispatched는 부르지 말고, ${then}.`
+}
 
 /** What the lead should read after a launch: the claim could not become `running`, or became it with warnings. */
 function noteOf(key: string, committed: { result: string } | { deny: string } | Error): string | undefined {
@@ -213,9 +272,10 @@ function noteOf(key: string, committed: { result: string } | { deny: string } | 
  * Claims the task (checked and set in one step), runs the launch, and then makes the claim a
  * running task or lets it go: a refusal, a failure or an exception leaves the task ready. The launch
  * is over by then, so what the record said about it (blocked because the brief changed while it went
- * out, warnings) comes back as a note for the lead to read, never as a refusal.
+ * out, warnings) comes back as a note for the lead to read, never as a refusal; so does a failure
+ * whose receipt says why (the task is ready again, not running).
  */
-async function claimed<R>($: EngineInterface, hold: Hold, launch: () => Promise<R>, receipt: (ran: R) => { isOk: boolean; text: string }): Promise<{ refused: string } | { ran: R; note: string | undefined }> {
+async function claimed<R>($: EngineInterface, hold: Hold, launch: () => Promise<R>, receipt: (ran: R) => Receipt): Promise<{ refused: string } | { ran: R; note: string | undefined }> {
   const held = await reserveDispatch($, hold.root, hold.run, hold.task)
   if ('deny' in held) return { refused: refused(hold.task, [held.deny]).deny }
   let ran: R
@@ -225,23 +285,71 @@ async function claimed<R>($: EngineInterface, hold: Hold, launch: () => Promise<
     await held.release().catch(() => undefined)
     throw error
   }
-  const { isOk, text } = receipt(ran)
-  if (!isOk) {
-    await held.release().catch(() => undefined)
+  const got = receipt(ran)
+  if (!got.isOk) {
+    const isLetGo = await held.release().then(
+      () => true,
+      () => false,
+    )
 
-    return { ran, note: undefined }
+    return { ran, note: got.why === undefined ? undefined : failedNote(hold, got.why, isLetGo) }
   }
-  const committed = await held.commit(hold.runnerOf(text)).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))))
+  const committed = await held.commit(hold.runnerOf(got.text)).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))))
 
   return { ran, note: noteOf(hold.task, committed) }
 }
 
-/** A tool result with the note added to what the model reads after it (`context`). */
+/**
+ * A tool result with the note added to what the model reads after it (`context`), an errored one's
+ * included; a refusal carries no context, so the note goes on its text.
+ */
 function withNote<R>(ran: R, note: string | undefined): R {
-  if (note === undefined || isFailed(ran)) return ran
-  const call = ran as unknown as { context?: readonly string[] }
+  if (note === undefined || ran === null || typeof ran !== 'object') return ran
+  const call = ran as unknown as { deny?: unknown; context?: readonly string[] }
+  if (typeof call.deny === 'string') return { ...ran, deny: `${call.deny}\n${note}` }
 
   return { ...ran, context: [...(call.context ?? []), note] }
+}
+
+/**
+ * The SendMessage calls out now that carry a claimed brief. A message to a finished subagent resumes
+ * it inside the call: the engine raises `agent.spawn` with `resume` and the message as the prompt,
+ * and answers the call only after that spawn is decided (a resume declined there came back as the
+ * call's `{ success: false }`, 2026-11-11). That resume is the send's own: the send was checked and
+ * holds the claim, so the spawn passes unchecked, and how it went is kept here for the send's receipt.
+ */
+type Sending = { to: string; brief: string; resumed?: { deny?: string } }
+const sending = new Set<Sending>()
+
+/**
+ * The send out now that a resume belongs to, one resume a send: by the agent it addresses (the
+ * resumed id, or the name the spawn carries), else by the claimed brief its prompt names.
+ */
+async function sendOf($: EngineInterface, e: AgentSpawnInput): Promise<Sending | undefined> {
+  const resume = e.resume
+  if (resume === undefined || sending.size === 0) return undefined
+  const open = [...sending].filter(going => going.resumed === undefined)
+  const addressed = open.find(going => going.to === resume.agentId || (e.name !== undefined && going.to === e.name))
+  if (addressed !== undefined) return addressed
+  if (!e.prompt.includes('.relay/runs/')) return undefined
+  const cwd = await $.session.cwd().catch(() => undefined)
+  const named = new Set(runPathsIn(e.prompt).map(path => resolvePath(path, cwd)))
+
+  return open.find(going => named.has(going.brief))
+}
+
+/** Starts the resume a send caused, keeping whether it was refused (or threw) for the send's receipt. */
+async function resumeOf<R extends { deny?: string }>(going: Sending, start: () => Promise<R>): Promise<R> {
+  going.resumed = {}
+  try {
+    const started = await start()
+    if (typeof started.deny === 'string') going.resumed = { deny: started.deny }
+
+    return started
+  } catch (error) {
+    going.resumed = { deny: error instanceof Error ? error.message : String(error) }
+    throw error
+  }
 }
 
 /** Notes for subagents started, by the Agent call that started them: the spawn cannot carry one, its tool result can. */
@@ -299,7 +407,7 @@ export async function planOrca($: EngineInterface, command: string): Promise<Pla
     if (problems.length > 0) return refused(taskKey(picked.task), problems)
     const to = optionOf(call, '--to')
 
-    return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), runnerOf: receipt => orcaRunner(dispatchIdIn(receipt), to) } }
+    return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), brief: picked.task.specPath, act: 'send', runnerOf: receipt => orcaRunner(dispatchIdIn(receipt), to) } }
   }
 
   const file = optionOf(call, '--spec-file')
@@ -319,7 +427,7 @@ export async function planOrca($: EngineInterface, command: string): Promise<Pla
   else if (effort.trim() !== task.effort.trim()) problems.push(`--effort ${effort}가 지시서의 effort ${task.effort}와 다릅니다.`)
   if (problems.length > 0) return refused(taskKey(task), problems)
 
-  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), runnerOf: receipt => orcaRunner(dispatchIdIn(receipt)) } }
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), brief: task.specPath, act: 'launch', runnerOf: receipt => orcaRunner(dispatchIdIn(receipt)) } }
 }
 
 // ── Subagents ──────────────────────────────────────────────
@@ -339,10 +447,14 @@ export async function planSpawn($: EngineInterface, prompt: string, model: strin
   else if (!sameModel(model, task.model)) problems.push(`model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
   if (problems.length > 0) return refused(taskKey(task), problems)
 
-  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), runnerOf: id => `subagent ${id === '' ? '(agent id 미확인)' : id}` } }
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), brief: task.specPath, act: 'launch', runnerOf: id => `subagent ${id === '' ? '(agent id 미확인)' : id}` } }
 }
 
-/** Gate 1 for a message to a subagent: one carrying a brief of an active run is a new revision going out. */
+/**
+ * Gate 1 for a message to a subagent: one carrying a brief of an active run is a new revision going
+ * out. The model is not checked: the subagent keeps the one it runs on (a resume's content keys are
+ * fixed, engine types).
+ */
 export async function planMessage($: EngineInterface, to: string, message: string): Promise<Plan> {
   if (!mayNameBrief([message])) return { pass: true }
   const root = await rootOf($)
@@ -354,7 +466,7 @@ export async function planMessage($: EngineInterface, to: string, message: strin
   const problems = await briefProblems($, picked.task)
   if (problems.length > 0) return refused(taskKey(picked.task), problems)
 
-  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), runnerOf: () => `subagent ${to}` } }
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), brief: picked.task.specPath, act: 'send', runnerOf: () => `subagent ${to}` } }
 }
 
 // ── The answer's end ──────────────────────────────────────────────
@@ -401,7 +513,8 @@ export function gateLaunches(on: On): void {
     const plan = await planOrca($, e.command)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
-    const out = await claimed($, plan.hold, () => next(e), ran => ({ isOk: !isFailed(ran), text: printed(ran) }))
+    // A failed orca command shows its own error: the task is ready again, with no note.
+    const out = await claimed($, plan.hold, () => next(e), (ran): Receipt => (isFailed(ran) ? { isOk: false } : { isOk: true, text: printed(ran) }))
 
     return 'refused' in out ? { deny: out.refused } : withNote(out.ran, out.note)
   }).catch(($, e, next) => next(e))
@@ -409,23 +522,43 @@ export function gateLaunches(on: On): void {
   on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
     const message = typeof e.message === 'string' ? e.message : ''
     if (!message.includes('.relay/runs/')) return next(e)
-    const plan = await planMessage($, String(e.to), message)
+    const to = String(e.to)
+    const plan = await planMessage($, to, message)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
-    const out = await claimed($, plan.hold, () => next(e), ran => ({ isOk: !isFailed(ran), text: '' }))
+    const going: Sending = { to, brief: resolvePath(plan.hold.brief, undefined) }
+    const send = async () => {
+      sending.add(going)
+      try {
+        return await next(e)
+      } finally {
+        sending.delete(going)
+      }
+    }
+    // A send that answered `success: false`, or whose resume was refused, did not go: the task is ready again.
+    const out = await claimed($, plan.hold, send, (sent): Receipt => {
+      const refusal = going.resumed?.deny
+      const why = failureOf(sent) ?? (refusal === undefined ? undefined : oneLine(`재개가 거절됐습니다: ${refusal}`))
+
+      return why === undefined ? { isOk: true, text: '' } : { isOk: false, why }
+    })
 
     return 'refused' in out ? { deny: out.refused } : withNote(out.ran, out.note)
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
+    // The resume a SendMessage of a claimed brief caused: that send was checked and holds the claim.
+    const going = await sendOf($, e)
+    if (going !== undefined) return resumeOf(going, () => next(e))
     if (!e.prompt.includes('.relay/runs/')) return next(e)
     const plan = await planSpawn($, e.prompt, e.model)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
-    const out = await claimed($, plan.hold, () => next(e), started => {
-      const id = 'agentId' in started && typeof started.agentId === 'string' ? started.agentId : ''
+    const out = await claimed($, plan.hold, () => next(e), (started): Receipt => {
+      const why = failureOf(started)
+      if (why !== undefined) return { isOk: false, why }
 
-      return { isOk: !isFailed(started), text: id }
+      return { isOk: true, text: typeof started.agentId === 'string' ? started.agentId : '' }
     })
     if ('refused' in out) return { deny: out.refused }
     if (out.note !== undefined) {

@@ -3,6 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { dispatchIdIn, mayLaunch, readOrcaCalls, resolvePath, runPathsIn, sameModel } from '../hooks/relay/gate'
+import { taskKey } from '../hooks/relay/relay-format'
 import type { RelayState } from '../hooks/relay/relay-format'
 
 const ROOT = '/repo/work'
@@ -38,11 +39,27 @@ type Sim = {
   headAsks: number
   /** Git asked for the repository's top folder with no folder named: how the gate asks, where the plugin's other hooks name theirs. */
   ownGit: string[][]
+  /**
+   * The finished subagents a SendMessage resumes, by the address it is sent to: the engine raises
+   * `agent.spawn` with `resume` and the message as the prompt, through every hook, and answers the
+   * call `{ success: false, message }` when that resume was refused (as seen 2026-11-11).
+   */
+  finished: Record<string, string>
+  /** The test's engine, which raises the resume through the plugin (a stand-in hook's own `$` may not spawn: host rule). */
+  engine: Engine | undefined
+  /** The resumes that reached the engine (none refused above it), and a refusal beneath for them (another plugin declining). */
+  resumed: { prompt: string; agentId: string }[]
+  resumeDeny: string | undefined
+  /** What a SendMessage answers instead of its usual record (a failure's shape), and a subagent start refused beneath. */
+  sendAnswer: Record<string, unknown> | undefined
+  spawnDeny: string | undefined
+  /** Every state.json the tool wrote, in order: how a task's statuses went. */
+  stateWrites: string[]
 }
 
 /** Stands for the engine beneath the plugin: files in memory, a repository, a Bash tool that prints a receipt, a subagent start. */
 function standIn(on: On): Sim {
-  const sim: Sim = { files: {}, head: HEAD_1, commands: [], spawned: [], receipt: RECEIPT, isLaunchFailed: false, hold: undefined, isLaunchThrowing: false, whileLaunching: undefined, relayReads: [], relayExists: [], relayLists: [], toplevelAsks: 0, headAsks: 0, ownGit: [] }
+  const sim: Sim = { files: {}, head: HEAD_1, commands: [], spawned: [], receipt: RECEIPT, isLaunchFailed: false, hold: undefined, isLaunchThrowing: false, whileLaunching: undefined, relayReads: [], relayExists: [], relayLists: [], toplevelAsks: 0, headAsks: 0, ownGit: [], finished: {}, engine: undefined, resumed: [], resumeDeny: undefined, sendAnswer: undefined, spawnDeny: undefined, stateWrites: [] }
   const isDir = (path: string) => Object.keys(sim.files).some(file => file.startsWith(`${path}/`))
   on('session.id', () => ({ value: 'lead-session-1234' }))
   on('session.cwd', () => ({ value: ROOT }))
@@ -59,6 +76,7 @@ function standIn(on: On): Sim {
   })
   on('fs.write', (_, e) => {
     sim.files[e.path] = e.text
+    if (e.path === `${DIR}/state.json`) sim.stateWrites.push(e.text)
 
     return { value: undefined }
   })
@@ -92,12 +110,25 @@ function standIn(on: On): Sim {
     return out('', 1)
   })
   on('tool.call', async (_, e) => {
-    if (e.tool === 'Agent') return { result: { status: 'async_launched', agentId: 'ag-1' } as never }
-    if (e.tool === 'SendMessage') {
-      sim.commands.push(`SendMessage ${String(e.to)}: ${String(e.message)}`)
-      sim.whileLaunching?.()
+    if (e.tool === 'Agent') {
+      // A start refused beneath errors the Agent call, its reason as the text.
+      if (sim.spawnDeny !== undefined) return { isError: true as const, result: sim.spawnDeny, text: sim.spawnDeny }
 
-      return { result: {} as never }
+      return { result: { status: 'async_launched', agentId: 'ag-1' } as never }
+    }
+    if (e.tool === 'SendMessage') {
+      const to = String(e.to)
+      sim.commands.push(`SendMessage ${to}: ${String(e.message)}`)
+      sim.whileLaunching?.()
+      if (sim.sendAnswer !== undefined) return sim.sendAnswer as never
+      const agentId = sim.finished[to]
+      if (agentId === undefined || sim.engine === undefined) return { result: {} as never }
+      // A finished subagent: resumed inside the call, on the model it started on, the call answered once the resume is decided.
+      const resume = { tool_use_id: 'toolu_first_start', prompt: String(e.message), description: 'worker', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, model: 'claude-sonnet-5-5', parentModel: 'claude-opus-5-5', resume: { agentId } }
+      const resumed = (await sim.engine.agent.spawn(resume as never)) as { deny?: string }
+      const record = resumed.deny === undefined ? { success: true, message: `Agent "${to}" was stopped; resumed it in the background with your message.` } : { success: false, message: `a plugin declined the resume: ${resumed.deny}` }
+
+      return { result: record as never, text: JSON.stringify(record) }
     }
     if (e.tool === 'Bash') {
       sim.commands.push(String((e as { command?: unknown }).command))
@@ -112,6 +143,13 @@ function standIn(on: On): Sim {
     return { result: {} as never }
   })
   on('agent.spawn', async (_, e) => {
+    if (e.resume !== undefined) {
+      if (sim.resumeDeny !== undefined) return { deny: sim.resumeDeny }
+      sim.resumed.push({ prompt: e.prompt, agentId: e.resume.agentId })
+
+      return { model: 'claude-sonnet-5-5', agentId: e.resume.agentId }
+    }
+    if (sim.spawnDeny !== undefined) return { deny: sim.spawnDeny }
     sim.spawned.push({ prompt: e.prompt, model: e.model })
     await sim.hold
     sim.whileLaunching?.()
@@ -807,6 +845,150 @@ test('V1-11: a prompt naming two ready briefs is refused: one at a time; a done 
   expect(sim.spawned).toEqual([])
   expect((await spawn($, `Follow ${a}; it builds on ${c}.`, 'A', 'sonnet')).deny).toBeUndefined()
   expect(state(sim).tasks.map(task => task.status)).toEqual(['running', 'ready', 'done'])
+})
+
+// ── A new revision sent to a finished subagent (task D, 2026-11-11) ──────────────────────────────────────────────
+
+type Sent = { deny?: string; context?: string[]; isError?: boolean; result?: { success?: boolean } }
+
+const sendMessage = ($: Engine, to: string, text: string): Promise<Sent> => $.tool.call({ tool: 'SendMessage', to, message: text } as never) as Promise<Sent>
+
+/** The statuses a task went through as the state was written, repeats dropped. */
+function statusesOf(sim: Sim, key: string): string[] {
+  const seen: string[] = []
+  for (const text of sim.stateWrites) {
+    const status = (JSON.parse(text) as RelayState).tasks.find(task => taskKey(task) === key)?.status
+    if (status !== undefined && seen.at(-1) !== status) seen.push(status)
+  }
+
+  return seen
+}
+
+test('D: a new revision sent to a finished subagent is checked once; the resume the send causes passes and the task is running as subagent <to>', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const first = await newTask($, 'A', { edit_scope: ['area-a/**'] })
+  await newTask($, 'A', { edit_scope: ['area-a/**'] })
+  const second = `${DIR}/tasks/A-r2.md`
+  const b = await newTask($, 'B', { edit_scope: ['area-b/**'] })
+  sim.engine = $
+  sim.finished = { 'ag-worker-a': 'ag-worker-a', 'worker-b': 'ag-worker-b' }
+
+  // As A-r2 went out: the new brief beside the cancelled one, to the worker by its id (once refused: "ready인 지시서가 없습니다(A-r2 launching, A-r1 cancelled)").
+  const a = await sendMessage($, 'ag-worker-a', `New revision: read ${second}. It replaces ${first}.`)
+  expect(a.deny).toBeUndefined()
+  expect(a.result?.success).toBe(true)
+  expect(a.context).toBeUndefined()
+  // As B-r2 went out: the brief alone, to the worker by a name (once refused: "B-r2는 launching 상태라 띄우지 않습니다").
+  const sentB = await sendMessage($, 'worker-b', `Read ${b}.`)
+  expect(sentB.deny).toBeUndefined()
+  expect(sentB.result?.success).toBe(true)
+  expect(sentB.context).toBeUndefined()
+
+  // Each resume reached the engine with the message; no fresh subagent was started.
+  expect(sim.resumed).toEqual([
+    { prompt: `New revision: read ${second}. It replaces ${first}.`, agentId: 'ag-worker-a' },
+    { prompt: `Read ${b}.`, agentId: 'ag-worker-b' },
+  ])
+  expect(sim.spawned).toEqual([])
+  // Claimed once and recorded running once each.
+  expect(statusesOf(sim, 'A-r2')).toEqual(['ready', 'launching', 'running'])
+  expect(statusesOf(sim, 'B-r1')).toEqual(['ready', 'launching', 'running'])
+  const tasks = state(sim).tasks
+  expect(tasks.find(task => taskKey(task) === 'A-r2')?.runner).toBe('subagent ag-worker-a')
+  expect(tasks.find(task => taskKey(task) === 'B-r1')?.runner).toBe('subagent worker-b')
+  expect(tasks.find(task => taskKey(task) === 'A-r1')?.status).toBe('cancelled')
+})
+
+test('D: a send whose resume is refused, or that answers success: false, an error or a refusal, leaves the revision ready and tells the lead', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A')
+  sim.engine = $
+  sim.finished = { 'ag-worker': 'ag-worker' }
+
+  // The resume refused beneath (another plugin declining): the call answers success: false.
+  sim.resumeDeny = 'another plugin said no'
+  const declined = await sendMessage($, 'ag-worker', `Read ${a}.`)
+  expect(declined.deny).toBeUndefined()
+  expect(declined.result?.success).toBe(false)
+  expect(declined.context).toHaveLength(1)
+  expect(declined.context?.[0]).toContain('⚠ relay: A-r1 보내기가 실패해 ready로 되돌렸습니다(a plugin declined the resume: another plugin said no)')
+  expect(declined.context?.[0]).toContain('dispatched는 부르지 말고')
+  expect(state(sim).tasks[0]?.status).toBe('ready')
+  expect(state(sim).tasks[0]?.runner).toBeNull()
+  expect(statusesOf(sim, 'A-r1')).toEqual(['ready', 'launching', 'ready'])
+  expect(sim.resumed).toEqual([])
+  sim.resumeDeny = undefined
+
+  // Nobody by that name (success: false), an error core reported: the same.
+  const shapes: [Record<string, unknown>, string][] = [
+    [{ result: { success: false, message: 'No agent named "gone" is running.' } }, 'No agent named "gone" is running.'],
+    [{ isError: true, result: 'boom', text: 'SendMessage broke' }, 'SendMessage broke'],
+  ]
+  for (const [answer, why] of shapes) {
+    sim.sendAnswer = answer
+    const failed = await sendMessage($, 'gone', `Read ${a}.`)
+    expect(failed.context).toHaveLength(1)
+    expect(failed.context?.[0]).toContain(`⚠ relay: A-r1 보내기가 실패해 ready로 되돌렸습니다(${why})`)
+    expect(state(sim).tasks[0]?.status).toBe('ready')
+  }
+
+  // A refusal beneath carries no context: the line goes on its text.
+  sim.sendAnswer = { deny: 'a rule refused the send' }
+  const refused = await sendMessage($, 'gone', `Read ${a}.`)
+  expect(refused.deny).toContain('a rule refused the send')
+  expect(refused.deny).toContain('⚠ relay: A-r1 보내기가 실패해 ready로 되돌렸습니다')
+  expect(state(sim).tasks[0]?.status).toBe('ready')
+
+  // Sent again once the cause is gone: running, once.
+  sim.sendAnswer = undefined
+  const sent = await sendMessage($, 'ag-worker', `Read ${a}.`)
+  expect(sent.result?.success).toBe(true)
+  expect(sent.context).toBeUndefined()
+  expect(state(sim).tasks[0]?.status).toBe('running')
+  expect(state(sim).tasks[0]?.runner).toBe('subagent ag-worker')
+  expect(sim.resumed).toHaveLength(1)
+})
+
+test("D: a subagent start refused beneath leaves the task ready, and the Agent call's errored result carries the ⚠ relay: line", async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const b = await newTask($, 'B')
+  sim.spawnDeny = 'the host refused the start'
+
+  const spawned = await spawn($, `Follow ${b}.`, 'B', 'sonnet', 'toolu_refused')
+  expect(spawned.deny).toBe('the host refused the start')
+  const answered = (await $.tool.call({ tool: 'Agent', tool_use_id: 'toolu_refused', prompt: `Follow ${b}.`, description: 'B', model: 'sonnet' } as never)) as Sent
+  expect(answered.isError).toBe(true)
+  expect(answered.context).toHaveLength(1)
+  expect(answered.context?.[0]).toContain('⚠ relay: B-r1 띄우기가 실패해 ready로 되돌렸습니다(the host refused the start)')
+  expect(state(sim).tasks[0]?.status).toBe('ready')
+  expect(statusesOf(sim, 'B-r1')).toEqual(['ready', 'launching', 'ready'])
+
+  sim.spawnDeny = undefined
+  expect((await spawn($, `Follow ${b}.`, 'B', 'sonnet')).deny).toBeUndefined()
+  expect(state(sim).tasks[0]?.status).toBe('running')
+  expect(state(sim).tasks[0]?.runner).toBe('subagent ag-1')
+})
+
+test('D: a resume no send of the run caused is checked as a start, as before; a message naming no brief resumes untouched', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A')
+
+  const resume = { tool_use_id: 'toolu_r', prompt: `Follow ${a}.`, description: 'A', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', resume: { agentId: 'ag-old' } }
+  const alone = (await $.agent.spawn(resume as never)) as { deny?: string }
+  expect(alone.deny).toContain('모델이 지정되지 않았습니다')
+  expect(sim.resumed).toEqual([])
+  expect(state(sim).tasks[0]?.status).toBe('ready')
+
+  sim.engine = $
+  sim.finished = { 'ag-old': 'ag-old' }
+  const chat = await sendMessage($, 'ag-old', 'How is it going?')
+  expect(chat.result?.success).toBe(true)
+  expect(sim.resumed).toEqual([{ prompt: 'How is it going?', agentId: 'ag-old' }])
+  expect(state(sim).tasks[0]?.status).toBe('ready')
 })
 
 // ── Gate 2, the answer's end ──────────────────────────────────────────────
