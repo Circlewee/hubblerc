@@ -5,7 +5,7 @@
 #
 # 아래 번호는 이 파일의 판이다. 내용을 바꾸면 올린다: `/setup`은 설치된 판이 같거나 새로우면 덮어쓰지
 # 않아서, 예전 hubblerc로 도는 다른 세션의 `/setup`이 새 파일을 되돌리지 못한다.
-# hubblerc-shell-version: 2
+# hubblerc-shell-version: 3
 
 # Orca의 터미널은 그림(kitty 유니코드 placeholder)을 그리지만, Claude Code는 Orca를 그림 되는 터미널로
 # 알아보지 못한다. Orca는 자기 에이전트 실행으로 띄운 Claude에만 이 값을 넣어 주므로, 탭에서 직접 띄울
@@ -20,6 +20,55 @@ fi
 #
 # 다시 열 때 처음 실행의 옵션 중 플러그인·폴더·설정·모델을 정하는 것만 그대로 넘긴다.
 # 세션을 정하는 것(--resume, --continue, 프롬프트)과 권한 옵션은 넘기지 않는다.
+
+# 개발판 사본: 저장소의 플러그인을 --plugin-dir로 직접 불러오면 그 세션이 플러그인 파일을 고칠 때 자동 모드
+# 검사가 판정을 건너뛴다(no verdict). 그래서 개발판은 저장소 밖 사본을 불러온다.
+#   HUBBLERC_DEV_SRC   원본 위치(저장소의 plugins/hubblerc). ~/.zshrc에서 export로 정한다. 필수.
+#   HUBBLERC_DEV_COPY  사본 위치. 없으면 ~/.cache/hubblerc-live.
+#   hcc-sync           원본을 사본으로 복사한다(실행 중 세션은 바뀐 사본을 다시 읽는다).
+#   hcc [옵션]         복사한 뒤 사본으로 Claude Code를 띄운다.
+# 사본에는 원본 위치를 적은 .hubblerc-source가 남는다. 아래 claude()는 그 표시가 있는 --plugin-dir를
+# 다시 띄우기 직전에 새로 복사한다.
+
+# _hubblerc_copy_sync <원본> <사본>: 원본을 사본으로 복사하고 표시를 남긴다.
+_hubblerc_copy_sync() {
+  local src="${1%/}" dest="${2%/}"
+  if [[ ! -f "$src/.claude-plugin/plugin.json" ]]; then
+    print -r -- "원본 폴더가 아닙니다: $src (.claude-plugin/plugin.json이 없음)" >&2
+    return 1
+  fi
+  if [[ "$src" == "$dest" ]]; then
+    print -r -- "원본과 사본이 같은 폴더입니다: $src" >&2
+    return 1
+  fi
+  mkdir -p "$dest" || return 1
+  # -c: an edit of the same size within the same second would pass the size-and-time check unnoticed.
+  rsync -ac --delete "$src/" "$dest/" || return 1
+  print -r -- "$src" >| "$dest/.hubblerc-source"
+}
+
+hcc-sync() {
+  if [[ -z "${HUBBLERC_DEV_SRC:-}" ]]; then
+    print -r -- "HUBBLERC_DEV_SRC가 정해져 있지 않습니다. ~/.zshrc에 개발판 원본 위치를 넣으세요: export HUBBLERC_DEV_SRC=<저장소>/plugins/hubblerc" >&2
+    return 1
+  fi
+  _hubblerc_copy_sync "$HUBBLERC_DEV_SRC" "${HUBBLERC_DEV_COPY:-$HOME/.cache/hubblerc-live}"
+}
+
+hcc() {
+  hcc-sync || return $?
+  claude --plugin-dir "${HUBBLERC_DEV_COPY:-$HOME/.cache/hubblerc-live}" "$@"
+}
+
+# _hubblerc_resync <--plugin-dir 값>: hcc가 만든 사본이면 원본에서 새로 복사한다. 아니면 아무것도 안 한다.
+_hubblerc_resync() {
+  local dir="${1%/}"
+  [[ -f "$dir/.hubblerc-source" ]] || return 0
+  local src
+  src="$(<"$dir/.hubblerc-source")"
+  _hubblerc_copy_sync "$src" "$dir" || print -r -- "개발판 사본을 새로 복사하지 못했습니다. 있던 사본으로 다시 띄웁니다: $dir" >&2
+  return 0
+}
 
 claude() {
   local file="${TMPDIR:-/tmp}/hubblerc-relaunch.$$.$RANDOM"
@@ -48,6 +97,14 @@ claude() {
     rm -f "$file"
     # 세션 id(uuid)가 아니면 다시 띄우지 않는다.
     [[ "$id" =~ '^[0-9a-f-]{36}$' ]] || break
+    local k
+    for (( k = 1; k <= ${#keep}; k++ )); do
+      case "${keep[k]}" in
+        --plugin-dir|--plugin-dir-no-mcp) _hubblerc_resync "${keep[k+1]}" ;;
+        --plugin-dir=*) _hubblerc_resync "${keep[k]#--plugin-dir=}" ;;
+        --plugin-dir-no-mcp=*) _hubblerc_resync "${keep[k]#--plugin-dir-no-mcp=}" ;;
+      esac
+    done
     HUBBLERC_RELAUNCH_FILE="$file" command claude "${keep[@]}" --resume "$id"
     code=$?
   done

@@ -202,6 +202,19 @@ test('/setup in a session on an older hubblerc leaves a newer shell file in plac
   expect(ran).toContain('셸 설정(재시작 함수: 사이드바 "재시작"·`/relaunch`, Orca 그림): 설치됨')
 })
 
+test('/setup replaces the version-2 shell file with the shipped one (hcc, hcc-sync and the copy refresh on relaunch came in version 3)', async ($, on) => {
+  standInForEngine(on)
+  // A hooks module cannot read the real file (imports are limited), so a stand-in with version 3's number.
+  const shipped = '# hubblerc-shell-version: 3\nNEW SCRIPT'
+  const { files } = machine(on, { HOME: '/home/me', SHELL: '/bin/zsh' }, {}, shipped)
+  files['/home/me/.claude/hubblerc/relaunch.zsh'] = '# hubblerc-shell-version: 2\nOLD SCRIPT'
+  files['/home/me/.zshrc'] = '[ -f "$HOME/.claude/hubblerc/relaunch.zsh" ] && source "$HOME/.claude/hubblerc/relaunch.zsh"\n'
+  await start($)
+
+  await $.command.run({ ...COMMAND, command: 'setup' })
+  expect(files['/home/me/.claude/hubblerc/relaunch.zsh']).toBe(shipped)
+})
+
 test('/setup copies the relaunch function and adds the line to ~/.zshrc, the old one kept; a second run changes nothing', async ($, on) => {
   standInForEngine(on)
   const before = "alias hcc='claude --plugin-dir x'\n"

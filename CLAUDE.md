@@ -19,7 +19,9 @@ tools/likely-replay.ts         likely 기록 재실행 실험(bun)
 ```
 
 ## 개발 루프
-- 이 폴더에선 배포판이 꺼져 있다(`.claude/settings.local.json`). 개발판은 `hcc`(= `claude --plugin-dir …/plugins/hubblerc`)로 띄운다.
+- 이 폴더에선 배포판이 꺼져 있다(`.claude/settings.local.json`). 개발판은 `hcc`로 띄운다. `hcc`는 `plugins/hubblerc`를 저장소 밖 사본(기본 `~/.cache/hubblerc-live`)으로 복사해 `claude --plugin-dir <사본>`으로 띄운다. 이유: 저장소의 플러그인을 `--plugin-dir`로 직접 불러오면 그 세션과 서브에이전트가 `plugins/hubblerc`를 Edit·Write할 때 자동 모드 검사가 "no verdict"(판정 건너뜀)를 낸다 [확인: 2026-11-11, 사본으로 불러오면 정상 판정].
+  - `hcc`·`hcc-sync`·`/relaunch` 때의 사본 갱신은 `/setup`이 까는 셸 파일(`shell/relaunch.zsh`)에 있다. `~/.zshrc`에 `export HUBBLERC_DEV_SRC=<저장소>/plugins/hubblerc`를 둔다(사본 위치는 `HUBBLERC_DEV_COPY`로 바꿀 수 있음). 값이 없으면 `hcc`가 안내만 하고 띄우지 않는다.
+  - 실행 중 세션에 고친 코드를 반영: `hcc-sync`(엔진이 바뀐 사본을 다시 읽음 [확인: 2026-11-11 사본 갱신 뒤 relay 한 줄 그리기가 실행 중 세션에 붙음]) 또는 `/relaunch`(재시작 직전에 사본을 새로 복사).
 - 검사 세 가지(모두 통과해야 커밋):
   - `claude plugin validate plugins/hubblerc`
   - `claude plugin test plugins/hubblerc` (파일 선택 불가. 부하가 높으면 무관한 테스트가 5초 제한에 걸리니 다시 돌린다)
