@@ -1,7 +1,13 @@
+import { atom, read } from 'claude-code'
 import type { EngineInterface, On, ResolveInput } from 'claude-code'
 
+import type { RelayStatus } from '../../types'
 import { COLORS } from '../shared/style'
 import { isRecord } from '../shared/values'
+import { findTaskLine, statusWord, taskName } from './relay-status'
+
+/** The sidebar's summary of the runs, which names a task by its title; the same key as relay-status.ts's. */
+const relayStatus = atom({ plugin: 'hubblerc', key: 'relayStatus' } as const, null)
 
 /**
  * relay's calls and results in the conversation, one line each (the screen only: the text the
@@ -13,8 +19,9 @@ import { isRecord } from '../shared/values'
  */
 
 const RELAY_TOOL = 'mcp__hubblerc__relay'
-/** The cells the engine's result rows take before their text: `  ⎿  `. */
-const RESULT_GUTTER = 5
+/** The cells before a result row's text: `  ↳ `, as the conversation lines of tool-lines.tsx are drawn. */
+const RESULT_GUTTER = 4
+const NAME_CHARS = 30
 const GOAL_CHARS = 30
 const REASON_CHARS = 30
 const RUNNER_CHARS = 24
@@ -59,32 +66,40 @@ export function outputText(output: unknown): string | undefined {
 
 /**
  * A call as one line, from its input. `answer` (the result text, when the call has ended) only
- * supplies the revision a `task` call was written as (`A-r3`); without it the task's id stands.
+ * supplies the revision a `task` call was written as (`A-r3`); without it the title stands alone.
+ * `status` (the sidebar's summary of the runs) gives a task named by key or id its title; a task it
+ * does not hold is named by what the call said.
  */
-export function callLine(input: unknown, answer?: string): string {
+export function callLine(input: unknown, answer?: string, status: RelayStatus | null = null): string {
   const call = isRecord(input) ? input : {}
   const action = field(call, 'action')
+  const named = (key: string): string => {
+    const name = field(call, key)
+    const found = findTaskLine(status, field(call, 'run'), name)
+
+    return found === undefined ? name : taskName(found, NAME_CHARS)
+  }
   switch (action) {
     case 'start':
       return `relay 시작 · ${field(call, 'name')} · ${clip(field(call, 'goal'), GOAL_CHARS)}`
     case 'task': {
-      const id = field(call, 'id')
-      const rev = /-r(\d+)\.md/.exec(answer?.split('\n')[0] ?? '')?.[1]
+      const rev = Number(/-r(\d+)\.md/.exec(answer?.split('\n')[0] ?? '')?.[1] ?? 1)
       const criteria = Array.isArray(call.done_when) ? call.done_when.length : 0
       const model = field(call, 'model')
+      const name = taskName({ key: field(call, 'id'), rev, title: field(call, 'title') }, NAME_CHARS)
 
-      return `relay 지시서 ${rev === undefined ? id : `${id}-r${rev}`} · ${clip(field(call, 'title'), GOAL_CHARS)} · ${shortModel(model)}/${field(call, 'effort')} · 기준 ${criteria}`
+      return `relay 지시서 ${name} · ${shortModel(model)}/${field(call, 'effort')} · 기준 ${criteria}`
     }
     case 'spec_text':
-      return `relay 지시서 미리보기 ${field(call, 'id')}`
+      return `relay 지시서 미리보기 ${named('id')}`
     case 'dispatched':
-      return `relay 띄움 기록 ${field(call, 'task')} → ${clip(field(call, 'runner'), RUNNER_CHARS)}`
+      return `relay 띄움 기록 ${named('task')} → ${clip(field(call, 'runner'), RUNNER_CHARS)}`
     case 'cancel':
-      return `relay 취소 ${field(call, 'task')} · ${clip(field(call, 'reason'), REASON_CHARS)}`
+      return `relay 취소 ${named('task')} · ${clip(field(call, 'reason'), REASON_CHARS)}`
     case 'report':
-      return `relay 보고 확인 ${field(call, 'task')}`
+      return `relay 보고 확인 ${named('task')}`
     case 'check':
-      return `relay 완료 검사 ${field(call, 'task')}`
+      return `relay 완료 검사 ${named('task')}`
     case 'package': {
       const tasks = Array.isArray(call.tasks) ? call.tasks.filter((task): task is string => typeof task === 'string') : []
 
@@ -172,9 +187,9 @@ function told(lines: readonly string[]): string | undefined {
 
   if (head.startsWith('# Task ')) return `미리보기 ${lines.join('\n').trimEnd().split('\n').length}줄`
 
-  if ((match = /^\S+: running · /.exec(head))) return 'running'
+  if ((match = /^\S+: running · /.exec(head))) return statusWord('running')
 
-  if ((match = /^\S+: (.+?) → cancelled · /.exec(head))) return `${match[1]} → cancelled`
+  if ((match = /^\S+: (.+?) → cancelled · /.exec(head))) return `${statusWord(match[1] ?? '')} → ${statusWord('cancelled')}`
 
   if ((match = /^\S+: 보고 (.+?) → 상태 (\S+)/.exec(head))) {
     const outside = after(lines, '범위 밖 파일:')
@@ -277,7 +292,7 @@ function resultRows($: EngineInterface, e: ToolRow, view: ResultView): JSX.Eleme
     <Box flexDirection="column">
       <Box>
         <Box width={RESULT_GUTTER} flexShrink={0}>
-          <Text dimColor>{'  ⎿  '}</Text>
+          <Text dimColor>{'  ↳ '}</Text>
         </Box>
         <Text wrap="truncate-end" {...(view.isProblem ? { color: COLORS.alert } : {})}>
           {view.line}
@@ -304,11 +319,14 @@ export function showRelayLines(on: On): void {
     const { Box, Text } = $.ui.resolve(e)
     const { isRunning, isErrored } = e.props
     const dot = isErrored ? COLORS.alert : isRunning ? undefined : COLORS.ok
+    // Only the summary in state is read, never a file: the render draws from what is held.
+    const status = await read($, relayStatus).catch(() => null)
 
+    // The blank line above keeps two calls in a row from sitting against each other.
     return (
-      <Box>
+      <Box marginTop={1}>
         <Text {...(dot === undefined ? { dimColor: true as const } : { color: dot })}>{'● '}</Text>
-        <Text wrap="truncate-end">{callLine(e.props.input, outputText(e.props.output))}</Text>
+        <Text wrap="truncate-end">{callLine(e.props.input, outputText(e.props.output), status)}</Text>
       </Box>
     )
   })

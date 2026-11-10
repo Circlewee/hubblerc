@@ -1134,14 +1134,14 @@ test('all twelve actions are said as the table says, read from the real tool’s
     ['relay 묶음 목록', '진행 중 1'],
     ['relay 기다리는 결정', '없음'],
     ['relay 지시서 미리보기 A', `미리보기 ${previewLines}줄`],
-    ['relay 지시서 A-r1 · Add the tool · opus-5-5/high · 기준 2', '씀'],
-    ['relay 띄움 기록 A → subagent worker-a-with-a…', 'running'],
-    ['relay 지시서 B-r1 · Docs · opus-5-5/high · 기준 2', '씀'],
-    ['relay 취소 B · not needed after all, the docs…', 'ready → cancelled'],
+    ['relay 지시서 Add the tool · opus-5-5/high · 기준 2', '씀'],
+    ['relay 띄움 기록 A → subagent worker-a-with-a…', '도는 중'],
+    ['relay 지시서 Docs · opus-5-5/high · 기준 2', '씀'],
+    ['relay 취소 B · not needed after all, the docs…', '띄우기 전 → 취소'],
     ['relay 보고 확인 A', 'DONE · 범위 밖 0 · 테스트 변경 0 · 경고 0'],
     ['relay 완료 검사 A', 'pass 1 · fail 0 · 미확인 1 · 0 ms · 트리 깨끗함'],
-    ['relay 지시서 C-r1 · Next · opus-5-5/high · 기준 2', expect.stringMatching(/^씀 · 경고 1: 같은 범위를 고친 A-r1가 끝났습니다/)],
-    ['relay 취소 C · later', 'ready → cancelled'],
+    ['relay 지시서 Next · opus-5-5/high · 기준 2', expect.stringMatching(/^씀 · 경고 1: 같은 범위를 고친 A-r1가 끝났습니다/)],
+    ['relay 취소 C · later', '띄우기 전 → 취소'],
     ['relay 검증 꾸러미 · 전체', 'V1 · 검토 파일 1'],
     ['relay 판정 V1', 'pass · 기준 2/2 · 지적 high 0, medium 1 · 커밋 aaaaaaa'],
     ['relay 기다리는 결정', '2개: D2, D3'],
@@ -1191,7 +1191,7 @@ test('a refusal says its first reason, a failure of the tool says so, and a text
 
 test('a gate warning in a result is kept whole as a notice', () => {
   const view = resultView('A-r1: running · subagent x\n⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침', false)
-  expect(view).toEqual({ line: 'running', isProblem: false, notices: ['⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침'] })
+  expect(view).toEqual({ line: '도는 중', isProblem: false, notices: ['⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침'] })
 })
 
 // ── Registered in the list only while a run is not finished ──────────────────────────────────────

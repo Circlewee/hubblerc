@@ -1,7 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { showRelayLines } from '../hooks/relay/relay-view'
+import { callLine, showRelayLines } from '../hooks/relay/relay-view'
+import type { RelayStatus } from '../types'
 
 // Nothing draws beneath the plugin: this hook stands for the engine's own row.
 function engineDraws(on: On): void {
@@ -41,7 +42,7 @@ test('a call is one line, however long its input', async ($, on) => {
   showRelayLines(on)
   const ui = await $.ui.mount({ ...USE, props: use(INPUT, { output: '지시서: /repo/.relay/runs/2026-11-10-demo/tasks/A-r3.md\n보고서 자리: x' }) })
   expect(await ui.find({ type: 'Text', text: /engine row/ })).toBeUndefined()
-  expect((await ui.find({ type: 'Text', text: /relay 지시서/ }))?.text).toBe('relay 지시서 A-r3 · Add the tool · opus-5-5/high · 기준 2')
+  expect((await ui.find({ type: 'Text', text: /relay 지시서/ }))?.text).toBe('relay 지시서 Add the tool (3번째 지시서) · opus-5-5/high · 기준 2')
   expect(await ui.find({ type: 'Text', text: /long goal body/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -93,7 +94,7 @@ test('a gate warning stays beneath the result line', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
   const ui = await $.ui.mount({ ...RESULT, props: result('A-r1: running · subagent x\n보낸 지시서 사본: /x\n⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침') })
-  expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('running')
+  expect((await ui.find({ type: 'Text', text: /도는 중/ }))?.text).toBe('도는 중')
   expect((await ui.find({ type: 'Text', text: /⚠ relay/ }))?.text).toBe('⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침')
   await ui.unmount()
 })
@@ -104,5 +105,38 @@ test('a text that no reading fits shows its first line', async ($, on) => {
   const ui = await $.ui.mount({ ...RESULT, props: result('새로 바뀐 문구입니다\n둘째 줄') })
   expect((await ui.find({ type: 'Text', text: /새로 바뀐/ }))?.text).toBe('새로 바뀐 문구입니다')
   expect(await ui.find({ type: 'Text', text: /둘째/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+// ── Names, spacing and the arrow ──────────────────────────────────────────
+
+const line = (key: string, id: string, rev: number, title: string) => ({ key, id, rev, title, status: 'running', model: 'claude-opus-5-5', effort: 'high', runner: 'orca', dispatchedAt: null })
+const SUMMARY: RelayStatus = {
+  runs: [{ run: '2026-11-10-demo', tasks: [line('A-r1', 'A', 1, 'Add the tool'), line('B-r2', 'B', 2, 'Wire the sidebar box')], pending: 0, verdict: null }],
+}
+
+test('a task is named by its title, "n번째 지시서" from the second brief; the key where the summary does not hold it', () => {
+  expect(callLine({ action: 'cancel', run: '2026-11-10-demo', task: 'B-r2', reason: 'x' }, undefined, SUMMARY)).toBe('relay 취소 Wire the sidebar box (2번째 지시서) · x')
+  // The id alone names its latest revision, the same way.
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'B' }, undefined, SUMMARY)).toBe('relay 보고 확인 Wire the sidebar box (2번째 지시서)')
+  expect(callLine({ action: 'check', task: 'A' }, undefined, SUMMARY)).toBe('relay 완료 검사 Add the tool')
+  expect(callLine({ action: 'dispatched', task: 'A-r1', runner: 'orca dispatch:x' }, undefined, SUMMARY)).toBe('relay 띄움 기록 Add the tool → orca dispatch:x')
+  expect(callLine({ action: 'spec_text', id: 'B' }, undefined, SUMMARY)).toBe('relay 지시서 미리보기 Wire the sidebar box (2번째 지시서)')
+  // Not held (another run, a finished run, no summary): the key as it was said.
+  expect(callLine({ action: 'report', run: '2026-11-01-old', task: 'B-r2' }, undefined, SUMMARY)).toBe('relay 보고 확인 B-r2')
+  expect(callLine({ action: 'report', task: 'Z-r1' }, undefined, SUMMARY)).toBe('relay 보고 확인 Z-r1')
+  expect(callLine({ action: 'report', task: 'A-r1' }, undefined, null)).toBe('relay 보고 확인 A-r1')
+  // A brief written is named by the title it carries; the revision is told from the answer.
+  expect(callLine({ action: 'task', id: 'A', title: 'Add the tool', model: 'claude-opus-5-5', effort: 'high', done_when: [] }, '지시서: /r/tasks/A-r1.md')).toBe('relay 지시서 Add the tool · opus-5-5/high · 기준 0')
+})
+
+test('a result row begins with an arrow, not the engine’s hook, and states are in Korean', async ($, on) => {
+  engineDraws(on)
+  showRelayLines(on)
+  const ui = await $.ui.mount({ ...RESULT, props: result('A-r1: running → cancelled · gave up\n보낸 지시서 사본: /x') })
+  expect((await ui.find({ type: 'Text', text: /도는 중/ }))?.text).toBe('도는 중 → 취소')
+  expect((await ui.find({ type: 'Text', text: /↳/ }))?.text).toBe('  ↳ ')
+  expect(await ui.find({ type: 'Text', text: /⎿/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /running|cancelled/ })).toBeUndefined()
   await ui.unmount()
 })

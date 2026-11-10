@@ -180,6 +180,11 @@ export type LikelyStatus = {
 export type RelayTaskLine = {
   /** `A-r3`. */
   key: string
+  /** The task id (`A`) and the revision of its brief (`3`): the rows say "n번째 지시서" for a revision past the first. */
+  id: string
+  rev: number
+  /** The brief's title, cut short; the rows name the task by it. */
+  title: string
   /** Its status as state.json holds it (a `TaskStatus` of `hooks/relay/relay-format.ts`). */
   status: string
   /** Blocked by the tool after its launch went out: its worker may still be at work. */

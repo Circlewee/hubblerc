@@ -29,9 +29,47 @@ const STATUS_WORDS: Record<string, string> = {
 }
 const LIVE_BLOCKED_WORD = '띄운 뒤 막힘'
 
+/** A status as a person reads it; a word not in the table (a status of a newer tool) as it is. */
+export const statusWord = (status: string): string => STATUS_WORDS[status] ?? status
+
+const TITLE_CHARS_IN_STATE = 40
+
+/** Cut to `max` characters with `…`, whitespace folded. */
+function cut(value: string, max: number): string {
+  const chars = Array.from(value.replace(/\s+/g, ' ').trim())
+
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : chars.join('')
+}
+
+/**
+ * What a task is called where a person reads: its title (cut to `max`), with ` (n번째 지시서)` when it
+ * is a brief sent again (n > 1); the key when the title is not known. Never made up.
+ */
+export function taskName(task: { key: string; rev: number; title: string }, max: number): string {
+  const title = cut(task.title, max)
+  if (title === '') return task.key
+
+  return task.rev > 1 ? `${title} (${task.rev}번째 지시서)` : title
+}
+
+/**
+ * The task a call names (`B-r2`, or the id `B` for its latest revision) among the runs in small;
+ * with `run`, only that run's. Undefined when the summary does not hold it (a finished run).
+ */
+export function findTaskLine(status: RelayStatus | null, run: string, name: string): RelayTaskLine | undefined {
+  const lines = (status?.runs ?? []).filter(other => run === '' || other.run === run).flatMap(other => other.tasks)
+  const exact = lines.find(line => line.key === name)
+  if (exact !== undefined) return exact
+
+  return lines.filter(line => line.id === name).sort((a, b) => b.rev - a.rev)[0]
+}
+
 function taskLine(task: RelayTask): RelayTaskLine {
   return {
     key: taskKey(task),
+    id: task.id,
+    rev: task.rev,
+    title: cut(task.title, TITLE_CHARS_IN_STATE),
     status: task.status,
     ...(task.status === 'blocked' && task.workerLive === true ? { isLiveBlocked: true as const } : {}),
     model: task.model,
@@ -109,14 +147,16 @@ function statusColor(task: RelayTaskLine, palette: Palette): string | undefined 
   }
 }
 
-/** A task's line: its key, its status, model/effort, where it runs and when it was launched. A cancelled one dim. */
+const BOX_TITLE_CHARS = 14
+
+/** A task's line: its name (title; the key when unknown), its status, model/effort, where it runs and when it was launched. A cancelled one dim. */
 export function taskSegments(task: RelayTaskLine, palette: Palette): Segment[] {
-  const word = task.isLiveBlocked === true ? LIVE_BLOCKED_WORD : (STATUS_WORDS[task.status] ?? task.status)
+  const word = task.isLiveBlocked === true ? LIVE_BLOCKED_WORD : statusWord(task.status)
   const color = statusColor(task, palette)
   const tail = [modelEffort(task), task.runner, task.dispatchedAt === null ? '' : clockTime(task.dispatchedAt)].filter(part => part !== '')
 
   return [
-    { text: task.key, ...(task.status === 'cancelled' ? { dim: true } : { bold: true }) },
+    { text: taskName(task, BOX_TITLE_CHARS), ...(task.status === 'cancelled' ? { dim: true } : { bold: true }) },
     { text: ` ${word}`, ...(color === undefined ? { dim: true } : { color }) },
     ...(tail.length === 0 ? [] : [{ text: ` · ${tail.join(' · ')}`, dim: true }]),
   ]
