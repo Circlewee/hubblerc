@@ -22,7 +22,9 @@ import { filesBox } from './boxes/files'
 import { frame } from './boxes/frame'
 import type { SectionId } from './boxes/frame'
 import { activityBox, statusBox } from './boxes/status'
+import { relayBox } from './boxes/relay'
 import { todoBody } from './boxes/todo'
+import { relayLines } from '../relay/relay-status'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
@@ -53,6 +55,7 @@ const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, nu
 const sidebarTab = atom({ plugin: 'hubblerc', key: 'sidebarTab' } as const, 'contents')
 const userTodoVersion = atom({ plugin: 'hubblerc', key: 'userTodoVersion' } as const, 0)
 const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)
+const relayStatus = atom({ plugin: 'hubblerc', key: 'relayStatus' } as const, null)
 
 /** Where the folds are kept across sessions. */
 const FOLDED_KEY = 'sidebarFolded'
@@ -190,7 +193,8 @@ export async function toggleSidebar($: EngineInterface, layout: Layout, presenta
 
 /**
  * The sidebar, in four boxes each titled on its top border: the band's status, one item a line,
- * and how long since the last request; what runs; the files the session changed, with the answers
+ * and how long since the last request; what runs; relay's runs not finished, only while there are
+ * any (`boxes/relay.tsx`); the files the session changed, with the answers
  * that changed them; and the contents, the session's answers newest first, each a press away from
  * its place in the conversation. A press on a box's title folds it to one line, and back. What each
  * answer did is on its own closing line, not here.
@@ -240,6 +244,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // likely's spend, one line when an API key is set (`hooks/likely/`).
     const decisions = await read($, likelyStatus)
     const likelyLine = decisions === null ? '' : statusLine(decisions)
+    // relay's runs not finished, in small: written as a run's state is saved, never read from files here.
+    const relay = relayLines(await read($, relayStatus), THEME_COLORS)
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
@@ -320,6 +326,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       boxRows('device', 2 + (picture === null ? deviceText : Math.max(PICTURE_ROWS, deviceText))) +
       boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1) + (likelyLine === '' ? 0 : 1)) +
       boxRows('activity', activity.length) +
+      (relay.length === 0 ? 0 : boxRows('relay', relay.length)) +
       (files.length === 0 ? 0 : boxRows('files', 0)) +
       boxRows('contents', 0)
     // No rows given (a surface that does not say): nothing is cut.
@@ -368,6 +375,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         {deviceBox($, f, { info: deviceInfo, lines, note, picture, pictureColumns, Image, mood, mark: catMark(mood), isRestartPending })}
         {statusBox($, f, { status, id, name, request, likelyLine })}
         {activityBox(f, activity)}
+        {relay.length === 0 ? null : relayBox(f, relay)}
         {files.length === 0 ? null : filesBox(f, { shown: shownFiles, isExpanded: isFilesExpanded, isCut, onExpand: expandFiles, onCollapse: () => void update($, filesExpanded, () => false) })}
         {f.box('contents', tabs, lastBody)}
       </Box>

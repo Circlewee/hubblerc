@@ -176,6 +176,37 @@ export type LikelyStatus = {
   budgetUsd: number
 }
 
+/** A task of a relay run as the sidebar's relay box shows it (`hooks/relay/relay-status.ts`). */
+export type RelayTaskLine = {
+  /** `A-r3`. */
+  key: string
+  /** Its status as state.json holds it (a `TaskStatus` of `hooks/relay/relay-format.ts`). */
+  status: string
+  /** Blocked by the tool after its launch went out: its worker may still be at work. */
+  isLiveBlocked?: true
+  /** The model's id and the effort, as the brief names them. */
+  model: string
+  effort: string
+  /** Where it runs, the runner's first word (`orca`, `subagent`); '' before its launch. */
+  runner: string
+  /** When it was launched; null before. */
+  dispatchedAt: number | null
+}
+
+/** A relay run not finished, in small: what the sidebar's relay box draws. */
+export type RelayRunStatus = {
+  run: string
+  /** Each task's latest revision, and an earlier one still holding a worker, in the order written. */
+  tasks: RelayTaskLine[]
+  /** Decisions waiting on the person (asked, on hold); null when progress.md could not be read. */
+  pending: number | null
+  /** The last verdict, with HEAD as read when this summary was made (absent when it could not be). */
+  verdict: { id: string; result: 'pass' | 'fail'; commit: string; head?: string } | null
+}
+
+/** The relay runs of the session's repository not finished, by name: refreshed as a run's state is saved and at session.start. */
+export type RelayStatus = { runs: RelayRunStatus[] }
+
 declare module 'claude-code' {
   interface PluginState {
     hubblerc: {
@@ -241,6 +272,8 @@ declare module 'claude-code' {
       answerVersion: number
       /** Decisions' spend for the sidebar's line; null while no API key is set (no line). */
       likelyStatus: LikelyStatus | null
+      /** The sidebar's relay box: the runs not finished, in small; null until session.start has looked. */
+      relayStatus: RelayStatus | null
     }
   }
 }

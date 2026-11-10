@@ -5,7 +5,7 @@ import type { Segment } from '../../shared/style'
 import { cellWidth } from '../../shared/text-width'
 
 /** The sidebar's boxes, by the id their fold is kept under. */
-export type SectionId = 'device' | 'status' | 'activity' | 'files' | 'contents'
+export type SectionId = 'device' | 'status' | 'activity' | 'relay' | 'files' | 'contents'
 
 /** The elements a box draws with, as `$.ui.resolve` gave them to the sidebar's drawing. */
 export type Parts = {

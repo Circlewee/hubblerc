@@ -48,6 +48,9 @@ import {
   withTasks,
 } from './relay-format'
 import type { BriefInput, CheckOutcome, Criterion, FileChange, RelayPackage, RelayState, RelayTask, RunnerKind, TaskStatus } from './relay-format'
+import { noteRun, runStatus, setRuns, statusText } from './relay-status'
+import type { RelayRunStatus } from '../../types'
+import { THEME_COLORS } from '../shared/style'
 
 /**
  * relay's tool: the steps of the lead/worker skill (hubblerc:relay) that have one right answer.
@@ -133,6 +136,34 @@ export async function registerRelayTool($: EngineInterface): Promise<void> {
   const active = root === undefined ? [] : await findActiveRuns($, root).catch(() => [])
   const spec = { name: TOOL_NAME, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> }
   await $.tool.register(active.length === 0 ? spec : { ...spec, isDeferred: false }).catch(() => undefined)
+  // The sidebar's relay box, from the runs just found: none, a box of none.
+  await setRuns($, await summarize($, root, active, START_LOOK_MS)).catch(() => undefined)
+}
+
+/** Runs read, in small: each run's progress.md for the decisions waiting, HEAD once where there is a verdict to compare. */
+async function summarize($: EngineInterface, root: string | undefined, active: readonly ActiveRun[], timeoutMs = GIT_MS): Promise<RelayRunStatus[]> {
+  const head = root !== undefined && active.some(found => found.state.verdicts.length > 0) ? await headSha($, root, timeoutMs) : undefined
+  const runs: RelayRunStatus[] = []
+  for (const found of active) runs.push(runStatus(found.state, await readText($, `${found.dir}/progress.md`), head))
+
+  return runs
+}
+
+/**
+ * `/relay-status`: the runs not finished as the sidebar's relay box shows them, read now (and the
+ * box put to what was read); with none, the run finished last.
+ */
+export async function relayStatusText($: EngineInterface): Promise<string> {
+  const root = await repoRoot($)
+  if (root === undefined) return '세션의 작업 폴더가 git 저장소가 아니어서 relay 묶음이 없습니다(relay 기록은 저장소 루트의 .relay/runs/에 둡니다).'
+  const runs = await findRuns($, root)
+  const shown = await summarize($, root, runs.filter(found => found.state.status === 'active'))
+  await setRuns($, shown).catch(() => undefined)
+  // Finished last: by its last verdict (finish takes a passing one), else by when it started.
+  const when = (state: RelayState) => state.verdicts.at(-1)?.at ?? state.createdAt
+  const last = runs.filter(found => found.state.status === 'finished').reduce<ActiveRun | undefined>((latest, found) => (latest === undefined || when(found.state) > when(latest.state) ? found : latest), undefined)
+
+  return statusText({ runs: shown }, THEME_COLORS, last?.run)
 }
 
 export function serveRelayTool(on: On): void {
@@ -188,8 +219,8 @@ export async function repoRoot($: EngineInterface, timeoutMs = GIT_MS): Promise<
   return root === '' ? undefined : root
 }
 
-async function headSha($: EngineInterface, root: string): Promise<string | undefined> {
-  const ran = await git($, root, ['rev-parse', 'HEAD']).catch(() => undefined)
+async function headSha($: EngineInterface, root: string, timeoutMs = GIT_MS): Promise<string | undefined> {
+  const ran = await $.process.run(['git', 'rev-parse', 'HEAD'], { cwd: root, timeoutMs }).catch(() => undefined)
   const sha = ran?.exitCode === 0 ? ran.stdout.trim() : ''
 
   return sha === '' ? undefined : sha
@@ -254,14 +285,29 @@ export async function readState($: EngineInterface, root: string, run: string): 
   }
 }
 
-async function writeState($: EngineInterface, root: string, state: RelayState): Promise<void> {
+const progressPath = (root: string, run: string): string => `${runDir(root, run)}/progress.md`
+
+/**
+ * Writes the state; then the sidebar's relay box takes the run in small (relay-status.ts): every
+ * save of the tool and of the gate comes through here. `progress` is progress.md as the caller
+ * read or wrote it (null: not there), undefined to read it.
+ */
+async function writeState($: EngineInterface, root: string, state: RelayState, progress?: string | null): Promise<void> {
   await $.fs.write(`${runDir(root, state.run)}/state.json`, `${JSON.stringify(state, null, 2)}\n`)
+  await noteSaved($, root, state, progress).catch(() => undefined)
 }
 
-/** Draws progress.md's Tasks block again; a warning when the file or its markers are gone. */
-async function redrawTasks($: EngineInterface, root: string, state: RelayState): Promise<string | undefined> {
-  const path = `${runDir(root, state.run)}/progress.md`
-  const progress = await readText($, path)
+/** A finished run leaves the box with nothing read; an active one reads progress.md unless handed it, and HEAD only where there is a verdict. */
+async function noteSaved($: EngineInterface, root: string, state: RelayState, progress?: string | null): Promise<void> {
+  if (state.status !== 'active') return noteRun($, state, undefined, undefined)
+  const text = progress === undefined ? await readText($, progressPath(root, state.run)) : (progress ?? undefined)
+  const head = state.verdicts.length === 0 ? undefined : await headSha($, root)
+  await noteRun($, state, text, head)
+}
+
+/** Draws progress.md's Tasks block again from its text as read; a warning when the file or its markers are gone. */
+async function redrawTasks($: EngineInterface, root: string, state: RelayState, progress: string | undefined): Promise<string | undefined> {
+  const path = progressPath(root, state.run)
   if (progress === undefined) return `progress.md가 없어 Tasks 표를 그리지 못했습니다: ${path}`
   const next = withTasks(progress, state.tasks)
   if (next === null) return `progress.md의 Tasks 표시(<!-- relay:tasks:start/end -->)가 없어 다시 그리지 않았습니다: ${path}`
@@ -270,19 +316,18 @@ async function redrawTasks($: EngineInterface, root: string, state: RelayState):
   return undefined
 }
 
-/** Saves the state and draws its Tasks block; the redraw's warning, if any. */
+/** Saves the state and draws its Tasks block, progress.md read once for both; the redraw's warning, if any. */
 async function save($: EngineInterface, root: string, state: RelayState): Promise<string | undefined> {
-  await writeState($, root, state)
+  const progress = await readText($, progressPath(root, state.run))
+  await writeState($, root, state, progress ?? null)
 
-  return redrawTasks($, root, state)
+  return redrawTasks($, root, state, progress)
 }
 
 export type ActiveRun = { run: string; dir: string; state: RelayState }
 
-/** The runs of this repository still active, by name. Only reads: the gate hook calls it on each launch. */
-export async function findActiveRuns($: EngineInterface, root?: string): Promise<ActiveRun[]> {
-  const top = root ?? (await repoRoot($))
-  if (top === undefined) return []
+/** Every run of this repository with a state this tool wrote, by name. Only reads. */
+async function findRuns($: EngineInterface, top: string): Promise<ActiveRun[]> {
   const folder = `${top}/${RUN_PREFIX}`
   if (!(await $.fs.exists(folder).catch(() => false))) return []
   const entries = await $.fs.list(folder).catch(() => [])
@@ -290,10 +335,18 @@ export async function findActiveRuns($: EngineInterface, root?: string): Promise
   for (const entry of entries) {
     if (entry.kind !== 'dir' || !isRun(entry.name)) continue
     const state = await readState($, top, entry.name)
-    if (state?.status === 'active') found.push({ run: entry.name, dir: runDir(top, entry.name), state })
+    if (state !== undefined) found.push({ run: entry.name, dir: runDir(top, entry.name), state })
   }
 
   return found.sort((a, b) => a.run.localeCompare(b.run))
+}
+
+/** The runs of this repository still active, by name. Only reads: the gate hook calls it on each launch. */
+export async function findActiveRuns($: EngineInterface, root?: string): Promise<ActiveRun[]> {
+  const top = root ?? (await repoRoot($))
+  if (top === undefined) return []
+
+  return (await findRuns($, top)).filter(found => found.state.status === 'active')
 }
 
 // ── Commits ──────────────────────────────────────────────
@@ -490,10 +543,11 @@ async function startAction($: EngineInterface, root: string, input: Record<strin
     const lead = await $.session.id().catch(() => '')
     const state: RelayState = { version: 1, run, goal, doneWhen, base, lead, status: 'active', createdAt: now, tasks: [], verdicts: [], packages: [] }
 
+    const progress = progressText(state, now)
     await $.fs.write(`${dir}/.gitignore`, '*\n')
-    await $.fs.write(`${dir}/progress.md`, progressText(state, now))
+    await $.fs.write(`${dir}/progress.md`, progress)
     await $.fs.write(`${dir}/reviews/verdict.schema.json`, `${JSON.stringify(VERDICT_SCHEMA, null, 2)}\n`)
-    await writeState($, root, state)
+    await writeState($, root, state, progress)
 
     return { result: [`묶음을 시작했습니다: ${run}`, `폴더: ${dir}`, `진행 기록: ${dir}/progress.md`, `Base: ${base}`].join('\n') }
   })
