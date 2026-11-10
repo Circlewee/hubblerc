@@ -8,7 +8,7 @@ import { standInForEngine, start } from './engine'
 
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
 const BAND_PROPS = {
-  hasSurvey: false,
+  hasSurvey: false, isCollapsed: false,
   isWorking: false,
   maxRows: 6,
   bodyColumns: 160,

@@ -12,7 +12,7 @@ import { catPictures, NOW, standInForEngine, start } from './engine'
 const PANE = { plugin: 'hubblerc', component: 'Pane', requestId: 'hubblerc' } as const
 const PANE_PROPS = { title: 'hubblerc', isFocused: false, bodyColumns: 56, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 60 }, view: {} }
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
-const BAND_PROPS = { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 120, scroll: { offset: 0, bodyRows: 6 }, view: {} }
+const BAND_PROPS = { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 6, bodyColumns: 120, scroll: { offset: 0, bodyRows: 6 }, view: {} }
 
 async function sidebar($: Engine, surface: 'terminal' | 'desktop') {
   const ui = await $.ui.mount({ ...PANE, surface, props: PANE_PROPS })

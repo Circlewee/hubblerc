@@ -173,7 +173,9 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
   })
   on('http.fetch', async (_, e) => {
     if (e.url === 'https://api.anthropic.com/v1/messages') {
-      const body = JSON.parse(e.init?.body ?? '{}') as Record<string, unknown>
+      // The plugin sends its body as text; bytes (`{ base64 }`) are not what the Messages API is asked with here.
+      const sent = e.init?.body
+      const body = JSON.parse(typeof sent === 'string' ? sent : '{}') as Record<string, unknown>
       standIn.anthropicCalls.push({ headers: { ...(e.init?.headers ?? {}) }, body })
       if (standIn.anthropicDelayMs > 0) await standIn.clock.sleep(standIn.anthropicDelayMs)
       const answer = standIn.anthropic(body)

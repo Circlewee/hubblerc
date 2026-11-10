@@ -163,7 +163,7 @@ test('the band stays aside while the answer pane stands in front of the sidebar,
     { id: 'hubblerc', title: 'hubblerc', isShown: false, isFocused: false, isPlaced: true },
     { id: 'hubblerc-answer', title: '#1 답변', isShown: true, isFocused: true, isPlaced: true },
   ]
-  const band = await $.ui.mount({ plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band', surface: 'terminal', props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 120, scroll: { offset: 0, bodyRows: 6 }, view: {} }, viewport: { isFullscreen: true, columns: 200, rows: 50 } as never })
+  const band = await $.ui.mount({ plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band', surface: 'terminal', props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 6, bodyColumns: 120, scroll: { offset: 0, bodyRows: 6 }, view: {} }, viewport: { isFullscreen: true, columns: 200, rows: 50 } as never })
   // Aside: no line of the band drawn.
   expect(await band.find({ type: 'Text', text: /^Opus/ })).toBeUndefined()
   // The answer closed (the kit has no close to raise): the sidebar in front again, still aside.

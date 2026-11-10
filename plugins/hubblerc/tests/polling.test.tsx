@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { standInForEngine, start } from './engine'
 
 const SIDEBAR = { id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true }
-const BAND_PROPS = { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 160, scroll: { offset: 0, bodyRows: 6 }, view: {} }
+const BAND_PROPS = { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 6, bodyColumns: 160, scroll: { offset: 0, bodyRows: 6 }, view: {} }
 const statusRuns = (ran: string[][]) => ran.filter(argv => argv[0] === 'git' && argv.includes('status')).length
 const count = (ran: string[][], program: string) => ran.filter(argv => argv[0] === program).length
 

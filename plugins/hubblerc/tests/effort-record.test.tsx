@@ -9,7 +9,7 @@ import type { StandIn } from './engine'
 
 const LOG = '/home/me/.claude/hubblerc/auto-effort/Test-Mac.jsonl'
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
-const BAND_PROPS = { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 160, scroll: { offset: 0, bodyRows: 6 }, view: {} }
+const BAND_PROPS = { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 6, bodyColumns: 160, scroll: { offset: 0, bodyRows: 6 }, view: {} }
 const COMMAND = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }
 
 /** Stands for the API: each request answered, its effort recorded. */
