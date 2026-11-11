@@ -34,9 +34,6 @@ export function effortSamples(): readonly EffortSample[] {
  * request's tokens also add up on its turn (the answer's closing line), and its return is when the
  * prompt cache was last warmed.
  *
- * A subagent's requests go as the engine sent them (a relay worker's effort is fixed at its start by
- * its agent type, relay/worker-types.ts).
- *
  * Session only: the engine's setting (and other sessions) are untouched.
  */
 export function controlEffort(on: On, autoByDefault: boolean): void {

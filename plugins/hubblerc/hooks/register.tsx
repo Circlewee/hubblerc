@@ -24,7 +24,6 @@ import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, no
 import { findTurnForLine, summarize } from './activity/summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
 import { gateLaunches, unverifiedLine } from './relay/gate'
-import { registerWorkerTypes } from './relay/worker-types'
 import { registerRelayTool, serveRelayTool } from './relay/relay'
 import { showRelayLines } from './relay/relay-view'
 import { showToolLines } from './activity/tool-lines'
@@ -49,8 +48,6 @@ export const register: Register = (on, options) => {
     await startSidebar($, layout).catch(() => undefined)
     await startTodos($).catch(() => undefined)
     await registerRelayTool($).catch(() => undefined)
-    // relay's worker types, one per effort level: a brief's subagent starts as the one of its effort.
-    await registerWorkerTypes($).catch(() => undefined)
     await startLikely($).catch(() => undefined)
     await registerLikelyCommand($).catch(() => undefined)
     await startDevice($).catch(() => undefined)

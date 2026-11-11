@@ -1086,3 +1086,20 @@ test('a subagent\'s end, an interrupted answer and a repository with no run fold
   expect((await $.turn.complete({ answer: '', isAborted: true, reason: 'aborted', turnId: 't2', durationMs: 10 })).text).toBe('')
   expect((await $.turn.complete({ answer: 'x', isAborted: false, reason: 'answer', turnId: 't3', durationMs: 10, agentId: 'ag-9' })).text).toBe('')
 })
+
+// Moved here on 2026-11-11 (D-r6) from the deleted subagent effort tests: the runner part of their named-send test.
+test('D: a brief sent by a name whose answer names the agent is recorded under that agentId; an answer that names none keeps the address', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const b = await newTask($, 'B', { edit_scope: ['area-b/**'] })
+  const c = await newTask($, 'C', { edit_scope: ['area-c/**'] })
+  const named = { success: true, message: 'Resuming agent ag-7', resumedAgentId: 'ag-7' }
+  sim.sendAnswer = { result: named, text: JSON.stringify(named) }
+  expect((await sendMessage($, 'worker-b', `Read ${b}.`)).deny).toBeUndefined()
+  expect(state(sim).tasks.find(task => taskKey(task) === 'B-r1')).toMatchObject({ status: 'running', runner: 'subagent ag-7' })
+
+  const plain = { success: true, message: 'Sent' }
+  sim.sendAnswer = { result: plain, text: JSON.stringify(plain) }
+  expect((await sendMessage($, 'worker-c', `Read ${c}.`)).deny).toBeUndefined()
+  expect(state(sim).tasks.find(task => taskKey(task) === 'C-r1')).toMatchObject({ status: 'running', runner: 'subagent worker-c' })
+})
