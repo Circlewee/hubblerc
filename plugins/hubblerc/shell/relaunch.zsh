@@ -30,6 +30,12 @@ fi
 # 사본에는 원본 위치를 적은 .hubblerc-source가 남는다. 아래 claude()는 그 표시가 있는 --plugin-dir를
 # 다시 띄우기 직전에 새로 복사한다.
 
+# 같은 이름의 alias(예전 방식의 `alias hcc="claude --plugin-dir <저장소>"` 등)가 있으면 아래 함수 정의가
+# 파싱 오류로 깨지고(alias는 함수보다 먼저 풀린다) 이 파일의 나머지도 불러오지 못한다. 그리고 alias가
+# 남으면 함수보다 먼저 실행되어 저장소 경로를 직접 불러오게 된다. 그래서 이 파일이 정의하는 이름의
+# alias는 먼저 지운다(이 셸 세션에서만. ~/.zshrc의 alias 줄은 건드리지 않는다).
+unalias hcc hcc-sync claude hubblerc-key 2>/dev/null
+
 # _hubblerc_copy_sync <원본> <사본>: 원본을 사본으로 복사하고 표시를 남긴다.
 _hubblerc_copy_sync() {
   local src="${1%/}" dest="${2%/}"

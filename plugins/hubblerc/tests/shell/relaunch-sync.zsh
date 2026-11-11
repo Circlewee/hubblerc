@@ -45,7 +45,16 @@ chmod +x "$tmp/bin/claude"
 
 export PATH="$tmp/bin:$PATH" HOME="$tmp/home" TMPDIR="$tmp" FAKE_DIR="$tmp" FAKE_SRC="$tmp/src"
 unset TERM_PROGRAM
-source "$script"
+
+# 0. Old aliases with the names the file defines must not break sourcing, and the functions win.
+alias hcc="claude --plugin-dir /nonexistent"
+alias hcc-sync="false"
+alias claude="false"
+alias hubblerc-key="false"
+source "$script" && rc=0 || rc=$?
+check "alias: source ok" 0 "$rc"
+check "alias: functions defined" "function function function function" "$(whence -w hcc hcc-sync claude hubblerc-key | awk '{print $2}' | tr '\n' ' ' | sed 's/ $//')"
+check "alias: aliases removed" "" "$(alias hcc hcc-sync claude hubblerc-key 2>/dev/null)"
 
 # 1. Without HUBBLERC_DEV_SRC: guidance in Korean, nothing launched.
 unset HUBBLERC_DEV_SRC HUBBLERC_DEV_COPY
