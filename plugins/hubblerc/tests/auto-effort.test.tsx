@@ -111,6 +111,27 @@ test("auto from the slider: each question's requests go out at the table's level
   await band.unmount()
 })
 
+test('a level chosen on the slider wins over auto; the reset turns auto off', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const sent = answerRequests(on)
+  await start($)
+
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal', props: BAND_PROPS })
+  await band.press({ key: 'effort' })
+  await band.press({ key: 'effort-auto' })
+  await band.press({ key: 'effort' })
+  await band.press({ key: 'effort-low' })
+  await ask($, 't1', '질문')
+  expect((await band.find({ key: 'effort' }))?.text).toBe('low')
+
+  await band.press({ key: 'effort' })
+  await band.press({ key: 'effort-reset' })
+  await ask($, 't2', '질문')
+  expect(sent).toEqual(['low', 'xhigh'])
+  expect(standIn.completions).toHaveLength(0)
+  await band.unmount()
+})
+
 test('the same kind gets the level of the row for the turn\'s model: ask is low on Fable 5.2 and medium on Opus 5.5, a [1m] id the same row', { options: { autoEffort: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   const sent = answerRequests(on)
