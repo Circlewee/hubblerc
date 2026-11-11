@@ -51,6 +51,7 @@ import {
 } from './relay-format'
 import type { BriefInput, CheckOutcome, Criterion, FileChange, RelayPackage, RelayState, RelayTask, RunnerKind, TaskStatus } from './relay-format'
 import { noteRun, runStatus, setRuns, statusText } from './relay-status'
+import { settleWorkerEfforts } from './worker-effort'
 import type { RelayRunStatus } from '../../types'
 import { THEME_COLORS } from '../shared/style'
 
@@ -296,6 +297,8 @@ const progressPath = (root: string, run: string): string => `${runDir(root, run)
  */
 async function writeState($: EngineInterface, root: string, state: RelayState, progress?: string | null): Promise<void> {
   await $.fs.write(`${runDir(root, state.run)}/state.json`, `${JSON.stringify(state, null, 2)}\n`)
+  // A worker its task let go (reported, cancelled, the run closed) sends as the engine says again.
+  settleWorkerEfforts(state)
   await noteSaved($, root, state, progress).catch(() => undefined)
 }
 
@@ -498,11 +501,14 @@ export async function answerRelayTool($: EngineInterface, input: Record<string, 
 
     return markDispatched($, root, run, text(input.task), runner)
   }
-  // check only reads the state (its commands may run for minutes): it takes no lock.
+  // check writes no state, only its result file (its commands may run for minutes): it takes no lock.
   if (action === 'check') {
     const state = await readState($, root, run)
+    if (state === undefined) return { deny: STATE_GONE(root, run) }
+    // check runs commands and writes its result file: an abandoned run takes it no more than the other actions.
+    if (state.status === 'abandoned') return { deny: ABANDONED(run) }
 
-    return state === undefined ? { deny: STATE_GONE(root, run) } : checkAction($, root, state, text(input.task))
+    return checkAction($, root, state, text(input.task))
   }
 
   return withRunLock(root, run, async () => {
@@ -510,7 +516,7 @@ export async function answerRelayTool($: EngineInterface, input: Record<string, 
     if (state === undefined) return { deny: STATE_GONE(root, run) }
     const isClosing = action === 'task' || action === 'cancel' || action === 'report' || action === 'finish' || action === 'abandon'
     if (isClosing && state.status === 'finished') return { deny: `이미 끝난 묶음입니다: ${run}` }
-    // An abandoned run takes nothing that writes to it; pending (and check, above) only read it.
+    // An abandoned run takes nothing that writes to it or runs a command (check, above, neither); pending only reads it.
     if (action !== 'pending' && state.status === 'abandoned') return { deny: ABANDONED(run) }
     switch (action) {
       case 'task':
@@ -887,10 +893,13 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
     report.criteria.length === 0 ? '기준 없음(워커 보고)' : notPassed.length === 0 ? `기준 ${passed} pass(워커 보고)` : `기준 ${passed}/${report.criteria.length} pass(워커 보고)`
   const commits = report.commits.length === 0 ? '커밋 없음' : `커밋 ${report.commits.map(sha => sha.slice(0, 7)).join(', ')}`
   const isDoneNow = status === 'done' || status === 'done_with_concerns'
+  // Every criterion fixed at least once, passed or not: a pass the check then fails may have no tries left.
+  const tried = task.criteria.filter(criterion => (task.tries[criterion.id] ?? 0) >= 1).map(criterion => `${criterion.id} ${task.tries[criterion.id]}`)
   const lines = [
     [`${key}: 보고 ${report.status ?? '없음'} → 상태 ${status}`, commits, criteria, ...(isDoneNow ? ['다음: check'] : [])].join(' · '),
     ...(wasLive ? ['띄운 뒤 막혀 있던 작업의 워커가 보고했습니다: 이제 점유하지 않습니다(보고대로 처리).'] : []),
-    ...(notPassed.length === 0 ? [] : [`기준(워커 보고): ${notPassed.map(criterion => `${criterion.id} ${criterion.result}${criterion.tries === null ? '' : ` (tries ${criterion.tries})`}`).join(', ')}`]),
+    ...(notPassed.length === 0 ? [] : [`기준(워커 보고): ${notPassed.map(criterion => `${criterion.id} ${criterion.result}`).join(', ')}`]),
+    ...(tried.length === 0 ? [] : [`tries: ${tried.join(', ')}`]),
     ...(look.outside.length === 0 ? [] : [`범위 밖 파일: ${look.outside.join(', ')}`]),
     ...(look.tests.length === 0 ? [] : [`테스트·검사 파일 변경: ${look.tests.join(', ')}`]),
     ...(ran === undefined || ran === task.effort.trim().toLowerCase() ? [] : [`effort: 지시서 ${task.effort} · 실제 ${ran}(${signed.length > 0 ? '커밋 꼬리말' : '보고서'})`]),
@@ -1008,9 +1017,10 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
     `${key} 검사 결과(HEAD ${head.slice(0, 7)}): ${[...counts, treeShort, duration(totalMs)].join(' · ')}`,
     ...(isClean ? [] : [tree]),
     ...shown.map(outcome => {
-      const exit = outcome.exitCode === undefined ? '' : ` · exit ${outcome.exitCode}(기대 ${outcome.expectExit}) · ${outcome.ms ?? 0} ms`
+      const exit = outcome.exitCode === undefined ? '' : ` · exit ${outcome.exitCode}(기대 ${outcome.expectExit}) · ${duration(outcome.ms ?? 0)}`
 
-      return `- ${outcome.id}: ${outcome.result}${exit}${outcome.reason === undefined ? '' : ` · ${outcome.reason}`}`
+      // The tries counted across revisions: one that fails with 3 behind it asks for another worker.
+      return `- ${outcome.id}: ${outcome.result}${exit}${outcome.reason === undefined ? '' : ` · ${outcome.reason}`} · tries ${task.tries[outcome.id] ?? 0}`
     }),
     ...(shown.length === 0 ? [] : [`검사 결과 파일: ${path}`]),
   ]

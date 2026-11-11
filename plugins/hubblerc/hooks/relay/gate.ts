@@ -7,6 +7,7 @@ import type { ActiveRun } from './relay'
 import { isBusy, sameCommit, taskKey } from './relay-format'
 import type { RelayTask } from './relay-format'
 import { noteWorkerEffort, refillWorkerEfforts } from './worker-effort'
+import type { WorkerOwner } from './worker-effort'
 
 /**
  * relay's gates, as hooks. Gate 1 looks at a worker about to start or to be sent a brief (`orca
@@ -340,7 +341,7 @@ function withNote<R>(ran: R, note: string | undefined): R {
  * call's `{ success: false }`, 2026-11-11). That resume is the send's own: the send was checked and
  * holds the claim, so the spawn passes unchecked, and how it went is kept here for the send's receipt.
  */
-type Sending = { to: string; brief: string; effort: string; resumed?: { deny?: string; agentId?: string } }
+type Sending = { to: string; brief: string; effort: string; owner: WorkerOwner; resumed?: { deny?: string; agentId?: string } }
 const sending = new Set<Sending>()
 
 /**
@@ -372,7 +373,7 @@ async function resumeOf<R extends { deny?: string }>(going: Sending, agentId: st
     if (typeof started.deny === 'string') going.resumed = { deny: started.deny }
     else {
       going.resumed = { agentId }
-      noteWorkerEffort(agentId, going.effort)
+      noteWorkerEffort(agentId, going.effort, going.owner)
     }
 
     return started
@@ -497,7 +498,8 @@ export async function planMessage($: EngineInterface, to: string, message: strin
   const problems = await briefProblems($, picked.task)
   if (problems.length > 0) return refused(taskKey(picked.task), problems)
 
-  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), brief: picked.task.specPath, act: 'send', runnerOf: () => `subagent ${to}`, effort: picked.task.effort } }
+  // The receipt is the agentId the send reached (the resumed one, or the answer's), '' when neither names one: then the address.
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), brief: picked.task.specPath, act: 'send', runnerOf: id => `subagent ${id === '' ? to : id}`, effort: picked.task.effort } }
 }
 
 // ── The answer's end ──────────────────────────────────────────────
@@ -568,7 +570,7 @@ export function gateLaunches(on: On): void {
     const plan = await planMessage($, to, message)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
-    const going: Sending = { to, brief: resolvePath(plan.hold.brief, undefined), effort: plan.hold.effort ?? '' }
+    const going: Sending = { to, brief: resolvePath(plan.hold.brief, undefined), effort: plan.hold.effort ?? '', owner: { run: plan.hold.run, task: plan.hold.task } }
     const send = async () => {
       sending.add(going)
       try {
@@ -583,9 +585,11 @@ export function gateLaunches(on: On): void {
       const why = failureOf(sent) ?? (refusal === undefined ? undefined : oneLine(`재개가 거절됐습니다: ${refusal}`))
       if (why !== undefined) return { isOk: false, why }
       // The agent's requests carry its agentId: the resumed one, else what the answer names, else the address (a name may not match).
-      noteWorkerEffort(going.resumed?.agentId ?? resumedIdIn(sent) ?? to, going.effort)
+      // The runner is written with the same id, so the refill at session start finds that worker again.
+      const reached = going.resumed?.agentId ?? resumedIdIn(sent)
+      noteWorkerEffort(reached ?? to, going.effort, going.owner)
 
-      return { isOk: true, text: '' }
+      return { isOk: true, text: reached ?? '' }
     })
 
     return 'refused' in out ? { deny: out.refused } : withNote(out.ran, out.note)
@@ -604,7 +608,7 @@ export function gateLaunches(on: On): void {
       if (why !== undefined) return { isOk: false, why }
       const agentId = typeof started.agentId === 'string' ? started.agentId : ''
       // Noted as soon as the start went, before the state is written: the subagent may already be sending requests.
-      if (agentId !== '' && plan.hold?.effort !== undefined) noteWorkerEffort(agentId, plan.hold.effort)
+      if (agentId !== '' && plan.hold?.effort !== undefined) noteWorkerEffort(agentId, plan.hold.effort, { run: plan.hold.run, task: plan.hold.task })
 
       return { isOk: true, text: agentId }
     })

@@ -66,6 +66,8 @@ function standIn(on: On): Sim {
     if (e.argv[0] !== 'git') return out('', 1)
     if (e.argv.includes('--show-toplevel')) return out(`${ROOT}\n`)
     if (e.argv[1] === 'rev-parse' && e.argv.at(-1) === 'HEAD') return out(`${HEAD}\n`)
+    // A clean tree, so a run can be finished.
+    if (e.argv[1] === 'status') return out('')
 
     return out('', 1)
   })
@@ -242,4 +244,94 @@ test('session start fills the efforts again from the active runs: subagent tasks
   expect(await request($, sim, 'ag-live', 'medium')).toBe('max')
   expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
   expect(await request($, sim, 'ctx_1', 'medium')).toBe('medium')
+})
+
+// ── Verdict V1: a worker its task let go goes as sent; a name's agentId is kept ──────────────────────
+
+/** A DONE report of a task's one criterion, with nothing committed. */
+const doneReport = (key: string): string =>
+  [`# Report ${key}`, '- Status: DONE', '- Change: no_change', '- Commits: none', '- Model / effort: claude-sonnet-5-5 / high', '- Found at start: none', '## Criteria', '- C1: pass · tries 0 · ok', '## Test changes', 'none'].join('\n')
+
+test('V1 a worker its task let go goes as sent: after its report, a message outside a brief, a cancel; a worker still running keeps its brief’s effort', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A', 'high')
+  const b = await newTask($, 'B', 'xhigh')
+  const c = await newTask($, 'C', 'max')
+  expect((await spawn($, `Follow ${a}.`)).agentId).toBe('ag-1')
+  expect((await spawn($, `Follow ${b}.`)).agentId).toBe('ag-2')
+  expect((await spawn($, `Follow ${c}.`)).agentId).toBe('ag-3')
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('high')
+
+  // A reports: its worker is let go; B's still runs at its brief's effort. Sending still reads nothing.
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = doneReport('A-r1')
+  expect((await relay($, { action: 'report', run: RUN, task: 'A' })).deny).toBeUndefined()
+  expect(state(sim).tasks.find(task => task.id === 'A')?.status).toBe('done')
+  const before = sim.reads
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
+  expect(await request($, sim, 'ag-2', 'medium')).toBe('xhigh')
+  expect(sim.reads).toBe(before)
+
+  // A later message to the finished worker that carries no brief resumes it untouched: its requests go as sent.
+  sim.engine = $
+  sim.finished = { 'ag-1': 'ag-1' }
+  expect((await sendMessage($, 'ag-1', 'One more question about your notes.')).deny).toBeUndefined()
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
+
+  // C cancelled once its worker stopped: let go too; B still holds.
+  expect((await relay($, { action: 'cancel', run: RUN, task: 'C', reason: 'stopped', confirmed_stopped: true })).deny).toBeUndefined()
+  expect(await request($, sim, 'ag-3', 'medium')).toBe('medium')
+  expect(await request($, sim, 'ag-2', 'medium')).toBe('xhigh')
+})
+
+/** Task A done and verified at HEAD as another session wrote it: this session's table still names its worker until the run is saved here. */
+function doneElsewhere(sim: Sim): void {
+  setState(sim, next => {
+    Object.assign(next.tasks[0] ?? {}, { status: 'done', reportedAt: NOON })
+    next.packages = [{ id: 'V1', at: NOON + 1, head: HEAD, tasks: [{ key: 'A-r1', criteria: ['C1'] }], files: [] }]
+    next.verdicts = [{ id: 'V1', at: NOON + 1, commit: HEAD, path: `${DIR}/reviews/V1-verdict.json`, result: 'pass' }]
+  })
+}
+
+test('V1 a run finished lets its workers go: their requests go as sent', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A', 'high')
+  await spawn($, `Follow ${a}.`)
+  doneElsewhere(sim)
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('high')
+  expect((await relay($, { action: 'finish', run: RUN })).deny).toBeUndefined()
+  expect(state(sim).status).toBe('finished')
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
+})
+
+test('V1 a run abandoned lets its workers go: their requests go as sent', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A', 'high')
+  await spawn($, `Follow ${a}.`)
+  doneElsewhere(sim)
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('high')
+  expect((await relay($, { action: 'abandon', run: RUN, reason: 'trial run' })).deny).toBeUndefined()
+  expect(state(sim).status).toBe('abandoned')
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
+})
+
+test('V1 a brief sent by a name whose answer names the agent: the runner is that agentId, and after a new session start its requests still go at the brief’s effort', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const b = await newTask($, 'B', 'xhigh')
+  sim.sendAnswer = { success: true, message: 'Resuming agent ag-7', resumedAgentId: 'ag-7' }
+  expect((await sendMessage($, 'worker-b', `Read ${b}.`)).deny).toBeUndefined()
+  expect(state(sim).tasks[0]).toMatchObject({ status: 'running', runner: 'subagent ag-7' })
+  expect(await request($, sim, 'ag-7', 'medium')).toBe('xhigh')
+
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  expect(await request($, sim, 'ag-7', 'medium')).toBe('xhigh')
+
+  // An answer that names no agent: the address, as before.
+  const c = await newTask($, 'C', 'low')
+  sim.sendAnswer = { success: true, message: 'Sent' }
+  expect((await sendMessage($, 'worker-c', `Read ${c}.`)).deny).toBeUndefined()
+  expect(state(sim).tasks.find(task => task.id === 'C')?.runner).toBe('subagent worker-c')
 })

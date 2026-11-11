@@ -1339,23 +1339,25 @@ test('a new revision’s brief says the tries a criterion takes over, from 1 up;
 
 // ── report and check say little when all is well ──────────────────────────────────────
 
-test('a clean report is one line: status, commits, criteria and what comes next, with no 없음 lines and no report path', async ($, on) => {
+test('a clean report is its first line (status, commits, criteria, what comes next) and a tries line when a criterion was fixed; no 없음 lines and no report path', async ($, on) => {
   const sim = standIn(on)
   await doneA($, sim)
+  // The report's C1 was fixed once, C2 never: the tries line names C1 only.
   const clean = await relay($, { action: 'report', run: RUN, task: 'A' })
-  expect(clean.result).toBe('A-r1: 보고 DONE → 상태 done · 커밋 1111111 · 기준 2 pass(워커 보고) · 다음: check')
+  expect(clean.result).toBe('A-r1: 보고 DONE → 상태 done · 커밋 1111111 · 기준 2 pass(워커 보고) · 다음: check\ntries: C1 1')
 
   // Concerns: the report is to be read, so its path is given.
   sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'DONE_WITH_CONCERNS', concerns: '- slow on big repos' })
   const concerned = await relay($, { action: 'report', run: RUN, task: 'A' })
-  expect(concerned.result).toBe(`A-r1: 보고 DONE_WITH_CONCERNS → 상태 done_with_concerns · 커밋 1111111 · 기준 2 pass(워커 보고) · 다음: check\n보고서: ${DIR}/tasks/A-r1-report.md`)
+  expect(concerned.result).toBe(`A-r1: 보고 DONE_WITH_CONCERNS → 상태 done_with_concerns · 커밋 1111111 · 기준 2 pass(워커 보고) · 다음: check\ntries: C1 1\n보고서: ${DIR}/tasks/A-r1-report.md`)
 
-  // Blocked: the criteria not passed, with their tries, and the path; no "next".
+  // Blocked: the criteria not passed, their tries, and the path; no "next".
   sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', commits: 'none', criteria: ['- C1: fail · tries 3 · red', '- C2: unverified · tries 1 · -'] })
   const blocked = await relay($, { action: 'report', run: RUN, task: 'A' })
-  expect(blocked.result?.split('\n').slice(0, 3)).toEqual([
+  expect(blocked.result?.split('\n').slice(0, 4)).toEqual([
     'A-r1: 보고 BLOCKED → 상태 blocked · 커밋 없음 · 기준 0/2 pass(워커 보고)',
-    '기준(워커 보고): C1 fail (tries 3), C2 unverified (tries 1)',
+    '기준(워커 보고): C1 fail, C2 unverified',
+    'tries: C1 3, C2 1',
     `보고서: ${DIR}/tasks/A-r1-report.md`,
   ])
 
@@ -1382,7 +1384,7 @@ test('a clean check is one line; a fail, an unverified one for another reason th
   expect(unread.result?.split('\n')).toEqual([
     'A-r1 검사 결과(HEAD aaaaaaa): pass 0 · 미확인 2 (C1, C2 명령 없음) · 트리 확인 실패 · 0 ms',
     '작업 트리: git status 실패',
-    '- C1: unverified · exit 0(기대 0) · 0 ms · git status를 읽지 못해 작업 트리를 확인하지 못함',
+    '- C1: unverified · exit 0(기대 0) · 0 ms · git status를 읽지 못해 작업 트리를 확인하지 못함 · tries 1',
     `검사 결과 파일: ${DIR}/tasks/A-r1-checks.md`,
   ])
   expect(resultView(unread.result, false)?.line).toBe('pass 0 · fail 0 · 미확인 2 · 0 ms · 트리 확인 실패')
@@ -1492,4 +1494,46 @@ test('an abandoned run is under way nowhere: no other action writes to it, list 
   // A finished run is not abandoned.
   sim.files[`${DIR}/state.json`] = JSON.stringify({ ...state(sim), status: 'finished' })
   expect((await relay($, { action: 'abandon', run: RUN, reason: 'x' })).deny).toBe(`이미 끝난 묶음입니다: ${RUN}`)
+})
+
+// ── Verdict V1's findings, each reproduced ──────────────────────────────────────────────
+
+test('V1 an abandoned run takes no check: no command runs and no result file is written; pending still answers', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  sim.commands['make test'] = { exitCode: 0 }
+  expect((await relay($, { action: 'abandon', run: RUN, reason: 'trial run' })).result).toMatch(/^묶음을 버렸습니다: /)
+
+  const refusedCheck = await said($, { action: 'check', run: RUN, task: 'A' })
+  expect(refusedCheck.result).toBe(`거절: 이미 버린 묶음입니다: ${RUN}`)
+  expect(refusedCheck.problem).toBe(true)
+  expect(sim.ran).toEqual([])
+  expect(sim.files[`${DIR}/tasks/A-r1-checks.md`]).toBeUndefined()
+  expect((await relay($, { action: 'pending', run: RUN })).result).toBe('사용자 답을 기다리는 결정(asked·on hold)이 없습니다.')
+
+  // A finished run's check runs as before.
+  sim.files[`${DIR}/state.json`] = JSON.stringify({ ...state(sim), status: 'finished' })
+  expect((await relay($, { action: 'check', run: RUN, task: 'A' })).result).toMatch(/^A-r1 검사 결과/)
+  expect(sim.ran).toEqual(['make test'])
+})
+
+test('V1 a criterion reported as a pass with tries 3 shows its tries in the report, and on the check line that fails it', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
+  sim.commits[SHA_A] = { task: 'A-r1', subject: 'Add', files: ['hooks/relay/relay.ts'] }
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ criteria: ['- C1: pass · tries 3 · make test exit 0', '- C2: pass · tries 0 · read it'] })
+  const reported = await said($, { action: 'report', run: RUN, task: 'A' })
+  const text = (await relay($, { action: 'report', run: RUN, task: 'A' })).result ?? ''
+  expect(text).toBe('A-r1: 보고 DONE → 상태 done · 커밋 1111111 · 기준 2 pass(워커 보고) · 다음: check\ntries: C1 3')
+  // The row says what it said before.
+  expect(reported.result).toBe('DONE · 범위 밖 0 · 테스트 변경 0 · 경고 0')
+
+  sim.commands['make test'] = { exitCode: 1 }
+  const checked = await said($, { action: 'check', run: RUN, task: 'A' })
+  const body = (await relay($, { action: 'check', run: RUN, task: 'A' })).result ?? ''
+  expect(body).toContain('- C1: fail · exit 1(기대 0) · 0 ms · tries 3')
+  expect(body).toContain('- C1: 워커는 pass, 명령은 fail')
+  expect(checked.result).toBe('pass 0 · fail 1 · 미확인 1 · 0 ms · 트리 깨끗함')
 })

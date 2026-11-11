@@ -893,7 +893,7 @@ function statusesOf(sim: Sim, key: string): string[] {
   return seen
 }
 
-test('D: a new revision sent to a finished subagent is checked once; the resume the send causes passes and the task is running as subagent <to>', async ($, on) => {
+test('D: a new revision sent to a finished subagent is checked once; the resume the send causes passes and the task is running as subagent <the agent resumed>', async ($, on) => {
   const sim = standIn(on)
   await newRun($)
   const first = await newTask($, 'A', { edit_scope: ['area-a/**'] })
@@ -925,7 +925,8 @@ test('D: a new revision sent to a finished subagent is checked once; the resume 
   expect(statusesOf(sim, 'B-r1')).toEqual(['ready', 'launching', 'running'])
   const tasks = state(sim).tasks
   expect(tasks.find(task => taskKey(task) === 'A-r2')?.runner).toBe('subagent ag-worker-a')
-  expect(tasks.find(task => taskKey(task) === 'B-r1')?.runner).toBe('subagent worker-b')
+  // Sent by a name: the runner is the agentId the resume reached, which the refill at session start can find.
+  expect(tasks.find(task => taskKey(task) === 'B-r1')?.runner).toBe('subagent ag-worker-b')
   expect(tasks.find(task => taskKey(task) === 'A-r1')?.status).toBe('cancelled')
 })
 
