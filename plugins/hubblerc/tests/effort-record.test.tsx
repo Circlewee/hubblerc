@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseLevel, parseReason } from '../hooks/effort/auto-effort'
+import { parseKind, parseReason } from '../hooks/effort/auto-effort'
 import { effortWord } from '../hooks/effort/effort-record'
 import { standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
@@ -24,14 +24,14 @@ function answerRequests(on: On): unknown[] {
   return sent
 }
 
-async function step($: Engine, turnId: string, index: number): Promise<void> {
-  const stream = $.turn.step({ turnId, index, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 1 })
+async function step($: Engine, turnId: string, index: number, model = 'claude-opus-5-5'): Promise<void> {
+  const stream = $.turn.step({ turnId, index, model, effort: 'xhigh', messageCount: 1 })
   for await (const chunk of stream) void chunk
 }
 
-async function ask($: Engine, turnId: string, text: string, during?: () => Promise<void>): Promise<void> {
+async function ask($: Engine, turnId: string, text: string, during?: () => Promise<void>, model?: string): Promise<void> {
   await $.turn.start({ text, turnId })
-  await step($, turnId, 0)
+  await step($, turnId, 0, model)
   if (during !== undefined) await during()
   await $.turn.complete({ answer: '답했습니다.', isAborted: false, reason: 'answer', turnId, durationMs: 4200 })
 }
@@ -42,19 +42,19 @@ const lines = (standIn: StandIn) =>
     .filter(line => line !== '')
     .map(line => JSON.parse(line) as Record<string, unknown>)
 
-test('a reply reads as a level and the reason after it; a reason that is not there leaves the level', () => {
-  expect(parseLevel('high - 여러 파일을 고치는 작업이다')).toBe('high')
-  expect(parseReason('high - 여러 파일을 고치는 작업이다')).toBe('여러 파일을 고치는 작업이다')
-  expect(parseReason('xhigh: 설계 결정\n두 번째 줄')).toBe('설계 결정')
-  expect(parseReason('medium')).toBeNull()
+test('a reply reads as a kind and the reason after it; a reason that is not there leaves the kind', () => {
+  expect(parseKind('hard - 여러 파일을 고치는 작업이다')).toBe('hard')
+  expect(parseReason('hard - 여러 파일을 고치는 작업이다')).toBe('여러 파일을 고치는 작업이다')
+  expect(parseReason('long: 코드베이스 전체 실험\n두 번째 줄')).toBe('코드베이스 전체 실험')
+  expect(parseReason('ask')).toBeNull()
   expect(['high', ' Max now', 'auto', '', '정도'].map(effortWord)).toEqual(['high', 'max', 'auto', null, null])
 })
 
-test('each pick is a line of the machine\'s auto-effort log: the question masked, the level and its reason, whether the first request took it; the answer\'s figures follow', { options: { autoEffort: true } }, async ($, on) => {
+test('each pick is a line of the machine\'s auto-effort log: the question masked, the kind, the model and the level the table gives, the reason, whether the first request took it; the answer\'s figures follow', { options: { autoEffort: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   mock.env(on, { HOME: '/home/me' })
   answerRequests(on)
-  standIn.completion = 'high - 여러 파일을 고치는 작업'
+  standIn.completion = 'hard - 여러 파일을 고치는 작업'
   await start($)
 
   await ask($, 't1', 'ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijkl 로 테스트를 돌려 줘', async () => {
@@ -66,9 +66,11 @@ test('each pick is a line of the machine\'s auto-effort log: the question masked
     type: 'decision',
     session: 'session-1',
     turn: 1,
-    promptVersion: 2,
+    promptVersion: 3,
     question: 'ANTHROPIC_API_KEY=*** 로 테스트를 돌려 줘',
     hadContext: false,
+    task: 'hard',
+    model: 'claude-opus-5-5',
     effort: 'high',
     reason: '여러 파일을 고치는 작업',
     tokens: { input: 120, output: 1 },
@@ -85,7 +87,7 @@ test('a level set by hand after a pick, on the slider or with /effort, and the n
   const standIn = standInForEngine(on)
   mock.env(on, { HOME: '/home/me' })
   answerRequests(on)
-  standIn.completion = 'medium - 짧은 질문'
+  standIn.completion = 'ask - 짧은 질문'
   // The engine's own /effort, beneath the plugin.
   on('command.run', { command: 'effort' }, () => ({ text: '' }))
   await start($)
@@ -119,7 +121,7 @@ test('a pick later than the first request\'s wait is logged as not taken: the fa
   const standIn = standInForEngine(on)
   mock.env(on, { HOME: '/home/me' })
   const sent = answerRequests(on)
-  standIn.completion = 'xhigh - 설계 결정'
+  standIn.completion = 'long - 설계 결정'
   standIn.completionDelayMs = 5000
   await start($)
 
@@ -130,7 +132,8 @@ test('a pick later than the first request\'s wait is logged as not taken: the fa
   await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 9000 })
   await standIn.clock.settle()
   expect(sent).toEqual(['high'])
-  expect(lines(standIn)[0]).toMatchObject({ effort: 'xhigh', reason: '설계 결정', appliedFirst: false, firstEffort: 'high' })
+  // The line keeps the late kind and what the table gives it, the fallback kind's level having gone out.
+  expect(lines(standIn)[0]).toMatchObject({ task: 'long', model: 'claude-opus-5-5', effort: 'xhigh', reason: '설계 결정', appliedFirst: false, firstEffort: 'high' })
   expect(Number(lines(standIn)[0]?.latencyMs)).toBeGreaterThanOrEqual(5000)
 
   standIn.completionDelayMs = 0
@@ -138,5 +141,18 @@ test('a pick later than the first request\'s wait is logged as not taken: the fa
   await ask($, 't2', '다음')
   await standIn.clock.settle()
   const failed = lines(standIn).filter(line => line.type === 'decision')[1]
-  expect(failed).toMatchObject({ effort: null, reason: null, error: 'api-error', appliedFirst: false })
+  expect(failed).toMatchObject({ task: null, effort: null, reason: null, error: 'api-error', appliedFirst: false })
+})
+
+test('a model without a row in the table: the line keeps the kind and the model, its effort null; the engine effort went out', { options: { autoEffort: true } }, async ($, on) => {
+  const standIn = standInForEngine(on)
+  mock.env(on, { HOME: '/home/me' })
+  const sent = answerRequests(on)
+  standIn.completion = 'ask - 짧은 질문'
+  await start($)
+
+  await ask($, 't1', '이 함수 뭐 해?', undefined, 'claude-opus-5')
+  await standIn.clock.settle()
+  expect(sent).toEqual(['xhigh'])
+  expect(lines(standIn)[0]).toMatchObject({ type: 'decision', promptVersion: 3, task: 'ask', model: 'claude-opus-5', effort: null, reason: '짧은 질문', appliedFirst: false, firstEffort: 'xhigh' })
 })

@@ -270,7 +270,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const relay = relayLines(relayRuns, THEME_COLORS, inner)
 
     const isAuto = (auto ?? autoByDefault) && override === null
-    const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
+    // A pick without a level: the turn's model has no row in auto's table, so the engine's effort went out.
+    const effort = override ?? (isAuto ? (pick === null ? null : (pick.level ?? '기준 없음')) : engine)
     const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const status = statusParts(
       { model: modelId, effort, isOverridden: override !== null, isAuto, isUltracode, usage: figures, project: projectName, git: gitInfo, now, burnout, isRoomy: true, palette: THEME_COLORS, barColumns: inner },

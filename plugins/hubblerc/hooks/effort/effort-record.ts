@@ -3,27 +3,33 @@ import type { EngineInterface } from 'claude-code'
 
 import { appendLogLine, defaultLogFolder } from '../shared/jsonl-log'
 import { maskSecrets } from '../shared/log-safety'
+import { isTaskKind, levelsFor } from './effort-table'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 
 /**
  * Auto effort's record (2026-11-05): each pick a line of this machine's JSONL in
  * `hubblerc/auto-effort/` (iCloud Drive, else `~/.claude/hubblerc/auto-effort/`), and what came after
- * it appended as outcome lines, the pick's line never rewritten. What the picks can later be judged
- * by: the person changing the effort the same answer or before the next question (strong), the next
+ * it appended as outcome lines, the pick's line never rewritten. Since 2026-11-11 (prompt version 3)
+ * a decision line holds the kind of work picked (`task`), the model the turn's first request went to
+ * (`model`) and the level the effort table gives that kind on that model (`effort`), so a changed
+ * table can be applied again to past lines. What the picks can later be judged by: the person changing the effort the same answer or before the next question (strong), the next
  * question (a correction or a retry, read later), and the answer's failures, time and output. Esc is
  * no signal: it is pressed when needed, not at a pick the person disliked.
  */
 
-/** The classifier's prompt and its reply's form; raised whenever either changes. 2: a level and a reason. */
-export const EFFORT_PROMPT_VERSION = 2
+/**
+ * The classifier's prompt and its reply's form; raised whenever either changes. 2: a level and a
+ * reason. 3: a kind of work and a reason; the level comes from the per-model table.
+ */
+export const EFFORT_PROMPT_VERSION = 3
 /** How much of the question the line keeps (secrets masked), and of the next question. */
 const QUESTION_CHARS = 500
 const NEXT_CHARS = 200
 const MAX_RECORDS = 10
 
-/** What a pick came to: the level (null when none came), the reason given, how long and how many tokens it took. */
-export type PickResult = { effort: string | null; reason: string | null; latencyMs: number; tokens: { input: number; output: number } | null; error?: string }
+/** What a pick came to: the kind of work (null when none came), the reason given, how long and how many tokens it took. */
+export type PickResult = { task: string | null; reason: string | null; latencyMs: number; tokens: { input: number; output: number } | null; error?: string }
 
 type PickRecord = {
   id: string
@@ -35,8 +41,8 @@ type PickRecord = {
   question: string
   hadContext: boolean
   result?: PickResult
-  /** The effort the turn's first request went out with, and whose. */
-  first?: { effort: string; source: string }
+  /** The effort the turn's first request went out with, whose, and the model it went to. */
+  first?: { effort: string; source: string; model: string }
   isTurnDone: boolean
   isWritten: boolean
   isTurnWritten: boolean
@@ -98,10 +104,10 @@ export async function notePickDone($: EngineInterface, turnId: string, result: P
 }
 
 /** The turn's first request went out: with the pick, at auto's fallback (no pick in time), or at a level the person set. */
-export async function noteFirstRequest($: EngineInterface, turnId: string, effort: string, source: string): Promise<void> {
+export async function noteFirstRequest($: EngineInterface, turnId: string, effort: string, source: string, model: string): Promise<void> {
   const record = records.get(turnId)
   if (record === undefined || record.first !== undefined) return
-  record.first = { effort, source }
+  record.first = { effort, source, model }
   await writeWhatIsKnown($, record)
 }
 
@@ -138,6 +144,8 @@ async function writeWhatIsKnown($: EngineInterface, record: PickRecord): Promise
   if (!record.isWritten && record.result !== undefined && (record.first !== undefined || record.isTurnDone)) {
     record.isWritten = true
     const { result, first } = record
+    // The level the table gives the kind on the first request's model: null without a kind, a request or a row.
+    const effort = first === undefined || !isTaskKind(result.task) ? null : (levelsFor(first.model)?.[result.task] ?? null)
     await append($, {
       type: 'decision',
       id: record.id,
@@ -147,7 +155,9 @@ async function writeWhatIsKnown($: EngineInterface, record: PickRecord): Promise
       promptVersion: EFFORT_PROMPT_VERSION,
       question: record.question,
       hadContext: record.hadContext,
-      effort: result.effort,
+      task: result.task,
+      ...(first === undefined ? {} : { model: first.model }),
+      effort,
       reason: result.reason,
       latencyMs: result.latencyMs,
       tokens: result.tokens,

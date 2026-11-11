@@ -72,8 +72,15 @@ export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 /** Whose effort a main-loop request went out with: the engine's, the slider's, auto's pick, or auto's fallback (no pick in time). */
 export type EffortSource = 'engine' | 'manual' | 'auto' | 'fallback'
 
-/** The level auto set a turn to, and how long its pick took (null and `isFallback` when none came in time). */
-export type AutoPick = { turnId: string; level: EffortLevel; ms: number | null; isFallback?: boolean }
+/** What a message asks for, as auto effort's small model sorts it: nothing of the answering model in it. */
+export type TaskKind = 'ask' | 'routine' | 'hard' | 'long'
+
+/**
+ * What auto set a turn to: the level (null: the turn's model has no row in the effort table, so the
+ * engine's effort went out), how long the pick took (null and `isFallback` when none came in time),
+ * the kind picked and the model the turn's first request went to.
+ */
+export type AutoPick = { turnId: string; level: EffortLevel | null; ms: number | null; isFallback?: boolean; task?: TaskKind; model?: string }
 
 /** One main-loop request: the effort it went out with, and its tokens as the API reported them. */
 export type EffortSample = {

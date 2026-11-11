@@ -28,8 +28,8 @@ export function effortSamples(): readonly EffortSample[] {
 }
 
 /**
- * Sends this session's main-loop requests with the effort the slider chose, else auto's pick for
- * the turn, else the engine's; keeps track of the engine's own effort so the band can show it, and
+ * Sends this session's main-loop requests with the effort the slider chose, else the level auto's
+ * table gives the turn's kind on the request's model, else the engine's; keeps track of the engine's own effort so the band can show it, and
  * logs each request's effort and tokens (`/effort-log`), to see what a change of effort costs. Each
  * request's tokens also add up on its turn (the answer's closing line), and its return is when the
  * prompt cache was last warmed.
@@ -57,7 +57,7 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
       effort = override
       source = 'manual'
     } else if (await isAutoOn($, autoByDefault)) {
-      const picked = await autoLevelFor($, e.turnId).catch(() => undefined)
+      const picked = await autoLevelFor($, e.turnId, e.model).catch(() => undefined)
       if (picked !== undefined) {
         effort = picked.level
         source = picked.isFallback ? 'fallback' : 'auto'
@@ -66,7 +66,7 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
 
     noteRequest(undefined, e.model, String(effort), source === 'auto' || source === 'fallback')
     // Auto's record: whether the first request went out at the pick.
-    if (e.index === 0) void noteFirstRequest($, e.turnId, String(effort), source).catch(() => undefined)
+    if (e.index === 0) void noteFirstRequest($, e.turnId, String(effort), source, e.model).catch(() => undefined)
     const result: TurnStepResult = yield* watchPhase($, next(effort === e.effort ? e : { ...e, effort }))
     await logRequest($, { turnId: e.turnId, index: e.index, effort: String(effort), source }, result).catch(() => undefined)
     await $.clock

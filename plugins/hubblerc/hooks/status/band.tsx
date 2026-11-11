@@ -69,7 +69,8 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
     const now = await $.clock.now()
 
     const isAuto = (auto ?? autoByDefault) && override === null
-    const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)
+    // A pick without a level: the turn's model has no row in auto's table, so the engine's effort went out.
+    const effort = override ?? (isAuto ? (pick === null ? null : (pick.level ?? '기준 없음')) : engine)
     const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const line1 = statusParts(
       { model: modelId, effort, isOverridden: override !== null, isAuto, isUltracode, usage: figures, project: projectName, git: gitInfo, now, burnout },

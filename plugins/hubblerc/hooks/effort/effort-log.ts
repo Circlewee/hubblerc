@@ -1,4 +1,5 @@
 import type { AutoPick, EffortSample, EffortSource, TurnRecord, UsageSnapshot } from '../../types'
+import { TASK_LABELS } from './effort-table'
 
 const SOURCE_LABELS: Record<EffortSource, string> = { engine: '엔진', manual: '직접', auto: 'auto', fallback: '대체' }
 
@@ -28,9 +29,18 @@ export function effortLogTable(samples: readonly EffortSample[], list: readonly 
 
   const header = ['답변 ', '요청', 'effort      ', '    입력', ' 캐시 읽기', ' 캐시 쓰기', '    출력'].join('  ')
   const lines = [`요청별 effort (전체 ${samples.length}개 중 최근 ${rows.length}개)`, header, ...rows, '', cacheSummary(samples)]
-  if (pick !== null) lines.push(pick.ms === null ? `마지막 auto 판정: 제때 오지 않아 ${pick.level}로 보냄` : `마지막 auto 판정: ${pick.level} (${(pick.ms / 1000).toFixed(1)}s)`)
+  if (pick !== null) lines.push(`마지막 auto 판정: ${pickLine(pick)}`)
 
   return lines.join('\n')
+}
+
+/** What auto's last pick came to: a model without a row in the table, no pick in time, or the kind and the level it gave. */
+function pickLine(pick: AutoPick): string {
+  if (pick.level === null) return `${pick.model ?? '이 모델'}은 기준표에 없어 엔진 설정으로 보냄`
+  if (pick.ms === null) return `제때 오지 않아 ${pick.level}로 보냄`
+  const seconds = `(${(pick.ms / 1000).toFixed(1)}s)`
+
+  return pick.task === undefined ? `${pick.level} ${seconds}` : `${TASK_LABELS[pick.task]} → ${pick.level} ${seconds}`
 }
 
 /**

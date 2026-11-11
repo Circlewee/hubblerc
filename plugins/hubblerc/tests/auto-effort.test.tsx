@@ -2,8 +2,10 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { classifierPrompt, parseLevel } from '../hooks/effort/auto-effort'
+import { classifierPrompt, parseKind } from '../hooks/effort/auto-effort'
 import { cacheSummary } from '../hooks/effort/effort-log'
+import { EFFORT_TABLE, levelsFor, TASK_KINDS } from '../hooks/effort/effort-table'
+import { isEffortLevel } from '../hooks/effort/levels'
 import { standInForEngine, start } from './engine'
 
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
@@ -40,21 +42,32 @@ function answerRequests(on: On): unknown[] {
   return sent
 }
 
-async function ask($: Engine, turnId: string, text: string, steps = 1, agentId?: string): Promise<void> {
+async function ask($: Engine, turnId: string, text: string, steps = 1, agentId?: string, model = 'claude-opus-5-5'): Promise<void> {
   await $.turn.start({ text, turnId, ...(agentId === undefined ? {} : { agentId }) })
   for (let index = 0; index < steps; index += 1) {
-    const stream = $.turn.step({ turnId, index, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 1, ...(agentId === undefined ? {} : { agentId }) })
+    const stream = $.turn.step({ turnId, index, model, effort: 'xhigh', messageCount: 1, ...(agentId === undefined ? {} : { agentId }) })
     for await (const chunk of stream) void chunk
   }
   await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId, durationMs: 1000, ...(agentId === undefined ? {} : { agentId }) })
 }
 
-test('a reply names a level by its first word; anything else names none', () => {
-  expect(parseLevel('high')).toBe('high')
-  expect(parseLevel(' XHigh.\n')).toBe('xhigh')
-  expect(parseLevel('medium - a quick question')).toBe('medium')
-  expect(parseLevel('max')).toBeUndefined()
-  expect(parseLevel('I think high')).toBeUndefined()
+test('a reply names a kind of work by its first word, any case; a level name or anything else names none', () => {
+  expect(parseKind('ask')).toBe('ask')
+  expect(parseKind(' Routine.\n')).toBe('routine')
+  expect(parseKind('HARD - 원인이 불분명한 실패')).toBe('hard')
+  expect(parseKind('long - 코드베이스 전체 실험')).toBe('long')
+  expect(parseKind('high')).toBeUndefined()
+  expect(parseKind('medium - a quick question')).toBeUndefined()
+  expect(parseKind('I think hard')).toBeUndefined()
+})
+
+test('every row of the effort table gives all four kinds a level, none of them max; an id with [1m] finds its row', () => {
+  for (const row of Object.values(EFFORT_TABLE)) {
+    expect(Object.keys(row).sort()).toEqual([...TASK_KINDS].sort())
+    expect(Object.values(row).every(level => isEffortLevel(level) && level !== 'max')).toBe(true)
+  }
+  expect(levelsFor('claude-fable-5-2[1m]')).toBe(EFFORT_TABLE['claude-fable-5-2'])
+  expect(levelsFor('claude-opus-5')).toBeUndefined()
 })
 
 test('the classifier reads the question, and the answer before it for a short follow-up', () => {
@@ -74,7 +87,7 @@ test('off by default: requests go out at the engine effort and nothing is classi
   expect(standIn.completions).toHaveLength(0)
 })
 
-test("auto from the slider: each question's requests go out at the small model's pick, a subagent's untouched", async ($, on) => {
+test("auto from the slider: each question's requests go out at the table's level for the small model's kind, a subagent's untouched", async ($, on) => {
   const standIn = standInForEngine(on)
   const sent = answerRequests(on)
   standIn.messages = [{ role: 'assistant', text: '3단계를 커밋했습니다.', toolUses: [] }]
@@ -85,12 +98,12 @@ test("auto from the slider: each question's requests go out at the small model's
   await band.press({ key: 'effort-auto' })
   expect((await band.find({ key: 'effort' }))?.text).toBe('auto')
 
-  standIn.completion = 'high'
+  standIn.completion = 'hard'
   await ask($, 't1', '이어서 진행하자', 2)
   expect((await band.find({ key: 'effort' }))?.text).toBe('auto high')
   expect(standIn.completions[0]).toMatchObject({ model: 'haiku', prompt: expect.stringContaining('3단계를 커밋했습니다.') })
 
-  standIn.completion = 'medium'
+  standIn.completion = 'ask'
   await ask($, 't2', '이 함수 뭐 하는 거야?')
   await ask($, 's1', 'find the callers', 1, 'ag-1')
   expect(sent).toEqual(['high', 'high', 'medium', 'xhigh'])
@@ -98,24 +111,37 @@ test("auto from the slider: each question's requests go out at the small model's
   await band.unmount()
 })
 
-test('a level chosen on the slider wins over auto; the reset turns auto off', async ($, on) => {
+test('the same kind gets the level of the row for the turn\'s model: ask is low on Fable 5.2 and medium on Opus 5.5, a [1m] id the same row', { options: { autoEffort: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   const sent = answerRequests(on)
+  standIn.completion = 'ask - 짧은 질문'
   await start($)
 
-  const band = await $.ui.mount({ ...BAND, surface: 'terminal', props: BAND_PROPS })
-  await band.press({ key: 'effort' })
-  await band.press({ key: 'effort-auto' })
-  await band.press({ key: 'effort' })
-  await band.press({ key: 'effort-low' })
-  await ask($, 't1', '질문')
-  expect((await band.find({ key: 'effort' }))?.text).toBe('low')
+  await ask($, 't1', '이 함수 뭐 해?', 1, undefined, 'claude-fable-5-2')
+  await ask($, 't2', '이 함수 뭐 해?', 1, undefined, 'claude-opus-5-5')
+  await ask($, 't3', '이 함수 뭐 해?', 1, undefined, 'claude-fable-5-2[1m]')
+  expect(sent).toEqual(['low', 'medium', 'low'])
+})
 
-  await band.press({ key: 'effort' })
-  await band.press({ key: 'effort-reset' })
-  await ask($, 't2', '질문')
-  expect(sent).toEqual(['low', 'xhigh'])
-  expect(standIn.completions).toHaveLength(0)
+test('a model without a row: the request goes out at the engine effort without waiting for the pick, and the band and /effort-log say there is no row', { options: { autoEffort: true } }, async ($, on) => {
+  const standIn = standInForEngine(on)
+  const sent = answerRequests(on)
+  standIn.completion = 'ask - 짧은 질문'
+  // Longer than the first request would wait: the clock is not moved, so a wait would never end.
+  standIn.completionDelayMs = 3000
+  await start($)
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal', props: BAND_PROPS })
+
+  await ask($, 't1', '이 함수 뭐 해?', 2, undefined, 'claude-opus-5')
+  expect(sent).toEqual(['xhigh', 'xhigh'])
+  expect((await band.find({ key: 'effort' }))?.text).toBe('auto 기준 없음')
+  // The pick is still made, for the record.
+  expect(standIn.completions).toHaveLength(1)
+
+  const log = (await $.command.run({ command: 'effort-log', ...COMMAND })).text ?? ''
+  // The table's last line; the command adds the limits after a blank line.
+  expect(log.split('\n\n').at(-2)?.split('\n').at(-1)).toBe('마지막 auto 판정: claude-opus-5은 기준표에 없어 엔진 설정으로 보냄')
+  expect(log).toContain('#1        0  엔진 xhigh')
   await band.unmount()
 })
 
@@ -137,12 +163,12 @@ test('a question after an answer is picked with that answer, kept as it complete
   expect(standIn.completions[1]?.prompt).toEqual(expect.stringContaining('두 가지 안이 있습니다.'))
 })
 
-test('the autoEffort option turns auto on for a new session; a failed pick sends the fallback, not the engine effort', { options: { autoEffort: true } }, async ($, on) => {
+test("the autoEffort option turns auto on for a new session; a failed pick sends the fallback kind's level, not the engine effort", { options: { autoEffort: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   const sent = answerRequests(on)
   await start($)
 
-  standIn.completion = 'xhigh'
+  standIn.completion = 'long'
   await ask($, 't1', '설계 같이 고민해 줘')
   standIn.completion = null
   await ask($, 't2', '질문')
@@ -159,7 +185,7 @@ test('the autoEffort option turns auto on for a new session; a failed pick sends
 test("a slow pick: the turn's first request waits for it, and the later ones keep it", { options: { autoEffort: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   const sent = answerRequests(on)
-  standIn.completion = 'medium'
+  standIn.completion = 'routine'
   standIn.completionDelayMs = 3000
   await start($)
 
@@ -183,7 +209,7 @@ test('/effort-log lists each request with whose effort it was, and the cache sha
   await band.press({ key: 'effort' })
   await band.press({ key: 'effort-auto' })
   await band.unmount()
-  standIn.completion = 'medium'
+  standIn.completion = 'routine'
   await ask($, 't1', '질문', 2)
 
   const log = (await $.command.run({ command: 'effort-log', ...COMMAND })).text ?? ''
@@ -194,7 +220,7 @@ test('/effort-log lists each request with whose effort it was, and the cache sha
     '#1        1  auto medium         10      50,000       2,000       100',
   ])
   expect(log).toContain('캐시 읽기 비율: effort가 바뀐 직후 0건 · 그대로인 요청 1건 평균 96%')
-  expect(log).toContain('마지막 auto 판정: medium (0.0s)')
+  expect(log).toContain('마지막 auto 판정: 일상 작업 → medium (0.0s)')
 })
 
 test('the cache share is averaged apart for requests right after a change of effort', () => {
