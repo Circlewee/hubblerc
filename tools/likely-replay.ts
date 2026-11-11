@@ -85,7 +85,7 @@ const SECOND_TO = '2026-11-11T06:00:00.000Z'
 export type Logged = { id: string; at: string; input: string; questions: Question[]; samples: number; thinking: boolean; p: number; failed: boolean }
 
 /** A logged Bash decision whatever became of it: `failed` null when its end was not seen (or not yet logged). */
-type Row = Omit<Logged, 'failed'> & { failed: boolean | null; outcomeAt?: string; note?: string; sessionId?: string; agentId?: string }
+export type Row = Omit<Logged, 'failed'> & { failed: boolean | null; outcomeAt?: string; note?: string; sessionId?: string; agentId?: string }
 
 type CallResult = { negated: boolean; p?: number; refused?: true; error?: string; latencyMs: number; tokens: Tokens }
 
@@ -96,7 +96,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Every logged Bash decision of the live method, oldest first. */
-function loadRows(): Row[] {
+export function loadRows(): Row[] {
   const decisions = new Map<string, Record<string, unknown>>()
   const outcomes = new Map<string, Record<string, unknown>>()
   for (const file of readdirSync(LOG_DIR).filter(name => name.endsWith('.jsonl')).sort()) {
@@ -155,7 +155,7 @@ function secondSet(rows: readonly Row[]): Scored[] {
 }
 
 /** The command inside a decision's input (bash-fail.ts's `bashInput`). */
-function commandOf(input: string): string {
+export function commandOf(input: string): string {
   const start = input.indexOf('\n\nCommand:\n')
   let text = start < 0 ? input : input.slice(start + '\n\nCommand:\n'.length)
   for (const marker of ['\n\nWorking folder: ', '\n\nWhat it is for: ']) {
