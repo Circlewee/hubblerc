@@ -87,7 +87,8 @@ export type Logged = { id: string; at: string; input: string; questions: Questio
 /** A logged Bash decision whatever became of it: `failed` null when its end was not seen (or not yet logged). */
 export type Row = Omit<Logged, 'failed'> & { failed: boolean | null; outcomeAt?: string; note?: string; sessionId?: string; agentId?: string }
 
-type CallResult = { negated: boolean; p?: number; refused?: true; error?: string; latencyMs: number; tokens: Tokens }
+/** `dist`: the first question's whole distribution, kept where it has more than a yes (a choice, a score). */
+export type CallResult = { negated: boolean; p?: number; dist?: number[]; refused?: true; error?: string; latencyMs: number; tokens: Tokens }
 
 export type ResultLine = { variant: string; id: string; at: string; model: string; thinking: boolean; calls: CallResult[]; p: number | null; costUsd: number }
 
@@ -355,7 +356,7 @@ export async function replayOne(decision: Logged, name: string, variant: Variant
         const distributions = distributionsOf(reply.values, questions, layout)
         if (typeof distributions === 'string') return { negated, error: distributions, latencyMs: ran.latencyMs, tokens }
 
-        return { negated, p: distributions[0]?.[0], latencyMs: ran.latencyMs, tokens }
+        return { negated, p: distributions[0]?.[0], ...((distributions[0]?.length ?? 0) > 1 ? { dist: distributions[0] } : {}), latencyMs: ran.latencyMs, tokens }
       }),
     ),
   )
