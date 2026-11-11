@@ -128,6 +128,8 @@ export function callLine(input: unknown, answer?: string, status: RelayStatus | 
       return 'relay 묶음 목록'
     case 'finish':
       return 'relay 묶음 끝내기'
+    case 'abandon':
+      return `relay 묶음 버리기 · ${clip(field(call, 'reason'), REASON_CHARS)}`
     default:
       return `relay ${clip(action, GOAL_CHARS)}`.trim()
   }
@@ -182,10 +184,6 @@ function after(lines: readonly string[], label: string): string | undefined {
   return found === undefined ? undefined : found.slice(label.length).trim()
 }
 
-function milliseconds(ms: number): string {
-  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)}초`
-}
-
 /** What a result's first line says it is, told apart by relay.ts's own words; undefined when none fits. */
 function told(lines: readonly string[]): string | undefined {
   const head = lines[0] ?? ''
@@ -206,33 +204,29 @@ function told(lines: readonly string[]): string | undefined {
 
   if ((match = /^\S+: (.+?) → cancelled · /.exec(head))) return `${statusWord(match[1] ?? '')} → ${statusWord('cancelled')}`
 
+  // A report's lines for files outside the scope and test changes are there only when there are some.
   if ((match = /^\S+: 보고 (.+?) → 상태 (\S+)/.exec(head))) {
-    const outside = after(lines, '범위 밖 파일:')
-    const tests = after(lines, '테스트·검사 파일 변경:')
     const mismatches = bulletsAfter(lines, line => line.startsWith('보고서 불일치')).length
-    const parts = [match[1] ?? '']
-    if (outside !== undefined) parts.push(`범위 밖 ${countOf(outside)}`)
-    if (tests !== undefined) parts.push(`테스트 변경 ${countOf(tests)}`)
-    parts.push(`경고 ${warningsIn(lines).length}`)
+    const parts = [match[1] ?? '', `범위 밖 ${countOf(after(lines, '범위 밖 파일:') ?? '')}`, `테스트 변경 ${countOf(after(lines, '테스트·검사 파일 변경:') ?? '')}`, `경고 ${warningsIn(lines).length}`]
     if (mismatches > 0) parts.push(`불일치 ${mismatches}`)
 
     return parts.join(' · ')
   }
 
-  if (/^\S+ 검사 결과\(HEAD /.test(head)) {
-    const outcomes = lines.filter(line => /^- [^:]+: (pass|fail|unverified)\b/.test(line))
-    const count = (result: string) => outcomes.filter(line => new RegExp(`^- [^:]+: ${result}\\b`).test(line)).length
-    const total = outcomes.reduce((sum, line) => sum + Number(/ · (\d+) ms/.exec(line)?.[1] ?? 0), 0)
-    const tree = lines.find(line => line.startsWith('작업 트리: '))?.slice('작업 트리: '.length) ?? ''
-    const treeShort = tree.startsWith('깨끗함')
-      ? '트리 깨끗함'
-      : tree.startsWith('git status 실패')
-        ? '트리 확인 실패'
-        : tree === ''
-          ? ''
-          : `트리 변경 ${countOf(tree.replace(/^.*?파일 /, ''))}개`
+  // A check's first line holds its counts (a result with none is absent), the tree and the time.
+  if ((match = /^\S+ 검사 결과\(HEAD [^)]*\): (.*)$/.exec(head))) {
+    const parts = (match[1] ?? '').split(' · ')
+    const count = (word: string) => Number(parts.map(part => new RegExp(`^${word} (\\d+)`).exec(part)?.[1]).find(found => found !== undefined) ?? 0)
+    const tree = parts.find(part => part.startsWith('트리 ')) ?? ''
+    const time = parts.find(part => /^\d+ ms$|^\d+(\.\d+)?초$/.test(part)) ?? ''
 
-    return [`pass ${count('pass')}`, `fail ${count('fail')}`, `미확인 ${count('unverified')}`, milliseconds(total), treeShort].filter(part => part !== '').join(' · ')
+    return [`pass ${count('pass')}`, `fail ${count('fail')}`, `미확인 ${count('미확인')}`, time, tree].filter(part => part !== '').join(' · ')
+  }
+
+  if ((match = /^묶음을 버렸습니다: \S+ · 남은 커밋 (\d+개|미확인)/.exec(head))) {
+    const pending = /^사용자 답을 기다리던 결정 (\d+)개:/.exec(lines.find(line => line.startsWith('사용자 답을 기다리던 결정')) ?? '')?.[1]
+
+    return `버림 · 남은 커밋 ${(match[1] ?? '').replace(/개$/, '')}${pending === undefined ? '' : ` · 기다리던 결정 ${pending}`}`
   }
 
   if ((match = /^검증 꾸러미 (V\d+): /.exec(head))) {

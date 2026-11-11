@@ -106,14 +106,14 @@ export function runStatus(state: RelayState, progress: string | undefined, head:
 
 const byName = (runs: readonly RelayRunStatus[]): RelayRunStatus[] => [...runs].sort((a, b) => a.run.localeCompare(b.run))
 
-/** The list with one run put in, or taken out (`status` undefined: finished). */
+/** The list with one run put in, or taken out (`status` undefined: no longer active, finished or abandoned). */
 export function withRun(current: RelayStatus | null, run: string, status: RelayRunStatus | undefined): RelayStatus {
   const others = (current?.runs ?? []).filter(other => other.run !== run)
 
   return { runs: byName(status === undefined ? others : [...others, status]) }
 }
 
-/** After a save: the run's summary in the box, or out of it once finished. */
+/** After a save: the run's summary in the box, or out of it once finished or abandoned. */
 export async function noteRun($: EngineInterface, state: RelayState, progress: string | undefined, head: string | undefined): Promise<void> {
   const status = state.status === 'active' ? runStatus(state, progress, head) : undefined
   await update($, relayStatus, current => withRun(current, state.run, status))

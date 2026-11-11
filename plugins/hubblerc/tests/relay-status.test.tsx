@@ -384,6 +384,28 @@ test('/relay-status reads the runs again and puts the box to them: a run another
   await ui.unmount()
 })
 
+test('an abandoned run is not under way: no box at session start, gone from the box once abandoned, and never the run "finished last"', async ($, on) => {
+  const standIn = standInForEngine(on)
+  disk(on, standIn)
+  // Abandoned later than the finished one: the finished one is still named.
+  putRun(standIn, { ...STATE, run: '2026-11-07-done', status: 'finished', verdicts: [{ ...STATE.verdicts[0]!, at: AT, result: 'pass' }] })
+  putRun(standIn, { ...STATE, run: '2026-11-08-dropped', status: 'abandoned', abandonedAt: AT + 60_000, abandonReason: 'trial', verdicts: [{ ...STATE.verdicts[0]!, at: AT + 60_000 }] })
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await boxLines(ui)).toBeUndefined()
+  expect(await relayStatus($)).toBe('진행 중인 relay 묶음이 없습니다. 가장 최근에 끝난 묶음: 2026-11-07-done')
+
+  // Through the tool: the run is in the box, then abandoned and out of it at the next drawing.
+  const run = `${localDate(NOW)}-demo`
+  expect((await relay($, { action: 'start', name: 'demo', goal: 'Try relay.', done_when: ['nothing'] })).deny).toBeUndefined()
+  expect((await boxLines(ui))?.[0]).toBe(run)
+  expect((await relay($, { action: 'abandon', run, reason: 'trial run' })).result).toMatch(/^묶음을 버렸습니다: /)
+  expect(await boxLines(ui)).toBeUndefined()
+  await ui.unmount()
+  expect(await relayStatus($)).toBe('진행 중인 relay 묶음이 없습니다. 가장 최근에 끝난 묶음: 2026-11-07-done')
+})
+
 test('idle with a run under way, nothing under .relay is read: the box waits for a save, not a timer', async ($, on) => {
   const standIn = standInForEngine(on)
   const seen = disk(on, standIn)

@@ -64,13 +64,19 @@ export type RelayState = {
   base: string
   /** The lead's session id. */
   lead: string
-  status: 'active' | 'finished'
+  /** `finished`: closed by `finish` on a passing verdict. `abandoned`: dropped by `abandon`, neither verified nor reverted. */
+  status: RunStatus
   createdAt: number
+  /** When and why the run was abandoned, when it was. */
+  abandonedAt?: number
+  abandonReason?: string
   tasks: RelayTask[]
   verdicts: RelayVerdict[]
   /** Absent in a state written before packages were recorded. */
   packages?: RelayPackage[]
 }
+
+export type RunStatus = 'active' | 'finished' | 'abandoned'
 
 export type RunnerKind = 'claude' | 'codex'
 
@@ -378,7 +384,8 @@ export function sectionBody(text: string, name: string): string[] | undefined {
 // ── The brief ──────────────────────────────────────────────
 
 export type BriefContext =
-  | { kind: 'full'; run: string; key: string; base: string; reportTo: string; lead: string }
+  /** `carried`: the tries each criterion takes over from the revision before (a new revision's brief says those of 1 or more). */
+  | { kind: 'full'; run: string; key: string; base: string; reportTo: string; lead: string; carried?: Record<string, number> }
   | { kind: 'light'; base: string; lead: string }
 
 function trailerFlags(input: BriefInput, context: BriefContext): string {
@@ -409,7 +416,9 @@ function rules(input: BriefInput, context: BriefContext): string[] {
     '범위 밖 파일(새 파일 포함)이 필요하면 먼저 묻는다.',
     '완료 기준과 테스트를 약화하지 않는다. 테스트를 바꿨으면 이유를 보고한다.',
     '목표·권한·입력·판정에 영향을 주는 것만 묻고 멈춘다(NEEDS_CONTEXT / BLOCKED). 사소한 선택(함수 이름, 파일 나누기, 문구)은 하고 나서 보고한다.',
-    '같은 기준의 수정은 판을 넘어 누적 3번까지(tries). 통과하면 더 다듬지 않는다.',
+    context.kind === 'full'
+      ? "같은 기준의 수정은 판을 넘어 누적 3번까지(tries). 기준 줄에 'tries 이어받음 N'이 있으면 거기서 이어 센다. 통과하면 더 다듬지 않는다."
+      : '같은 기준의 수정은 판을 넘어 누적 3번까지(tries). 통과하면 더 다듬지 않는다.',
     'push·배포·외부 전송·비용이 드는 일·되돌리기 어려운 일은 구체적인 승인 없이 하지 않는다.',
     `커밋: 새 파일은 먼저 \`git add <파일>\`(git이 모르는 파일은 --only로 커밋되지 않음), 그다음 \`${commit}\`. ${signedBy} 서명 줄(Co-Authored-By 등)은 넣지 않는다. 남이 스테이징한 변경은 건드리지 않는다. index.lock이면 3번까지 다시, 그래도 안 되면 BLOCKED(잠금 파일은 지우지 않음). stash·reset·checkout·clean·commit -a 금지.`,
     reportRule,
@@ -450,10 +459,12 @@ function reportFormat(input: BriefInput, context: BriefContext): string {
   ].join('\n')
 }
 
-function criterionLine(criterion: Criterion): string {
+/** A Done when line; `carried` (the tries taken over from the revision before) is said when 1 or more. */
+function criterionLine(criterion: Criterion, carried = 0): string {
   const command = criterion.command === undefined ? '' : ` · ${inlineCode(criterion.command)} → exit ${criterion.expectExit ?? 0}`
+  const tries = carried >= 1 ? ` · tries 이어받음 ${carried}` : ''
 
-  return `- ${criterion.id}: ${oneLine(criterion.text)}${command}`
+  return `- ${criterion.id}: ${oneLine(criterion.text)}${command}${tries}`
 }
 
 /** A brief, as the worker reads it: head lines, Goal, Read first, Done when, Rules, Report format. */
@@ -481,7 +492,7 @@ export function briefText(input: BriefInput, context: BriefContext): string {
     ...readFirst,
     '',
     '## Done when',
-    ...input.criteria.map(criterionLine),
+    ...input.criteria.map(criterion => criterionLine(criterion, context.kind === 'full' ? (context.carried?.[criterion.id] ?? 0) : 0)),
     '',
     '## Rules',
     ...rules(input, context).map((rule, at) => `${at + 1}. ${rule}`),
@@ -542,6 +553,21 @@ export function withTasks(progress: string, tasks: readonly RelayTask[]): string
   if (start < 0 || end < start) return null
 
   return `${progress.slice(0, start + TASKS_START.length)}\n${tasksTable(tasks)}\n${progress.slice(end)}`
+}
+
+/**
+ * progress.md with one row put at the end of its Log table (`| <time> | <what> |`), or null when
+ * there is no Log section. Rows the lead wrote are kept as they are.
+ */
+export function withLogRow(progress: string, at: number, what: string): string | null {
+  const parts = sections(progress)
+  const log = parts.find(section => section.title !== '' && titled(section, 'Log'))
+  if (log === undefined) return null
+  const row = `| ${localTime(at)} | ${cell(what)} |`
+  const last = log.lines.reduce((found, line, i) => (line.trim().startsWith('|') ? i : found), -1)
+  log.lines.splice(last < 0 ? log.lines.length : last + 1, 0, row)
+
+  return parts.map(section => section.lines.join('\n')).join('\n')
 }
 
 // ── The decisions table ──────────────────────────────────────────────

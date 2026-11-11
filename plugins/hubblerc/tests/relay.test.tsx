@@ -4,8 +4,10 @@ import type { On } from 'claude-code'
 
 import { checkTask, decisionRows, effortRan, globsOverlap, isPending, isTestFile, parseReport, pathMatches, reportMismatches, withoutSections } from '../hooks/relay/relay-format'
 import type { RelayState } from '../hooks/relay/relay-format'
+import { unverifiedLine } from '../hooks/relay/gate'
 import { registerRelayTool, reserveDispatch } from '../hooks/relay/relay'
 import { callLine, resultView } from '../hooks/relay/relay-view'
+import type { RelayStatus } from '../types'
 import { standInForEngine, start } from './engine'
 
 const ROOT = '/repo/work'
@@ -474,9 +476,12 @@ test('check runs each command itself and judges by its exit code; a criterion wi
   const checked = await relay($, { action: 'check', run: RUN, task: 'A' })
   expect(sim.ran).toEqual(['make test', 'make lint'])
   expect(checked.result).toContain(`${DIR}/tasks/A-r1-checks.md`)
-  expect(checked.result).toContain('- C1: pass · exit 0(기대 0)')
+  // A pass and a criterion with no command are counted on the first line; only the fail has a line of its own.
+  expect(checked.result?.split('\n')[0]).toBe('A-r1 검사 결과(HEAD aaaaaaa): pass 1 (C1) · fail 1 (C2) · 미확인 1 (C3 명령 없음) · 트리 깨끗함 · 0 ms')
   expect(checked.result).toContain('- C2: fail · exit 2(기대 0)')
-  expect(checked.result).toContain('- C3: unverified · 명령 없음: 검증자·사용자 확인')
+  expect(checked.result).not.toContain('- C1:')
+  expect(checked.result).not.toContain('- C3:')
+  expect(sim.files[`${DIR}/tasks/A-r1-checks.md`]).toContain('- Unverified: 명령 없음: 검증자·사용자 확인')
   const file = sim.files[`${DIR}/tasks/A-r1-checks.md`] ?? ''
   expect(file).toContain('- Summary: pass 1 · fail 1 · unverified 1')
   // The output's last 20 lines only.
@@ -723,7 +728,7 @@ test('V1-03 check marks a criterion unverified on a tree with tracked changes, o
 
   // A clean tree: a pass. HEAD moved by the first command spoils both.
   sim.status = ''
-  expect((await relay($, { action: 'check', run: RUN, task: 'A' })).result).toContain('- C1: pass')
+  expect((await relay($, { action: 'check', run: RUN, task: 'A' })).result).toContain('pass 2 (C1 C2) · 트리 깨끗함')
   sim.commands['make test'] = { exitCode: 0, effect: () => (sim.head = HEAD_2) }
   const moved = await relay($, { action: 'check', run: RUN, task: 'A' })
   expect(moved.result).toContain('- C1: unverified · exit 0(기대 0) · 0 ms · 실행 중 HEAD가 바뀜(aaaaaaa → bbbbbbb)')
@@ -1283,4 +1288,208 @@ test('the tool is listed outright while a run is not finished, and stays behind 
   const outside = { ...(engine as unknown as Record<string, unknown>), process: { run: async () => ({ exitCode: 128, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }) } } as never
   await registerRelayTool(outside)
   expect('isDeferred' in (registered[3] ?? {})).toBe(false)
+})
+
+// ── A new revision's brief says the tries it takes over ──────────────────────────────────────
+
+test('a new revision’s brief says the tries a criterion takes over, from 1 up; it is launched, copied, reported and packaged as before', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, { ...TASK_A, done_when: [{ text: 'tests pass', command: 'make test' }, { text: 'reads well' }, { id: 'C3', text: 'docs' }] })
+  // A first revision carries nothing; its rule says where a carried count would be.
+  const r1 = sim.files[`${DIR}/tasks/A-r1.md`] ?? ''
+  expect(r1).not.toContain('· tries 이어받음')
+  expect(r1).toContain("같은 기준의 수정은 판을 넘어 누적 3번까지(tries). 기준 줄에 'tries 이어받음 N'이 있으면 거기서 이어 센다. 통과하면 더 다듬지 않는다.")
+  await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
+  sim.commits[SHA_A] = { task: 'A-r1', subject: 'Try', files: ['hooks/relay/relay.ts'] }
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', criteria: ['- C1: fail · tries 2 · red', '- C2: pass · tries 0 · ok', '- C3: fail · tries 1 · x'] })
+  await relay($, { action: 'report', run: RUN, task: 'A' })
+
+  // C1 asked the same (2 carried), C2 the same (0 carried), C3 changed and C4 new (from 0).
+  const done_when = [{ text: 'tests pass', command: 'make test' }, { text: 'reads well' }, { id: 'C3', text: 'docs, now longer' }, { id: 'C4', text: 'new' }]
+  await relay($, { ...TASK_A, done_when })
+  const brief = sim.files[`${DIR}/tasks/A-r2.md`] ?? ''
+  expect(brief).toContain('- C1: tests pass · `make test` → exit 0 · tries 이어받음 2\n')
+  expect(brief).toContain('- C2: reads well\n')
+  expect(brief).toContain('- C3: docs, now longer\n')
+  expect(brief).toContain('- C4: new\n')
+  expect(brief.match(/· tries 이어받음/g)).toHaveLength(1)
+  expect(state(sim).tasks[1]).toMatchObject({ status: 'ready', tries: { C1: 2, C2: 0 } })
+
+  // Launched through the gate's reservation: the copy is the brief as written, its hash the one task wrote.
+  const held = await reserveDispatch(engineOver(sim), ROOT, RUN, 'A')
+  if (!('commit' in held)) throw new Error(held.deny)
+  expect('result' in (await held.commit('subagent a'))).toBe(true)
+  expect(sim.files[`${DIR}/tasks/A-r2.dispatched.md`]).toBe(brief)
+  expect(state(sim).tasks[1]).toMatchObject({ status: 'running', dispatchedHash: state(sim).tasks[1]?.specHash })
+
+  // A worker that counts on from the brief's line is not warned; the package carries the brief as sent.
+  sim.commits[SHA_B] = { task: 'A-r2', subject: 'Fix', files: ['hooks/relay/relay.ts'] }
+  sim.files[`${DIR}/tasks/A-r2-report.md`] = report({ commits: SHA_B, criteria: ['- C1: pass · tries 3 · ok', '- C2: pass · tries 0 · ok', '- C3: pass · tries 1 · ok', '- C4: pass · tries 0 · ok'] })
+  const reported = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(reported.result).not.toContain('tries가')
+  expect(reported.result).not.toContain('지시서가 보낸 뒤에 바뀌었거나')
+  expect((await relay($, { action: 'package', run: RUN })).deny).toBeUndefined()
+  expect(sim.files[`${DIR}/reviews/V1-package.md`]).toContain('- C1: tests pass · `make test` → exit 0 · tries 이어받음 2')
+
+  // A light brief has no revisions: its rule stays as it was.
+  const { action: _, run: __, ...fields } = TASK_A
+  expect((await relay($, { action: 'spec_text', ...fields })).result).not.toContain('tries 이어받음')
+})
+
+// ── report and check say little when all is well ──────────────────────────────────────
+
+test('a clean report is one line: status, commits, criteria and what comes next, with no 없음 lines and no report path', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  const clean = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(clean.result).toBe('A-r1: 보고 DONE → 상태 done · 커밋 1111111 · 기준 2 pass(워커 보고) · 다음: check')
+
+  // Concerns: the report is to be read, so its path is given.
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'DONE_WITH_CONCERNS', concerns: '- slow on big repos' })
+  const concerned = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(concerned.result).toBe(`A-r1: 보고 DONE_WITH_CONCERNS → 상태 done_with_concerns · 커밋 1111111 · 기준 2 pass(워커 보고) · 다음: check\n보고서: ${DIR}/tasks/A-r1-report.md`)
+
+  // Blocked: the criteria not passed, with their tries, and the path; no "next".
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', commits: 'none', criteria: ['- C1: fail · tries 3 · red', '- C2: unverified · tries 1 · -'] })
+  const blocked = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(blocked.result?.split('\n').slice(0, 3)).toEqual([
+    'A-r1: 보고 BLOCKED → 상태 blocked · 커밋 없음 · 기준 0/2 pass(워커 보고)',
+    '기준(워커 보고): C1 fail (tries 3), C2 unverified (tries 1)',
+    `보고서: ${DIR}/tasks/A-r1-report.md`,
+  ])
+
+  // A mismatch: its block and the path; the conversation's row counts it.
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ criteria: ['- C1: fail · tries 3 · red', '- C2: pass · tries 0 · ok'] })
+  const mismatched = await said($, { action: 'report', run: RUN, task: 'A' })
+  expect(mismatched.result).toMatch(/^DONE · 범위 밖 0 · 테스트 변경 0 · 경고 \d+ · 불일치 1$/)
+  const text = (await relay($, { action: 'report', run: RUN, task: 'A' })).result ?? ''
+  expect(text).toContain(`보고서: ${DIR}/tasks/A-r1-report.md`)
+  expect(text).toContain('보고서 불일치(워커에게 고쳐 달라고 하세요):\n- DONE인데 통과하지 않은 기준: C1(fail)')
+})
+
+test('a clean check is one line; a fail, an unverified one for another reason than no command, a dirty or unread tree each add their line and the file', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  sim.commands['make test'] = { exitCode: 0 }
+  const clean = await relay($, { action: 'check', run: RUN, task: 'A' })
+  expect(clean.result).toBe('A-r1 검사 결과(HEAD aaaaaaa): pass 1 (C1) · 미확인 1 (C2 명령 없음) · 트리 깨끗함 · 0 ms')
+  expect(clean.result).not.toContain('증거가 아닙니다')
+
+  // git status failing: the tree's line says so, and the command's result is unverified.
+  sim.status = null
+  const unread = await relay($, { action: 'check', run: RUN, task: 'A' })
+  expect(unread.result?.split('\n')).toEqual([
+    'A-r1 검사 결과(HEAD aaaaaaa): pass 0 · 미확인 2 (C1, C2 명령 없음) · 트리 확인 실패 · 0 ms',
+    '작업 트리: git status 실패',
+    '- C1: unverified · exit 0(기대 0) · 0 ms · git status를 읽지 못해 작업 트리를 확인하지 못함',
+    `검사 결과 파일: ${DIR}/tasks/A-r1-checks.md`,
+  ])
+  expect(resultView(unread.result, false)?.line).toBe('pass 0 · fail 0 · 미확인 2 · 0 ms · 트리 확인 실패')
+
+  // The worker's pass against the command's fail is still warned.
+  sim.status = ''
+  sim.commands['make test'] = { exitCode: 1 }
+  const failed = await relay($, { action: 'check', run: RUN, task: 'A' })
+  expect(failed.result).toContain('fail 1 (C1)')
+  expect(failed.result).toContain('- C1: fail · exit 1(기대 0) · 0 ms')
+  expect(failed.result).toContain('- C1: 워커는 pass, 명령은 fail')
+
+  // The row reads a time in seconds as the first line says it, and the call still names the revision the answer reached.
+  expect(resultView('A-r2 검사 결과(HEAD b457a7d): pass 4 (C1 C2 C3 C9) · 미확인 1 (C10 명령 없음) · 트리 깨끗함 · 16.2초', false)?.line).toBe('pass 4 · fail 0 · 미확인 1 · 16.2초 · 트리 깨끗함')
+  const later: RelayStatus = {
+    runs: [
+      {
+        run: RUN,
+        tasks: [{ key: 'A-r2', id: 'A', rev: 2, title: 'Second', status: 'ready', model: 'claude-opus-5-5', effort: 'high', runner: '', dispatchedAt: null }],
+        earlier: [{ key: 'A-r1', id: 'A', rev: 1, title: 'First' }],
+        pending: 0,
+        verdict: null,
+      },
+    ],
+  }
+  expect(callLine({ action: 'check', run: RUN, task: 'A' }, clean.result, later)).toBe('relay 완료 검사 First')
+  sim.commands['make test'] = { exitCode: 0 }
+  const reported = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(callLine({ action: 'report', run: RUN, task: 'A' }, reported.result, later)).toBe('relay 보고 확인 First')
+})
+
+// ── abandon ──────────────────────────────────────────────
+
+test('abandon refuses an empty reason and a task holding a worker; then the run is abandoned with why and when, its tasks as they were, its commits and waiting decisions told', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  await relay($, { ...TASK_A, id: 'B', edit_scope: ['docs/other.md'], reads: [] })
+  await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
+  sim.commits[SHA_A] = { task: 'A-r1', subject: 'Add the relay tool', files: ['hooks/relay/relay.ts'] }
+  sim.commits['9'.repeat(40)] = { task: 'X-r1', subject: 'Another run', files: ['x.ts'], run: '2026-11-09-other' }
+  sim.files[`${DIR}/progress.md`] = (sim.files[`${DIR}/progress.md`] ?? '').replace('|---|---|---|---|---|---|\n', '|---|---|---|---|---|---|\n| D2 | deploy | d | e | user | asked |\n')
+
+  expect((await relay($, { action: 'abandon', run: RUN, reason: '  ' })).deny).toBe('reason이 비었습니다: 왜 이 묶음을 버리는지 적으세요.')
+  const held = await said($, { action: 'abandon', run: RUN, reason: 'the person stopped it' })
+  expect(held.problem).toBe(true)
+  expect(held.result).toBe('거절: 워커를 잡고 있는 작업이 있어 버리지 않았습니다: A-r1(running · subagent a). 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.')
+  expect(state(sim).status).toBe('active')
+
+  await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'stopped', confirmed_stopped: true })
+  const dropped = await said($, { action: 'abandon', run: RUN, reason: 'the person stopped it' })
+  expect(dropped.call).toBe('relay 묶음 버리기 · the person stopped it')
+  expect(dropped.result).toBe('버림 · 남은 커밋 1 · 기다리던 결정 1')
+  expect(state(sim)).toMatchObject({ status: 'abandoned', abandonReason: 'the person stopped it', abandonedAt: NOON })
+  expect(state(sim).tasks.map(task => [taskKeyOf(task), task.status])).toEqual([
+    ['A-r1', 'cancelled'],
+    ['B-r1', 'ready'],
+  ])
+  const progress = sim.files[`${DIR}/progress.md`] ?? ''
+  expect(progress).toContain('| B-r1 | Add the tool | - | ready |')
+  expect(progress).toMatch(/\| Time \| What happened \|\n\|---\|---\|\n\| 2026-11-09 12:00 \| 묶음을 버림: the person stopped it \|/)
+})
+
+test('abandon answers the commits it leaves; the answer-end warning of work not verified no longer counts the run', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  sim.commits['8'.repeat(40)] = { task: '', subject: 'Lead fixup', files: ['docs/notes.md'] }
+  expect(await unverifiedLine(engineRecording(sim, []))).toContain(`⚠ relay ${RUN}: 검증되지 않은 판입니다`)
+  const dropped = await relay($, { action: 'abandon', run: RUN, reason: 'trial run' })
+  expect(await unverifiedLine(engineRecording(sim, []))).toBeUndefined()
+  expect(dropped.result).toBe(
+    ['묶음을 버렸습니다: 2026-11-09-demo · 남은 커밋 2개', '이유: trial run', '버리기는 코드를 되돌리지 않고, 이 커밋들은 검증된 것도 아닙니다(사용자에게 알리세요):', '- 1111111 Add the relay tool', '- 8888888 Lead fixup'].join('\n'),
+  )
+})
+
+test('an abandoned run is under way nowhere: no other action writes to it, list and session start do not count it, the gate does not launch into it', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  const dropped = await relay($, { action: 'abandon', run: RUN, reason: 'trial run' })
+  expect(dropped.result).toBe('묶음을 버렸습니다: 2026-11-09-demo · 남은 커밋 0개\n이유: trial run')
+
+  const refused = `이미 버린 묶음입니다: ${RUN}`
+  for (const input of [
+    TASK_A,
+    { action: 'cancel', run: RUN, task: 'A', reason: 'x' },
+    { action: 'report', run: RUN, task: 'A' },
+    { action: 'package', run: RUN, tasks: ['A'] },
+    { action: 'verdict', run: RUN, id: 'V1' },
+    { action: 'finish', run: RUN },
+    { action: 'abandon', run: RUN, reason: 'again' },
+    { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' },
+  ]) {
+    expect((await relay($, input)).deny).toBe(refused)
+  }
+  const reserved = await reserveDispatch(engineOver(sim), ROOT, RUN, 'A')
+  expect('deny' in reserved && reserved.deny).toBe(refused)
+  expect(state(sim).tasks[0]?.status).toBe('ready')
+  // What only reads still answers.
+  expect((await relay($, { action: 'pending', run: RUN })).result).toBe('사용자 답을 기다리는 결정(asked·on hold)이 없습니다.')
+  expect((await relay($, { action: 'list' })).result).toContain('이 저장소에 진행 중인 묶음이 없습니다')
+
+  const registered: Record<string, unknown>[] = []
+  await registerRelayTool(engineRecording(sim, registered))
+  expect('isDeferred' in (registered[0] ?? {})).toBe(false)
+
+  // A finished run is not abandoned.
+  sim.files[`${DIR}/state.json`] = JSON.stringify({ ...state(sim), status: 'finished' })
+  expect((await relay($, { action: 'abandon', run: RUN, reason: 'x' })).deny).toBe(`이미 끝난 묶음입니다: ${RUN}`)
 })

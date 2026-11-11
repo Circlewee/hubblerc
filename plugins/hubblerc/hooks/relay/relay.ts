@@ -46,6 +46,7 @@ import {
   VERDICT_SCHEMA,
   verifierInstructions,
   withoutSections,
+  withLogRow,
   withTasks,
 } from './relay-format'
 import type { BriefInput, CheckOutcome, Criterion, FileChange, RelayPackage, RelayState, RelayTask, RunnerKind, TaskStatus } from './relay-format'
@@ -68,10 +69,10 @@ const TOOL_NAME = 'relay'
 const RELAY_TOOL_PATTERN = /^mcp__hubblerc__relay$/
 const TOOL_DESCRIPTION =
   'Machine steps of the relay skill (hubblerc:relay): start a run, write task briefs and check their overlap, record or cancel a dispatch, ' +
-  'check a worker report, run the done-when commands, build the verifier package, record a verdict, list pending decisions, finish a run. ' +
+  'check a worker report, run the done-when commands, build the verifier package, record a verdict, list pending decisions, finish or abandon a run. ' +
   'Only for a lead following that skill.'
 
-const ACTIONS = ['start', 'list', 'task', 'spec_text', 'dispatched', 'cancel', 'report', 'check', 'package', 'verdict', 'pending', 'finish'] as const
+const ACTIONS = ['start', 'list', 'task', 'spec_text', 'dispatched', 'cancel', 'report', 'check', 'package', 'verdict', 'pending', 'finish', 'abandon'] as const
 
 /** One criterion's command may run this long; one `check` call this long in all. */
 const CHECK_MS = 120_000
@@ -116,7 +117,7 @@ const INPUT_SCHEMA = {
     runner_kind: { type: 'string', enum: ['claude', 'codex'] },
     task: { type: 'string', description: 'dispatched, cancel, report, check: T3 (latest revision) or T3-r2' },
     runner: { type: 'string', description: "dispatched: where it runs and how to reach it again ('orca dispatch:<id>', 'subagent <name|agentId>')" },
-    reason: { type: 'string', description: 'cancel: why the task will not run' },
+    reason: { type: 'string', description: 'cancel: why the task will not run. abandon: why the run is dropped' },
     confirmed_stopped: { type: 'boolean', description: 'cancel: true only once you checked that the running worker has stopped' },
     tasks: { ...strings, description: 'package: tasks to include; absent, every task done' },
   },
@@ -160,7 +161,7 @@ export async function relayStatusText($: EngineInterface): Promise<string> {
   const runs = await findRuns($, root)
   const shown = await summarize($, root, runs.filter(found => found.state.status === 'active'))
   await setRuns($, shown).catch(() => undefined)
-  // Finished last: by its last verdict (finish takes a passing one), else by when it started.
+  // Finished last: by its last verdict (finish takes a passing one), else by when it started. An abandoned run was never finished.
   const when = (state: RelayState) => state.verdicts.at(-1)?.at ?? state.createdAt
   const last = runs.filter(found => found.state.status === 'finished').reduce<ActiveRun | undefined>((latest, found) => (latest === undefined || when(found.state) > when(latest.state) ? found : latest), undefined)
 
@@ -298,7 +299,7 @@ async function writeState($: EngineInterface, root: string, state: RelayState, p
   await noteSaved($, root, state, progress).catch(() => undefined)
 }
 
-/** A finished run leaves the box with nothing read; an active one reads progress.md unless handed it, and HEAD only where there is a verdict. */
+/** A run no longer active (finished, abandoned) leaves the box with nothing read; an active one reads progress.md unless handed it, and HEAD only where there is a verdict. */
 async function noteSaved($: EngineInterface, root: string, state: RelayState, progress?: string | null): Promise<void> {
   if (state.status !== 'active') return noteRun($, state, undefined, undefined)
   const text = progress === undefined ? await readText($, progressPath(root, state.run)) : (progress ?? undefined)
@@ -471,6 +472,11 @@ const withWarnings = (lines: readonly string[], warnings: readonly (string | und
 }
 
 const STATE_GONE = (root: string, run: string) => `묶음이 없거나 state.json을 읽지 못했습니다: ${runDir(root, run)}`
+const ABANDONED = (run: string) => `이미 버린 묶음입니다: ${run}`
+
+/** Why a run takes no launch: finished or abandoned; undefined while it is active. */
+const closedRun = (state: RelayState): string | undefined =>
+  state.status === 'finished' ? `이미 끝난 묶음입니다: ${state.run}` : state.status === 'abandoned' ? ABANDONED(state.run) : undefined
 
 // ── Actions ──────────────────────────────────────────────
 
@@ -502,8 +508,10 @@ export async function answerRelayTool($: EngineInterface, input: Record<string, 
   return withRunLock(root, run, async () => {
     const state = await readState($, root, run)
     if (state === undefined) return { deny: STATE_GONE(root, run) }
-    const isClosing = action === 'task' || action === 'cancel' || action === 'report' || action === 'finish'
+    const isClosing = action === 'task' || action === 'cancel' || action === 'report' || action === 'finish' || action === 'abandon'
     if (isClosing && state.status === 'finished') return { deny: `이미 끝난 묶음입니다: ${run}` }
+    // An abandoned run takes nothing that writes to it; pending (and check, above) only read it.
+    if (action !== 'pending' && state.status === 'abandoned') return { deny: ABANDONED(run) }
     switch (action) {
       case 'task':
         return taskAction($, root, state, input)
@@ -517,6 +525,8 @@ export async function answerRelayTool($: EngineInterface, input: Record<string, 
         return verdictAction($, root, state, text(input.id))
       case 'pending':
         return pendingAction($, root, state)
+      case 'abandon':
+        return abandonAction($, root, state, text(input.reason))
       default:
         return finishAction($, root, state)
     }
@@ -592,7 +602,7 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
   const dir = runDir(root, state.run)
   const specPath = specFile(dir, key)
   const reportTo = reportFile(dir, key)
-  const spec = briefText(brief, { kind: 'full', run: state.run, key, base, reportTo, lead: state.lead })
+  const spec = briefText(brief, { kind: 'full', run: state.run, key, base, reportTo, lead: state.lead, carried: carried.tries })
   await $.fs.write(specPath, spec)
 
   // A new revision takes over: an earlier one not running and not done is never to be reported on.
@@ -718,7 +728,8 @@ export async function markDispatched($: EngineInterface, root: string, run: stri
   return withRunLock(root, run, async () => {
     const state = await readState($, root, run)
     if (state === undefined) return { deny: STATE_GONE(root, run) }
-    if (state.status === 'finished') return { deny: `이미 끝난 묶음입니다: ${run}` }
+    const closed = closedRun(state)
+    if (closed !== undefined) return { deny: closed }
     const task = findTask(state, name)
     if (task === undefined) return { deny: `작업이 없습니다: ${name}(${run})` }
     if (task.status !== 'ready') return { deny: `${taskKey(task)}는 ${task.status} 상태라 running으로 바꾸지 않습니다(ready인 판만). 새로 보낼 것이면 task로 새 판을 만드세요.` }
@@ -754,7 +765,8 @@ export async function reserveDispatch($: EngineInterface, root: string, run: str
   return withRunLock(root, run, async (): Promise<{ deny: string } | Reservation> => {
     const state = await readState($, root, run)
     if (state === undefined) return { deny: STATE_GONE(root, run) }
-    if (state.status === 'finished') return { deny: `이미 끝난 묶음입니다: ${run}` }
+    const closed = closedRun(state)
+    if (closed !== undefined) return { deny: closed }
     const task = findTask(state, name)
     if (task === undefined) return { deny: `작업이 없습니다: ${name}(${run})` }
     const key = taskKey(task)
@@ -868,22 +880,30 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
   task.reportedAt = await $.clock.now()
   warnings.push(await save($, root, state))
 
-  const summary = report.criteria.map(criterion => `${criterion.id} ${criterion.result}${criterion.tries === null ? '' : ` (tries ${criterion.tries})`}`).join(', ')
+  // The first line holds what a clean report says; a line follows only for something to act on.
+  const passed = report.criteria.filter(criterion => criterion.result === 'pass').length
+  const notPassed = report.criteria.filter(criterion => criterion.result !== 'pass')
+  const criteria =
+    report.criteria.length === 0 ? '기준 없음(워커 보고)' : notPassed.length === 0 ? `기준 ${passed} pass(워커 보고)` : `기준 ${passed}/${report.criteria.length} pass(워커 보고)`
+  const commits = report.commits.length === 0 ? '커밋 없음' : `커밋 ${report.commits.map(sha => sha.slice(0, 7)).join(', ')}`
+  const isDoneNow = status === 'done' || status === 'done_with_concerns'
   const lines = [
-    `${key}: 보고 ${report.status ?? '없음'} → 상태 ${status}`,
+    [`${key}: 보고 ${report.status ?? '없음'} → 상태 ${status}`, commits, criteria, ...(isDoneNow ? ['다음: check'] : [])].join(' · '),
     ...(wasLive ? ['띄운 뒤 막혀 있던 작업의 워커가 보고했습니다: 이제 점유하지 않습니다(보고대로 처리).'] : []),
-    `보고서: ${path}`,
-    `기준(워커 보고, 증거 아님): ${summary === '' ? '없음' : summary}`,
-    `커밋: ${report.commits.length === 0 ? '없음' : report.commits.join(', ')}`,
-    `범위 밖 파일: ${look.outside.length === 0 ? '없음' : look.outside.join(', ')}`,
-    `테스트·검사 파일 변경: ${look.tests.length === 0 ? '없음' : look.tests.join(', ')}`,
+    ...(notPassed.length === 0 ? [] : [`기준(워커 보고): ${notPassed.map(criterion => `${criterion.id} ${criterion.result}${criterion.tries === null ? '' : ` (tries ${criterion.tries})`}`).join(', ')}`]),
+    ...(look.outside.length === 0 ? [] : [`범위 밖 파일: ${look.outside.join(', ')}`]),
+    ...(look.tests.length === 0 ? [] : [`테스트·검사 파일 변경: ${look.tests.join(', ')}`]),
     ...(ran === undefined || ran === task.effort.trim().toLowerCase() ? [] : [`effort: 지시서 ${task.effort} · 실제 ${ran}(${signed.length > 0 ? '커밋 꼬리말' : '보고서'})`]),
+    // The report is to be read when it is not a plain DONE (concerns, a question), or when it disagrees.
+    ...(report.status !== 'DONE' || mismatches.length > 0 ? [`보고서: ${path}`] : []),
     ...(mismatches.length === 0 ? [] : ['', '보고서 불일치(워커에게 고쳐 달라고 하세요):', ...mismatches.map(problem => `- ${problem}`)]),
-    ...(status === 'done' || status === 'done_with_concerns' ? ['', `다음: check로 기준 명령을 직접 돌리세요(${key}).`] : []),
   ]
 
   return { result: withWarnings(lines, warnings) }
 }
+
+/** A check's time as its first line says it: `14 ms`, `16.2초`. */
+const duration = (ms: number): string => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)}초`)
 
 type Snapshot = { head: string | undefined; changes: TreeChanges | undefined }
 
@@ -971,15 +991,28 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
       if (found !== undefined && said.result === 'pass' && found.result === 'fail') disagree.push(`${said.id}: 워커는 pass, 명령은 fail`)
     }
   }
+  // The first line holds the counts, the tree and the time; a line follows only for what is to be looked at.
+  const isNoCommand = (outcome: CheckOutcome) => outcome.result === 'unverified' && outcome.command === undefined
+  const of = (result: CheckOutcome['result']) => outcomes.filter(outcome => outcome.result === result)
+  const unverified = of('unverified')
+  const shown = outcomes.filter(outcome => outcome.result === 'fail' || (outcome.result === 'unverified' && !isNoCommand(outcome)))
+  const isClean = before.changes !== undefined && uncommittedOf(before.changes).length === 0
+  const treeShort = before.changes === undefined ? '트리 확인 실패' : isClean ? '트리 깨끗함' : `트리 변경 ${uncommittedOf(before.changes).length}개`
+  const totalMs = outcomes.reduce((sum, outcome) => sum + (outcome.ms ?? 0), 0)
+  const counts = [
+    `pass ${of('pass').length}${of('pass').length === 0 ? '' : ` (${of('pass').map(outcome => outcome.id).join(' ')})`}`,
+    ...(of('fail').length === 0 ? [] : [`fail ${of('fail').length} (${of('fail').map(outcome => outcome.id).join(' ')})`]),
+    ...(unverified.length === 0 ? [] : [`미확인 ${unverified.length} (${unverified.map(outcome => (isNoCommand(outcome) ? `${outcome.id} 명령 없음` : outcome.id)).join(', ')})`]),
+  ]
   const lines = [
-    `${key} 검사 결과(HEAD ${head.slice(0, 7)}): ${path}`,
-    tree,
-    ...outcomes.map(outcome => {
+    `${key} 검사 결과(HEAD ${head.slice(0, 7)}): ${[...counts, treeShort, duration(totalMs)].join(' · ')}`,
+    ...(isClean ? [] : [tree]),
+    ...shown.map(outcome => {
       const exit = outcome.exitCode === undefined ? '' : ` · exit ${outcome.exitCode}(기대 ${outcome.expectExit}) · ${outcome.ms ?? 0} ms`
 
       return `- ${outcome.id}: ${outcome.result}${exit}${outcome.reason === undefined ? '' : ` · ${outcome.reason}`}`
     }),
-    '워커 보고의 pass는 증거가 아닙니다: 이 결과가 기준의 결과입니다.',
+    ...(shown.length === 0 ? [] : [`검사 결과 파일: ${path}`]),
   ]
 
   return { result: withWarnings(lines, disagree) }
@@ -1271,4 +1304,71 @@ async function finishAction($: EngineInterface, root: string, state: RelayState)
   ]
 
   return { result: withWarnings(lines, [redrawn]) }
+}
+
+/**
+ * The run's commits still in HEAD: those signed with its Run trailer since its base, and those its
+ * reports name that HEAD holds. Undefined when git log fails.
+ */
+async function commitsLeft($: EngineInterface, root: string, state: RelayState): Promise<string[] | undefined> {
+  const signed = await runCommits($, root, state)
+  if (signed === undefined) return undefined
+  const shas = [...new Set([...signed.values()].flat())]
+  const dir = runDir(root, state.run)
+  for (const task of state.tasks) {
+    const reportText = await readText($, reportFile(dir, taskKey(task)))
+    for (const sha of reportText === undefined ? [] : parseReport(reportText).commits) {
+      if (shas.some(other => sameCommit(other, sha))) continue
+      const held = await git($, root, ['merge-base', '--is-ancestor', sha, 'HEAD']).catch(() => undefined)
+      if (held?.exitCode === 0) shas.push(sha)
+    }
+  }
+  const lines: string[] = []
+  for (const sha of shas) {
+    const subject = await git($, root, ['log', '-1', '--format=%s', sha]).catch(() => undefined)
+    lines.push(`${sha.slice(0, 7)} ${subject?.exitCode === 0 ? subject.stdout.trim() : ''}`.trim())
+  }
+
+  return lines
+}
+
+/**
+ * Drops a run the person gave up on (or a trial run with nothing to keep): refused while a task
+ * holds a worker. The run is set abandoned with why and when; its tasks stay as they are. It is no
+ * longer under way anywhere (list, the box, session start, the gate), and nothing more writes to
+ * it. It reverts no code and verifies nothing: the answer lists the commits it leaves in HEAD.
+ */
+async function abandonAction($: EngineInterface, root: string, state: RelayState, reason: string): Promise<Answer> {
+  if (reason === '') return { deny: 'reason이 비었습니다: 왜 이 묶음을 버리는지 적으세요.' }
+  const holding = state.tasks.filter(isBusy)
+  if (holding.length > 0) {
+    const named = holding.map(task => `${taskKey(task)}(${statusLabel(task)}${task.runner === null ? '' : ` · ${task.runner}`})`).join(', ')
+
+    return { deny: `워커를 잡고 있는 작업이 있어 버리지 않았습니다: ${named}. 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.` }
+  }
+  const left = await commitsLeft($, root, state)
+  const at = await $.clock.now()
+  state.status = 'abandoned'
+  state.abandonedAt = at
+  state.abandonReason = reason
+  const warnings = [await save($, root, state)]
+  const path = progressPath(root, state.run)
+  const progress = await readText($, path)
+  const logged = progress === undefined ? null : withLogRow(progress, at, `묶음을 버림: ${reason}`)
+  if (logged === null) warnings.push(`progress.md의 Log 표가 없어 버린 기록을 적지 못했습니다: ${path}`)
+  else await $.fs.write(path, logged)
+  const pending = ((await decisions($, root, state)) ?? []).filter(isPending)
+
+  const lines = [
+    `묶음을 버렸습니다: ${state.run} · 남은 커밋 ${left === undefined ? '미확인' : `${left.length}개`}`,
+    `이유: ${reason}`,
+    ...(left === undefined
+      ? [`git log가 실패해 이 묶음(Run: ${state.run})의 커밋을 세지 못했습니다.`]
+      : left.length === 0
+        ? []
+        : ['버리기는 코드를 되돌리지 않고, 이 커밋들은 검증된 것도 아닙니다(사용자에게 알리세요):', ...left.map(line => `- ${line}`)]),
+    ...(pending.length === 0 ? [] : ['', `사용자 답을 기다리던 결정 ${pending.length}개:`, ...pending.map(decisionLine)]),
+  ]
+
+  return { result: withWarnings(lines, warnings) }
 }

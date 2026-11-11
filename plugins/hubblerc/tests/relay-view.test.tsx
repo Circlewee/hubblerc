@@ -148,6 +148,27 @@ test('a task is named by its title, "n번째 지시서" from the second brief; t
   expect(callLine({ action: 'task', id: 'A', title: 'Add the tool', model: 'claude-opus-5-5', effort: 'high', done_when: [] }, '지시서: /r/tasks/A-r1.md')).toBe('relay 지시서 Add the tool · opus-5-5/high · 기준 0')
 })
 
+test('abandon is drawn as one call line and one result line; short report and check texts keep their rows', async ($, on) => {
+  engineDraws(on)
+  showRelayLines(on)
+  const reason = 'the person gave up on this run after all'
+  const call = await $.ui.mount({ ...USE, props: use({ action: 'abandon', run: '2026-11-10-demo', reason }) })
+  expect((await call.find({ type: 'Text', text: /relay 묶음 버리기/ }))?.text).toBe('relay 묶음 버리기 · the person gave up on this run…')
+  await call.unmount()
+
+  const dropped = await $.ui.mount({ ...RESULT, props: result('묶음을 버렸습니다: 2026-11-10-demo · 남은 커밋 3개\n이유: x\n버리기는 코드를 되돌리지 않고, 이 커밋들은 검증된 것도 아닙니다(사용자에게 알리세요):\n- a b\n- c d\n- e f') })
+  expect((await dropped.find({ type: 'Text', text: /버림/ }))?.text).toBe('버림 · 남은 커밋 3')
+  await dropped.unmount()
+
+  const reported = await $.ui.mount({ ...RESULT, requestId: 'toolu_2', props: result('A-r2: 보고 DONE → 상태 done · 커밋 b457a7d · 기준 5 pass(워커 보고) · 다음: check') })
+  expect((await reported.find({ type: 'Text', text: /DONE/ }))?.text).toBe('DONE · 범위 밖 0 · 테스트 변경 0 · 경고 0')
+  await reported.unmount()
+
+  const checked = await $.ui.mount({ ...RESULT, requestId: 'toolu_3', props: result('A-r2 검사 결과(HEAD b457a7d): pass 4 (C1 C2 C3 C9) · 미확인 1 (C10 명령 없음) · 트리 깨끗함 · 16.2초') })
+  expect((await checked.find({ type: 'Text', text: /pass/ }))?.text).toBe('pass 4 · fail 0 · 미확인 1 · 16.2초 · 트리 깨끗함')
+  await checked.unmount()
+})
+
 test('a result row begins with an arrow, not the engine’s hook, and states are in Korean', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
