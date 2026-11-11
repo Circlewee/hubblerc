@@ -4,7 +4,7 @@ import { hasApiKey, judgesTodos, likely, recordOutcome } from '../likely/likely'
 import { changeTodos, currentTodos, currentTurn, redrawTodos } from './todo'
 import { setItemStatus } from './todo-format'
 import type { TurnRef, UserTodo } from './todo-format'
-import { awaits, cameTrue, candidatesFor, chosenId, DONE_QUIET_ANSWERS, doneInput, doneQuestion, PREVIOUS_CHARS, SAMPLES, SUGGEST_AT, suggestionToast, takeInput, takeQuestion, TASK_DONE, TASK_TAKE, valueOf } from './todo-judge-format'
+import { awaits, cameTrue, candidatesFor, CARRY_AT, chosenId, DONE_QUIET_ANSWERS, doneInput, doneQuestion, PREVIOUS_CHARS, SAMPLES, SUGGEST_AT, suggestionToast, takeInput, takeQuestion, TASK_DONE, TASK_TAKE, valueOf } from './todo-judge-format'
 import type { SuggestionKind, TodoSuggestion } from './todo-judge-format'
 
 /*
@@ -29,6 +29,12 @@ const rejected = new Map<string, number>()
 let answers = 0
 let question = ''
 let previousAnswer = ''
+/**
+ * The waiting item this question's judgment picked, shown or not: its answer may finish it, and an
+ * answer is judged against the items in progress alone otherwise (2026-11-12: a start judged at 0.67,
+ * under the line then, left the answer that finished the item with nothing to be judged against).
+ */
+let picked: number | null = null
 
 /** At session.start. */
 export function startTodoJudge(): void {
@@ -38,6 +44,7 @@ export function startTodoJudge(): void {
   answers = 0
   question = ''
   previousAnswer = ''
+  picked = null
 }
 
 /** Whether judgments are made at all: the option on and a key to make them with. */
@@ -123,6 +130,7 @@ export async function judgeTodoStart($: EngineInterface, text: string, isOffered
   answers += 1
   const mine = answers
   question = text
+  picked = null
   await settle($)
   if (isOffered || !canJudge() || text.trim() === '') return
   const candidates = candidatesFor('take', await currentTodos($))
@@ -130,12 +138,13 @@ export async function judgeTodoStart($: EngineInterface, text: string, isOffered
   const at = await currentTurn($)
   const made = await ask($, 'take', candidates, takeInput(text, previousAnswer))
   if (made === null || mine !== answers) return
+  if (made.id !== null && made.probability >= CARRY_AT) picked = made.id
   await suggest($, 'take', made, at)
 }
 
 /**
  * At a main-loop turn's end, not awaited: the answer is judged against the to-dos in progress (and
- * the item a "시작?" still waits on: one answer may start and finish it). Only an answer the model
+ * the waiting item its question's judgment picked: one answer may start and finish it). Only an answer the model
  * gave whole is judged; its end is kept as the next question's context either way.
  */
 export async function judgeTodoEnd($: EngineInterface, e: TurnCompleteInput): Promise<void> {
@@ -144,7 +153,7 @@ export async function judgeTodoEnd($: EngineInterface, e: TurnCompleteInput): Pr
   const asked = question
   if (answer !== '') previousAnswer = answer.slice(-PREVIOUS_CHARS)
   if (e.reason !== 'answer' || e.isAborted || answer === '' || !canJudge()) return
-  const candidates = candidatesFor('done', await currentTodos($), suggestion?.kind === 'take' ? suggestion.id : undefined)
+  const candidates = candidatesFor('done', await currentTodos($), picked ?? undefined)
   if (candidates.length === 0) return
   const at = await currentTurn($)
   const made = await ask($, 'done', candidates, doneInput(asked, answer))

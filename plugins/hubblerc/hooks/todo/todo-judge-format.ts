@@ -12,11 +12,14 @@ import type { TurnRef, UserTodo, UserTodoStatus } from './todo-format'
 export const TASK_TAKE = 'todo-take'
 export const TASK_DONE = 'todo-done'
 /**
- * A choice at least this sure is put to the person. A first value, to be set from the log: in a check
- * of 21 made-up messages against the real list (2026-11-12) the 9 right picks were 0.82 and up, and
- * the one wrong pick (a to-do put off, taken for started) 0.58.
+ * A choice at least this sure is put to the person. A first value, to be set from the log. It was 0.7
+ * for an hour (2026-11-12), read off made-up messages whose right picks were 0.82 and up; the first
+ * real question that started a to-do came to 0.67 (two calls at 0.8, one at 0.43) and was not shown.
+ * A line that asks wrongly costs a press and leaves an answer in the log; one not shown leaves nothing.
  */
-export const SUGGEST_AT = 0.7
+export const SUGGEST_AT = 0.5
+/** The item a question's judgment picked, however unsure, is shown to its answer's judgment at this chance or more. */
+export const CARRY_AT = 0.3
 /** Items a judgment is shown at most, the newest first: the input stays short, and a choice takes 20 options. */
 export const MAX_CANDIDATES = 12
 export const SAMPLES = 3

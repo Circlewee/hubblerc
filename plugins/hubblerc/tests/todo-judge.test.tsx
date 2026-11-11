@@ -242,6 +242,28 @@ test('with a key: no item of the kind, an aborted turn and a subagent\'s turn ar
   await ui.unmount()
 })
 
+test('a waiting item the question picked, shown or not, can be finished by its answer', WITH_KEY, async ($, on) => {
+  const standIn = standInForEngine(on)
+  const store = machine(on, standIn, [item(1, 'pending', '흐름 문서 쓰기'), item(2, 'pending', '문서 정리')])
+  await start($)
+  // Picked, but under the line: nothing is put at the start.
+  standIn.anthropic = choosing({ 'todo-1': 0.45, none: 0.55 })
+  await ask($, standIn, '흐름을 글로 정리해 줘', 't1')
+  expect(standIn.toasts).toHaveLength(0)
+  standIn.anthropic = choosing({ 'todo-1': 0.4, 'todo-2': 0.2, none: 0.4 })
+  await ask($, standIn, '흐름을 글로 정리해 줘', 't2')
+  standIn.anthropic = choosing({ 'todo-1': 0.9, none: 0.1 })
+  await answered($, standIn, '흐름 문서를 쓰고 커밋했습니다.', 't2')
+  // The answer's judgment was shown that item alone: nothing is in progress, and the other waiting item was not picked.
+  expect(promptOf(standIn, 6)).toMatch(/todo-1 - 흐름 문서 쓰기/)
+  expect(promptOf(standIn, 6)).not.toContain('todo-2')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await ui.find({ key: 'todo-suggestion' }))?.text).toContain('완료? 흐름 문서 쓰기')
+  await ui.press({ key: 'todo-suggestion-yes' })
+  expect(items(store).find(one => one.id === 1)).toMatchObject({ status: 'done', turn: 2 })
+  await ui.unmount()
+})
+
 test('a status moved by hand answers the judgment: logged at the next question, and the line goes', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
   const store = machine(on, standIn, [item(1, 'pending', '인증 버그 고치기'), item(2, 'pending', '문서 정리')])
