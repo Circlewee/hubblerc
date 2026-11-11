@@ -168,7 +168,7 @@ function report(task: Task): void {
   })
   console.log(`Haiku 3회의 흔들림: 고른 답의 확률 최대−최소 평균 ${mean(spreads).toFixed(3)}, 3회가 서로 다른 답을 고른 것 ${split.length}건 — 그중 기준과 어긋난 것 ${split.filter(pair => likeliest(pair.h) !== likeliest(pair.o)).length}건`)
   const noted = pairs.filter(pair => pair.item.note !== undefined)
-  if (noted.length > 0) console.log(`기록에 남은 실제 답이 있는 ${noted.length}건: Haiku와 같음 ${noted.filter(pair => options[likeliest(pair.h)] === pair.item.note).length}건, Opus와 같음 ${noted.filter(pair => options[likeliest(pair.o)] === pair.item.note).length}건`)
+  if (noted.length > 0) console.log(`기록에 남은 실제 답이 있는 ${noted.length}건: 그 답이 기준(Opus)과 같음 ${noted.filter(pair => options[likeliest(pair.o)] === pair.item.note).length}건, 같은 ${noted.length}건에서 Haiku(likely)가 기준과 같음 ${noted.filter(pair => likeliest(pair.h) === likeliest(pair.o)).length}건, Haiku(likely)가 기록의 답과 같음 ${noted.filter(pair => options[likeliest(pair.h)] === pair.item.note).length}건`)
   const cost = (who: string) => readResults(`${task.prefix}-${who}`).reduce((total, line) => total + line.costUsd, 0)
   console.log(`비용: Haiku $${cost('haiku').toFixed(3)} · Opus $${cost('opus').toFixed(3)}`)
   const file = join(OUT_DIR, `${task.prefix}-disagreements.md`)
