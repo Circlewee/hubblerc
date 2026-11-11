@@ -24,11 +24,11 @@ import type { CallLayout, Question } from '../plugins/hubblerc/hooks/likely/meth
 /** Kept equal to likely.ts, which needs the engine and so is not imported here. */
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const API_VERSION = '2026-10-21'
-const HAIKU = 'claude-haiku-5-5'
+export const HAIKU = 'claude-haiku-5-5'
 
-const ICLOUD = join(homedir(), 'Library/Mobile Documents/com~apple~CloudDocs/hubblerc')
+export const ICLOUD = join(homedir(), 'Library/Mobile Documents/com~apple~CloudDocs/hubblerc')
 const LOG_DIR = join(ICLOUD, 'likely')
-const OUT_DIR = join(ICLOUD, 'likely-replay')
+export const OUT_DIR = join(ICLOUD, 'likely-replay')
 
 /** The decisions replayed: Bash decisions with an outcome, logged before the experiment began (2026-11-06 09:50 KST). */
 const CUTOFF = '2026-11-06T00:50:00.000Z'
@@ -44,7 +44,7 @@ const BASE_RATE_HINT = 'For reference: most commands Claude Code runs here succe
  * place of likely's `low`. `request`: fields put over the request likely.ts would send (another
  * model's thinking setting, a larger `max_tokens`).
  */
-type Variant = { model: string; flip: boolean; hint: boolean; thinking: boolean; note: string; samples?: number; effort?: 'low' | 'medium' | 'high'; request?: Record<string, unknown>; set?: 'second'; history?: true }
+export type Variant = { model: string; flip: boolean; hint: boolean; thinking: boolean; note: string; samples?: number; effort?: 'low' | 'medium' | 'high'; request?: Record<string, unknown>; set?: 'second'; history?: true }
 
 const SONNET = 'claude-sonnet-5-5'
 const OPUS = 'claude-opus-5-5'
@@ -82,16 +82,16 @@ const VARIANTS: Record<string, Variant> = {
 const SECOND_FROM = '2026-11-06T02:06:00.000Z'
 const SECOND_TO = '2026-11-11T06:00:00.000Z'
 
-type Logged = { id: string; at: string; input: string; questions: Question[]; samples: number; thinking: boolean; p: number; failed: boolean }
+export type Logged = { id: string; at: string; input: string; questions: Question[]; samples: number; thinking: boolean; p: number; failed: boolean }
 
 /** A logged Bash decision whatever became of it: `failed` null when its end was not seen (or not yet logged). */
 type Row = Omit<Logged, 'failed'> & { failed: boolean | null; outcomeAt?: string; note?: string; sessionId?: string; agentId?: string }
 
 type CallResult = { negated: boolean; p?: number; refused?: true; error?: string; latencyMs: number; tokens: Tokens }
 
-type ResultLine = { variant: string; id: string; at: string; model: string; thinking: boolean; calls: CallResult[]; p: number | null; costUsd: number }
+export type ResultLine = { variant: string; id: string; at: string; model: string; thinking: boolean; calls: CallResult[]; p: number | null; costUsd: number }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
@@ -216,7 +216,7 @@ function inputWithHistory(row: Row, before: readonly Row[]): string {
   return `${row.input}\n\nThe Bash commands run just before this one in the same session, oldest first, and how each ended:\n${lines.join('\n')}`
 }
 
-function readResults(name: string): ResultLine[] {
+export function readResults(name: string): ResultLine[] {
   const file = join(OUT_DIR, `${name}.jsonl`)
   if (!existsSync(file)) return []
 
@@ -233,7 +233,7 @@ function readResults(name: string): ResultLine[] {
 }
 
 /** The key from the keychain, or a stop: never printed. */
-function keychainKey(): string {
+export function keychainKey(): string {
   const ran = Bun.spawnSync(['/usr/bin/security', 'find-generic-password', '-s', 'hubblerc-likely', '-w'], { stdout: 'pipe', stderr: 'ignore' })
   const key = ran.exitCode === 0 ? ran.stdout.toString().trim() : ''
   if (key === '') throw new Error('키체인 항목 hubblerc-likely에서 키를 읽지 못했습니다')
@@ -242,7 +242,7 @@ function keychainKey(): string {
 }
 
 /** At most `n` tasks at once. */
-function limiter(n: number): <T>(task: () => Promise<T>) => Promise<T> {
+export function limiter(n: number): <T>(task: () => Promise<T>) => Promise<T> {
   let active = 0
   const waiting: (() => void)[] = []
 
@@ -328,7 +328,7 @@ function priceOf(model: string): (tokens: Tokens) => number {
 }
 
 /** A logged decision asked again as the variant asks it: the same layouts as logged (seeded by its id), changed as the variant says. */
-async function replayOne(decision: Logged, name: string, variant: Variant, key: string, limit: ReturnType<typeof limiter>, input = decision.input): Promise<ResultLine> {
+export async function replayOne(decision: Logged, name: string, variant: Variant, key: string, limit: ReturnType<typeof limiter>, input = decision.input): Promise<ResultLine> {
   const questions: Question[] = variant.hint ? decision.questions.map(question => ({ ...question, instructions: `${question.instructions} ${BASE_RATE_HINT}` })) : decision.questions
   const random = seededRandom(seedOf(decision.id))
   const layouts: CallLayout[] = Array.from({ length: variant.samples ?? decision.samples }, (_, i) => {
@@ -442,7 +442,7 @@ function auc(pairs: readonly Pair[]): number {
   return wins / (positives.length * negatives.length)
 }
 
-function mean(values: readonly number[]): number {
+export function mean(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0) / values.length
 }
 
@@ -450,7 +450,7 @@ function round(value: number): number {
   return Math.round(value * 10_000) / 10_000
 }
 
-function percentile(sorted: readonly number[], q: number): number {
+export function percentile(sorted: readonly number[], q: number): number {
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(q * sorted.length)))] ?? Number.NaN
 }
 
@@ -472,8 +472,8 @@ function bootstrap(ids: readonly string[], ys: ReadonlyMap<string, boolean>, fig
   return [percentile(values, 0.025), percentile(values, 0.975)]
 }
 
-const logit = (p: number) => Math.log(Math.max(1e-4, Math.min(1 - 1e-4, p)) / (1 - Math.max(1e-4, Math.min(1 - 1e-4, p))))
-const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
+export const logit = (p: number) => Math.log(Math.max(1e-4, Math.min(1 - 1e-4, p)) / (1 - Math.max(1e-4, Math.min(1 - 1e-4, p))))
+export const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
 
 /** A logistic fit of the outcome on logit(p) (Newton, a little ridge): what a recalibration would make of the numbers. */
 function fitRecalibration(pairs: readonly Pair[]): (p: number) => number {
@@ -732,10 +732,10 @@ function solve(matrix: readonly number[][], vector: readonly number[]): number[]
   return a.map((row, i) => (row[n] ?? 0) / (row[i] || 1))
 }
 
-type Fit = { beta: number[]; se: number[]; logLik: number }
+export type Fit = { beta: number[]; se: number[]; logLik: number }
 
 /** A logistic regression (Newton; the first column is the intercept, the rest held by a faint ridge). */
-function fitLogistic(xs: readonly number[][], ys: readonly boolean[]): Fit {
+export function fitLogistic(xs: readonly number[][], ys: readonly boolean[]): Fit {
   const k = xs[0]?.length ?? 0
   const ridge = 1e-4
   let beta = Array.from({ length: k }, () => 0)
@@ -766,10 +766,10 @@ function fitLogistic(xs: readonly number[][], ys: readonly boolean[]): Fit {
   return { beta, se, logLik }
 }
 
-const predict = (fit: Fit, x: readonly number[]) => sigmoid(x.reduce((total, value, j) => total + value * (fit.beta[j] ?? 0), 0))
+export const predict = (fit: Fit, x: readonly number[]) => sigmoid(x.reduce((total, value, j) => total + value * (fit.beta[j] ?? 0), 0))
 
 /** The normal distribution's upper tail (Abramowitz & Stegun 7.1.26). */
-function upperTail(z: number): number {
+export function upperTail(z: number): number {
   const x = Math.abs(z) / Math.SQRT2
   const t = 1 / (1 + 0.3275911 * x)
   const erfc = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-x * x)
@@ -778,7 +778,7 @@ function upperTail(z: number): number {
 }
 
 /** AUC by ranks (ties share a rank): the same figure as `auc`, fast enough to bootstrap. */
-function aucOf(ps: readonly number[], ys: readonly boolean[]): number {
+export function aucOf(ps: readonly number[], ys: readonly boolean[]): number {
   const order = ps.map((_, i) => i).sort((a, b) => (ps[a] ?? 0) - (ps[b] ?? 0))
   let rankSum = 0
   let positives = 0
@@ -800,7 +800,7 @@ function aucOf(ps: readonly number[], ys: readonly boolean[]): number {
 }
 
 /** The area under precision-recall, one step a distinct score (chance is the failure rate, not 0.5). */
-function averagePrecision(ps: readonly number[], ys: readonly boolean[]): number {
+export function averagePrecision(ps: readonly number[], ys: readonly boolean[]): number {
   const order = ps.map((_, i) => i).sort((a, b) => (ps[b] ?? 0) - (ps[a] ?? 0))
   const positives = ys.filter(Boolean).length
   let seen = 0
@@ -823,7 +823,7 @@ function averagePrecision(ps: readonly number[], ys: readonly boolean[]): number
 }
 
 /** DeLong's test for two AUCs on the same decisions: the difference, its standard error, and how the two estimates move together. */
-function delong(a: readonly number[], b: readonly number[], ys: readonly boolean[]): { aucA: number; aucB: number; seA: number; seB: number; diff: number; se: number; p: number; r: number } {
+export function delong(a: readonly number[], b: readonly number[], ys: readonly boolean[]): { aucA: number; aucB: number; seA: number; seB: number; diff: number; se: number; p: number; r: number } {
   const positives = ys.flatMap((y, i) => (y ? [i] : []))
   const negatives = ys.flatMap((y, i) => (y ? [] : [i]))
   const psi = (x: number, y: number) => (x > y ? 1 : x === y ? 0.5 : 0)
@@ -1072,10 +1072,13 @@ function parseFlags(args: readonly string[]): { positional: string[]; flags: Rec
   return { positional, flags }
 }
 
-const [command, ...rest] = process.argv.slice(2)
-const { positional, flags } = parseFlags(rest)
-if (command === 'run' && positional[0] !== undefined) await run(positional[0], flags)
-else if (command === 'report') report(positional, flags.ref)
-else if (command === 'compare') compare()
-else if (command === 'variants') for (const [name, variant] of Object.entries(VARIANTS)) console.log(`${name}: ${variant.note} (${variant.model}, thinking ${variant.thinking ? '켬' : '끔'})`)
-else console.log('사용법: bun tools/likely-replay.ts run <변형> [--limit N] [--max-usd X] [--concurrency N] | report [변형 ...] | compare | variants')
+// The command line, when this file is the one run (likely-turn.ts imports its helpers).
+if (import.meta.main) {
+  const [command, ...rest] = process.argv.slice(2)
+  const { positional, flags } = parseFlags(rest)
+  if (command === 'run' && positional[0] !== undefined) await run(positional[0], flags)
+  else if (command === 'report') report(positional, flags.ref)
+  else if (command === 'compare') compare()
+  else if (command === 'variants') for (const [name, variant] of Object.entries(VARIANTS)) console.log(`${name}: ${variant.note} (${variant.model}, thinking ${variant.thinking ? '켬' : '끔'})`)
+  else console.log('사용법: bun tools/likely-replay.ts run <변형> [--limit N] [--max-usd X] [--concurrency N] | report [변형 ...] | compare | variants')
+}
