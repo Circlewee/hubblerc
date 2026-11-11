@@ -341,7 +341,7 @@ export function fenced(text: string, info = 'text'): string {
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
 const cell = (text: string): string => oneLine(text).replace(/\|/g, '\\|')
-const list = (items: readonly string[]): string => (items.length === 0 ? '없음' : items.join(', '))
+const list = (items: readonly string[]): string => (items.length === 0 ? 'none' : items.join(', '))
 
 type Section = { title: string; lines: string[] }
 
@@ -401,68 +401,68 @@ function trailerFlags(input: BriefInput, context: BriefContext): string {
 
 function rules(input: BriefInput, context: BriefContext): string[] {
   const flags = trailerFlags(input, context)
-  const commit = `git commit --only -m "<영어 제목>"${flags === '' ? '' : ` ${flags}`} -- <바꾼 파일들>`
+  const commit = `git commit --only -m "<English subject>"${flags === '' ? '' : ` ${flags}`} -- <the files you changed>`
   const signedBy =
     input.runnerKind === 'claude'
-      ? '나머지 꼬리말(Agent·Session·Model·Effort·Device)은 hubblerc가 붙인다.'
-      : 'Device 꼬리말은 넣지 않는다.'
+      ? 'hubblerc adds the other trailers (Agent, Session, Model, Effort, Device).'
+      : 'Do not add a Device trailer.'
   const reportRule =
     context.kind === 'full'
-      ? '보고서는 Report to 폴더에 임시 파일로 다 쓴 뒤 이름을 바꾸고 완료를 알린다(메시지에는 경로만).'
-      : '보고는 답으로 한다: 15줄 안팎. 증거·질문은 줄 수 때문에 버리지 않는다.'
+      ? 'Write the report whole to a temporary file in the Report to folder, rename it, then say you are done (the message carries the path only).'
+      : 'Report in your reply: about 15 lines. Never drop evidence or a question to keep it short.'
 
   return [
-    'Edit scope 안에서 이번 작업의 변경만 한다. 시작할 때 git status를 보고, 범위 안에 출처 모를 변경이 있으면 묻는다.',
-    '범위 밖 파일(새 파일 포함)이 필요하면 먼저 묻는다.',
-    '완료 기준과 테스트를 약화하지 않는다. 테스트를 바꿨으면 이유를 보고한다.',
-    '목표·권한·입력·판정에 영향을 주는 것만 묻고 멈춘다(NEEDS_CONTEXT / BLOCKED). 사소한 선택(함수 이름, 파일 나누기, 문구)은 하고 나서 보고한다.',
+    'Change only what this task asks for, inside the Edit scope. Run git status as you start; ask if the scope holds changes you cannot account for.',
+    'Ask before touching a file outside the scope, a new file included.',
+    'Do not weaken the completion criteria or the tests. Report why you changed any test.',
+    'Stop and ask only for what bears on the goal, permissions, inputs or the verdict (NEEDS_CONTEXT / BLOCKED). Make the small choices (a function name, how to split a file, wording) and report them after.',
     context.kind === 'full'
-      ? "같은 기준의 수정은 판을 넘어 누적 3번까지(tries). 기준 줄에 'tries 이어받음 N'이 있으면 거기서 이어 센다. 통과하면 더 다듬지 않는다."
-      : '같은 기준의 수정은 판을 넘어 누적 3번까지(tries). 통과하면 더 다듬지 않는다.',
-    'push·배포·외부 전송·비용이 드는 일·되돌리기 어려운 일은 구체적인 승인 없이 하지 않는다.',
-    `커밋: 새 파일은 먼저 \`git add <파일>\`(git이 모르는 파일은 --only로 커밋되지 않음), 그다음 \`${commit}\`. ${signedBy} 서명 줄(Co-Authored-By 등)은 넣지 않는다. 남이 스테이징한 변경은 건드리지 않는다. index.lock이면 3번까지 다시, 그래도 안 되면 BLOCKED(잠금 파일은 지우지 않음). stash·reset·checkout·clean·commit -a 금지.`,
+      ? "Fix the same criterion 3 times at most, counted across revisions (tries). Where a criterion's line says 'tries carried N', count on from N. Once it passes, do not polish further."
+      : 'Fix the same criterion 3 times at most, counted across revisions (tries). Once it passes, do not polish further.',
+    'No push, deploy, sending anything outside, spending money, or anything hard to undo without a specific approval.',
+    `Commit: a new file first with \`git add <file>\` (--only does not commit a file git does not know), then \`${commit}\`. ${signedBy} Add no signature line (Co-Authored-By and the like). Leave changes someone else staged alone. On index.lock try again up to 3 times, then BLOCKED (do not delete the lock file). Never stash, reset, checkout, clean or commit -a.`,
     reportRule,
-    '보고서 형식은 아래 Report format을 따른다.',
+    'Follow the Report format below. Write its free text (observations, concerns, questions) in the language the Goal is written in.',
   ]
 }
 
 function reportFormat(input: BriefInput, context: BriefContext): string {
   const name = context.kind === 'full' ? context.key : input.id
-  const criteria = input.criteria.map(criterion => `- ${criterion.id}: pass|fail|unverified · tries N · <관찰 사실>`)
+  const criteria = input.criteria.map(criterion => `- ${criterion.id}: pass|fail|unverified · tries N · <what you observed>`)
   const form = [
     `# Report ${name}`,
     '- Status: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED',
     '- Change: committed | no_change | uncommitted',
-    '- Commits: <이번 보고의 자기 커밋 전체 SHA, 여러 개면 쉼표, 없으면 none>',
-    '- Model / effort: <실제 값, 모르면 미확인>',
-    '- Found at start: none | unchecked | <사실>',
+    '- Commits: <the full SHA of each commit of yours this report covers, comma-separated; none if there is none>',
+    '- Model / effort: <the actual values; unknown if you cannot tell>',
+    '- Found at start: none | unchecked | <what you found>',
     '## Criteria',
     ...criteria,
-    '## Concerns   (DONE_WITH_CONCERNS일 때만)',
-    '## Test changes   (<파일>: <목적>, 없으면 none)',
+    '## Concerns   (only with DONE_WITH_CONCERNS)',
+    '## Test changes   (<file>: <why>; none if there is none)',
     '## For whoever picks up',
-    '- Tools: <경로 · 용도 · 한 번 도는 시간>',
-    '- Tried and dropped: <방법 → 관찰된 실패>',
+    '- Tools: <path · what it is for · how long one run takes>',
+    '- Tried and dropped: <the approach → the failure observed>',
     '- Remaining changes: …',
-    '- Decisions I made: <지시서가 정하지 않아 정한 것 — 이유>',
-    '## Question   (NEEDS_CONTEXT / BLOCKED일 때만)',
+    '- Decisions I made: <what the brief left open and you decided — why>',
+    '## Question   (only with NEEDS_CONTEXT / BLOCKED)',
   ].join('\n')
 
   return [
     fenced(form, 'markdown'),
     '',
-    '- Criteria는 위 기준마다 정확히 한 줄(빠짐·중복 없이). tries는 판을 넘어 누적한 수정 횟수(다시 돌려 보기만 한 것은 세지 않음).',
-    '- 상태: DONE = 모든 기준 통과',
-    '- DONE_WITH_CONCERNS = 모든 기준 통과 + 기준 밖 걱정(Concerns에 적음)',
-    '- NEEDS_CONTEXT = 답이 필요함(Question에 적음)',
-    '- BLOCKED = 실패·시도 소진·확인 불가·실행 장애',
+    '- Criteria: exactly one line for each criterion above, none missing or repeated. tries is the count of fixes made across revisions (a rerun alone is not one).',
+    '- Status: DONE = every criterion passes',
+    '- DONE_WITH_CONCERNS = every criterion passes, with a concern outside the criteria (written under Concerns)',
+    '- NEEDS_CONTEXT = an answer is needed (written under Question)',
+    '- BLOCKED = a failure, tries used up, something that cannot be checked, or the run itself broke',
   ].join('\n')
 }
 
 /** A Done when line; `carried` (the tries taken over from the revision before) is said when 1 or more. */
 function criterionLine(criterion: Criterion, carried = 0): string {
   const command = criterion.command === undefined ? '' : ` · ${inlineCode(criterion.command)} → exit ${criterion.expectExit ?? 0}`
-  const tries = carried >= 1 ? ` · tries 이어받음 ${carried}` : ''
+  const tries = carried >= 1 ? ` · tries carried ${carried}` : ''
 
   return `- ${criterion.id}: ${oneLine(criterion.text)}${command}${tries}`
 }
@@ -471,14 +471,14 @@ function criterionLine(criterion: Criterion, carried = 0): string {
 export function briefText(input: BriefInput, context: BriefContext): string {
   const name = context.kind === 'full' ? context.key : input.id
   const head = [
-    `- Base: ${context.base}   (비교 기준. checkout하지 말 것)`,
+    `- Base: ${context.base}   (what to compare against; do not check it out)`,
     `- Model / effort: ${input.model} / ${input.effort}`,
-    `- Edit scope: ${list(input.editScope)}   (저장소 기준, 새 파일 포함)`,
+    `- Edit scope: ${list(input.editScope)}   (from the repository root; new files included)`,
     `- Reads: ${list(input.reads)}`,
     `- External targets: ${list(input.targets)}`,
     ...(context.kind === 'full' ? [`- Report to: ${context.reportTo}`] : []),
   ]
-  const readFirst = input.readFirst.length === 0 ? ['- 없음'] : input.readFirst.map(path => `- ${path}`)
+  const readFirst = input.readFirst.length === 0 ? ['- none'] : input.readFirst.map(path => `- ${path}`)
 
   return [
     `# Task ${name}: ${oneLine(input.title)}`,
@@ -523,7 +523,7 @@ export function progressText(state: RelayState, at: number): string {
     '| ID | Decision | Why | Cost if wrong | By | Status |',
     '|---|---|---|---|---|---|',
     '',
-    '## Tasks (relay가 다시 그림 — 손으로 고치지 말 것)',
+    '## Tasks (redrawn by relay — do not edit by hand)',
     TASKS_START,
     TASKS_END,
     '',
@@ -621,7 +621,7 @@ const NONE = /^(none|없음|-|n\/a)$/i
  * The effort a worker ran at, from what its report gives. First the Effort trailer of its commits,
  * the last that has one: hubblerc writes there the effort that agent's requests were sent with
  * (`auto · xhigh` reads `xhigh`). Else the report's `Model / effort` line, only when its effort is
- * one plain word (a worker that does not know writes 미확인, or the brief's value with a note).
+ * one plain word (a worker that does not know writes unknown, or the brief's value with a note).
  * Undefined: not known.
  */
 export function effortRan(trailers: readonly string[], modelEffort: string): string | undefined {
@@ -895,15 +895,15 @@ export function filesToReview(root: string, changes: readonly FileChange[]): str
   const paths = [...new Set(changes.map(change => change.path))].sort()
   const lines = [
     '## Files to review',
-    `diff는 담지 않는다. 각 파일을 아래 명령으로 저장소 루트(${root})에서 열어 본다.`,
+    `This holds no diff. Open each file with its command below, from the repository root (${root}).`,
   ]
-  if (paths.length === 0) lines.push('- 없음(커밋 없음)')
+  if (paths.length === 0) lines.push('- none (no commits)')
   for (const path of paths) {
     const mine = changes.filter(change => change.path === path)
     const added = mine.reduce((sum, change) => sum + (change.added ?? 0), 0)
     const removed = mine.reduce((sum, change) => sum + (change.removed ?? 0), 0)
     const isBinary = mine.some(change => change.added === null)
-    lines.push(`- ${path} — ${isBinary ? 'binary 포함, ' : ''}+${added} −${removed}, 커밋 ${mine.length}개`)
+    lines.push(`- ${path} — ${isBinary ? 'binary included, ' : ''}+${added} −${removed}, ${mine.length} ${mine.length === 1 ? 'commit' : 'commits'}`)
     for (const change of mine) lines.push(`  - ${inlineCode(`git show ${change.sha} -- ${path}`)} (${counted(change)}, ${change.key})`)
   }
 
@@ -985,18 +985,18 @@ export function finishProblems(state: RelayState, head: string | undefined, trac
 export function verifierInstructions(verdictPath: string, schemaPath: string, required: readonly { id: string; text: string }[] = []): string {
   return [
     '## Criteria to judge',
-    '판정의 criteria에 아래 id를 그대로, 하나에 한 번씩 쓴다(빠지거나 겹치면 판정을 받지 않는다). 묶음의 Done when 같은 다른 항목은 다른 id로 더해도 된다.',
+    "Use the ids below as they are in the verdict's criteria, each once (a verdict with one missing or repeated is refused). You may add other items, such as the run's Done when, under other ids.",
     ...required.map(criterion => `- ${criterion.id} — ${oneLine(criterion.text)}`),
     '',
     '## Instructions for the verifier',
-    '- 반박하는 자세로 본다: 통과를 확인하려 하지 말고 결함을 찾아 근거를 댄다.',
-    '- 위 기준마다 pass / fail / unverified를 매기고 증거를 단다: 돌린 명령과 종료 코드, 출력 몇 줄, 파일:줄. 하나라도 fail·unverified면 result는 fail이다.',
-    '- 증거 없는 pass는 unverified다. 워커 보고의 pass는 증거가 아니다(relay 도구가 직접 돌린 Checks가 증거다).',
-    '- 위 Files to review의 각 파일을 그 명령으로 열어 보고 reviewed_files에 적는다. 열지 않은 파일은 적지 않는다. 목록의 파일이 하나라도 빠지면 판정을 받지 않는다.',
-    '- 취소는 코드를 되돌리지 않는다: 취소되거나 막힌 작업·판의 커밋도 HEAD에 남아 있으면 검토 대상이다(Other commits of this run 절 포함).',
-    '- 스타일 지적은 빼고 동작·정확성·범위·테스트 약화만 본다.',
-    '- 이 작업을 만든 워커와 같은 계열 모델이면 model 칸과 판정에 그렇게 적는다(교차 검증이 아님).',
-    `- 판정은 ${schemaPath} 형식의 JSON으로 ${verdictPath}에 쓴다. 쓸 수 없으면 같은 JSON을 답으로 준다.`,
-    '- commit 칸에는 본 HEAD의 전체 SHA를 적는다(위 HEAD 줄).',
+    '- Review to refute: do not look for confirmation that it passes; look for defects and show the grounds.',
+    '- Give each criterion above pass / fail / unverified with evidence: the command you ran and its exit code, a few lines of output, file:line. One fail or unverified makes the result fail.',
+    "- A pass without evidence is unverified. A pass in a worker's report is not evidence (the Checks the relay tool ran itself are).",
+    '- Open each file under Files to review with its command and list it in reviewed_files. Do not list a file you did not open. A verdict missing any file of the list is refused.',
+    '- A cancel reverts no code: commits of cancelled or blocked tasks and revisions are to be reviewed while they are in HEAD (the section Other commits of this run included).',
+    '- Leave style aside: judge behaviour, correctness, scope and weakened tests only.',
+    '- If you are of the same model family as the worker that did this work, say so in the model field and in the verdict (it is then no cross-check).',
+    `- Write the verdict as JSON in the form of ${schemaPath} to ${verdictPath}. If you cannot write it, give the same JSON as your reply.`,
+    '- In the commit field put the full SHA of the HEAD you reviewed (the HEAD line above).',
   ].join('\n')
 }

@@ -1191,10 +1191,10 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
         withoutSections(brief?.text ?? '', ['Rules', 'Report format']).replace(/^# /gm, '#### ').trim(),
         '',
         "### Worker's report (its hand-over notes left out)",
-        reportText === undefined ? '(보고서 없음)' : withoutSections(reportText, ['For whoever picks up']).replace(/^##? /gm, '#### ').trim(),
+        reportText === undefined ? '(no report)' : withoutSections(reportText, ['For whoever picks up']).replace(/^##? /gm, '#### ').trim(),
         '',
         '### Checks run by the relay tool (not the worker)',
-        checks === undefined ? '(check를 돌리지 않았습니다)' : checks.replace(/^##? /gm, '#### ').trim(),
+        checks === undefined ? '(check was not run)' : checks.replace(/^##? /gm, '#### ').trim(),
       )
     }
     // Every revision's commits: an earlier one's (cancelled, blocked) stay in HEAD too.
@@ -1214,10 +1214,10 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     other.push('', `### Commits signed Run: ${state.run} with no known task`)
     for (const { key, sha } of loose) {
       const subject = await git($, root, ['log', '-1', '--format=%s', sha]).catch(() => undefined)
-      other.push(...commitLines(`${sha} ${subject?.stdout.trim() ?? ''}`.trim() + (key === '' ? ' (Task 꼬리말 없음)' : ` (Task: ${key})`), await commitFiles(sha, key === '' ? '?' : key)))
+      other.push(...commitLines(`${sha} ${subject?.stdout.trim() ?? ''}`.trim() + (key === '' ? ' (no Task trailer)' : ` (Task: ${key})`), await commitFiles(sha, key === '' ? '?' : key)))
     }
   }
-  if (other.length > 0) parts.push('', '## Other commits of this run', '이 꾸러미의 작업 밖이지만 이 묶음의 커밋이다. 취소는 코드를 되돌리지 않는다: 이 파일들도 검토한다.', ...other)
+  if (other.length > 0) parts.push('', '## Other commits of this run', 'Commits of this run outside the tasks of this package. A cancel reverts no code: review these files too.', ...other)
 
   if (listFailures.length > 0) return { deny: ['커밋이 바꾼 파일 목록을 확실히 읽지 못해 꾸러미를 만들지 않았습니다(검토할 파일이 빠질 수 있음). 다시 package하세요:', ...listFailures.map(failure => `- ${failure}`)].join('\n') }
 

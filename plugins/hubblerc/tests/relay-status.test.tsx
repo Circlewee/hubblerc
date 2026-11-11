@@ -62,7 +62,7 @@ const PROGRESS = [
   '| D1 | use a | fast | small | lead | decided |',
   '| D2 | push now | the person decides | high | user | asked |',
   '',
-  '## Tasks (relay가 다시 그림 — 손으로 고치지 말 것)',
+  '## Tasks (redrawn by relay — do not edit by hand)',
   '<!-- relay:tasks:start -->',
   '<!-- relay:tasks:end -->',
   '',

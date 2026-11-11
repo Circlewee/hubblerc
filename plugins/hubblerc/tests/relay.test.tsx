@@ -330,7 +330,7 @@ test('task writes the brief with its head lines, criteria, rules and trailers, a
   expect(brief).toContain('- C2: reads well')
   expect(brief).toContain("--trailer 'Task: A-r1' --trailer 'Run: 2026-11-09-demo'")
   expect(brief).not.toContain('Agent: codex')
-  expect(brief).toContain('9. 보고서 형식은')
+  expect(brief).toContain('9. Follow the Report format below')
   expect(brief).toContain('- C1: pass|fail|unverified · tries N')
   expect(state(sim).tasks[0]).toMatchObject({ id: 'A', rev: 1, status: 'ready', runner: null, editScope: ['hooks/relay/**', 'tests/relay.test.tsx'] })
   expect(sim.files[`${DIR}/progress.md`]).toContain('| A-r1 | Add the tool | - | ready |')
@@ -510,7 +510,7 @@ test('package leaves out the rules and the hand-over notes, and carries the chec
   expect(text).toContain('Summary: pass 1')
   expect(text).toContain(`- ${SHA_A} Add the relay tool`)
   expect(text).toContain('## Files to review')
-  expect(text).toContain('반박하는 자세')
+  expect(text).toContain('Review to refute')
   expect(text).toContain(`${DIR}/reviews/verdict.schema.json`)
 })
 
@@ -612,7 +612,7 @@ test('spec_text answers a light brief and writes no file', async ($, on) => {
   expect(light.result).toContain('# Task A: Add the tool')
   expect(light.result).not.toContain('Report to')
   expect(light.result).not.toContain('Task: A')
-  expect(light.result).toContain('보고는 답으로 한다: 15줄 안팎')
+  expect(light.result).toContain('Report in your reply: about 15 lines')
   expect(Object.keys(sim.files)).toEqual([])
 })
 
@@ -876,10 +876,10 @@ test('D7 the package carries no diff: each commit with its files and line counts
   expect(text).not.toContain('diff --git')
   expect(text).not.toContain('## Diffs')
   expect(text).toContain(`- ${SHA_A} Add the relay tool\n  - hooks/relay/relay.ts (+3 −1)\n  - hooks/relay/relay-format.ts (+3 −1)`)
-  expect(text).toContain(`diff는 담지 않는다. 각 파일을 아래 명령으로 저장소 루트(${ROOT})에서 열어 본다.`)
-  expect(text).toContain('- hooks/relay/relay.ts — +3 −1, 커밋 1개')
+  expect(text).toContain(`This holds no diff. Open each file with its command below, from the repository root (${ROOT}).`)
+  expect(text).toContain('- hooks/relay/relay.ts — +3 −1, 1 commit')
   expect(text).toContain(`  - \`git show ${SHA_A} -- hooks/relay/relay.ts\` (+3 −1, A-r1)`)
-  expect(text).toContain('열지 않은 파일은 적지 않는다')
+  expect(text).toContain('Do not list a file you did not open')
   expect(state(sim).packages?.[0]?.files).toEqual(['hooks/relay/relay-format.ts', 'hooks/relay/relay.ts'])
 })
 
@@ -956,8 +956,8 @@ test('V1-04b the package shows the commits of tasks outside it, cancelled ones i
   expect(text).toContain(`- ${SHA_B} Weaken a test`)
   expect(text).toContain('### Test file changes (every revision of B): tests/weakened.test.ts (B-r1)')
   expect(text).toContain(`### Commits signed Run: ${RUN} with no known task`)
-  expect(text).toContain(`- ${loose} Lead fixup (Task 꼬리말 없음)`)
-  expect(text).toContain('취소는 코드를 되돌리지 않는다')
+  expect(text).toContain(`- ${loose} Lead fixup (no Task trailer)`)
+  expect(text).toContain('A cancel reverts no code')
   expect(state(sim).packages?.[0]?.files).toEqual(['docs/notes.md', 'hooks/relay/fix.ts', 'tests/weakened.test.ts'])
   expect(state(sim).packages?.[0]?.tasks).toEqual([{ key: 'A-r1', criteria: ['C1', 'C2'] }])
 
@@ -1298,8 +1298,8 @@ test('a new revision’s brief says the tries a criterion takes over, from 1 up;
   await relay($, { ...TASK_A, done_when: [{ text: 'tests pass', command: 'make test' }, { text: 'reads well' }, { id: 'C3', text: 'docs' }] })
   // A first revision carries nothing; its rule says where a carried count would be.
   const r1 = sim.files[`${DIR}/tasks/A-r1.md`] ?? ''
-  expect(r1).not.toContain('· tries 이어받음')
-  expect(r1).toContain("같은 기준의 수정은 판을 넘어 누적 3번까지(tries). 기준 줄에 'tries 이어받음 N'이 있으면 거기서 이어 센다. 통과하면 더 다듬지 않는다.")
+  expect(r1).not.toContain('· tries carried')
+  expect(r1).toContain("Fix the same criterion 3 times at most, counted across revisions (tries). Where a criterion's line says 'tries carried N', count on from N. Once it passes, do not polish further.")
   await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
   sim.commits[SHA_A] = { task: 'A-r1', subject: 'Try', files: ['hooks/relay/relay.ts'] }
   sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', criteria: ['- C1: fail · tries 2 · red', '- C2: pass · tries 0 · ok', '- C3: fail · tries 1 · x'] })
@@ -1309,11 +1309,11 @@ test('a new revision’s brief says the tries a criterion takes over, from 1 up;
   const done_when = [{ text: 'tests pass', command: 'make test' }, { text: 'reads well' }, { id: 'C3', text: 'docs, now longer' }, { id: 'C4', text: 'new' }]
   await relay($, { ...TASK_A, done_when })
   const brief = sim.files[`${DIR}/tasks/A-r2.md`] ?? ''
-  expect(brief).toContain('- C1: tests pass · `make test` → exit 0 · tries 이어받음 2\n')
+  expect(brief).toContain('- C1: tests pass · `make test` → exit 0 · tries carried 2\n')
   expect(brief).toContain('- C2: reads well\n')
   expect(brief).toContain('- C3: docs, now longer\n')
   expect(brief).toContain('- C4: new\n')
-  expect(brief.match(/· tries 이어받음/g)).toHaveLength(1)
+  expect(brief.match(/· tries carried/g)).toHaveLength(1)
   expect(state(sim).tasks[1]).toMatchObject({ status: 'ready', tries: { C1: 2, C2: 0 } })
 
   // Launched through the gate's reservation: the copy is the brief as written, its hash the one task wrote.
@@ -1330,11 +1330,11 @@ test('a new revision’s brief says the tries a criterion takes over, from 1 up;
   expect(reported.result).not.toContain('tries가')
   expect(reported.result).not.toContain('지시서가 보낸 뒤에 바뀌었거나')
   expect((await relay($, { action: 'package', run: RUN })).deny).toBeUndefined()
-  expect(sim.files[`${DIR}/reviews/V1-package.md`]).toContain('- C1: tests pass · `make test` → exit 0 · tries 이어받음 2')
+  expect(sim.files[`${DIR}/reviews/V1-package.md`]).toContain('- C1: tests pass · `make test` → exit 0 · tries carried 2')
 
   // A light brief has no revisions: its rule stays as it was.
   const { action: _, run: __, ...fields } = TASK_A
-  expect((await relay($, { action: 'spec_text', ...fields })).result).not.toContain('tries 이어받음')
+  expect((await relay($, { action: 'spec_text', ...fields })).result).not.toContain('tries carried')
 })
 
 // ── report and check say little when all is well ──────────────────────────────────────
