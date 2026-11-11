@@ -1,10 +1,12 @@
 import type { EngineInterface, ToolCallResult } from 'claude-code'
 
-import { likely, hasApiKey, recordOutcome } from './likely'
+import { likely, hasApiKey, predictsBash, recordOutcome } from './likely'
 import type { Question } from './method'
 
 /**
- * The first use of decisions: before each Bash call runs (the main loop's and every subagent's), a
+ * The first use of decisions, off unless the option `likelyBashFail` is set (2026-11-11: three
+ * comparisons found no way of asking that tells a failing command from its text; see the spec's F10).
+ * Before each Bash call runs (the main loop's and every subagent's), a
  * decision in the background on whether it will fail; as the call ends, what happened is appended
  * as its outcome. The command never waits for the decision.
  */
@@ -26,11 +28,11 @@ type BashCall = { tool: string; tool_use_id?: string; agentId?: string; command?
 
 /**
  * Before a Bash call runs: its decision, started and not awaited. The promise answers the decision's
- * id, or null when none was made (a limit, a failure). No key, a command run in the background (its
+ * id, or null when none was made (a limit, a failure). The option off, no key, a command run in the background (its
  * end is not seen here) or an empty one: no decision at all.
  */
 export function predictBashFailure($: EngineInterface, e: BashCall): Promise<string | null> | undefined {
-  if (!hasApiKey() || e.run_in_background === true) return undefined
+  if (!predictsBash() || !hasApiKey() || e.run_in_background === true) return undefined
   const command = typeof e.command === 'string' ? e.command : ''
   if (command.trim() === '') return undefined
   started += 1

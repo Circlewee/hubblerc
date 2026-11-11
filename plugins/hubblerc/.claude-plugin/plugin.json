@@ -58,6 +58,12 @@
       "description": "판정 기록(기기별 <기기>.jsonl)을 둘 폴더. 비우면 iCloud Drive의 hubblerc/likely, iCloud Drive가 없으면 ~/.claude/hubblerc/likely.",
       "default": ""
     },
+    "likelyBashFail": {
+      "type": "boolean",
+      "title": "likely Bash 실패 예측",
+      "description": "Bash 명령마다 실패할지 미리 판정해 기록할지. 명령 글만으로는 실패를 가려내지 못해(2026-11-11 비교) 기본은 꺼짐입니다. 켜면 명령마다 Haiku 호출 5번의 비용이 듭니다.",
+      "default": false
+    },
     "likelyModel": {
       "type": "string",
       "title": "likely 모델",

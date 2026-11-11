@@ -28,7 +28,7 @@ import { messageReply, NOW, standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
 
 const KEY = 'sk-ant-api03-test-key-0000'
-const WITH_KEY = { options: { anthropicApiKey: KEY } }
+const WITH_KEY = { options: { anthropicApiKey: KEY, likelyBashFail: true } }
 const HOME = '/home/me'
 const ICLOUD = `${HOME}/Library/Mobile Documents/com~apple~CloudDocs`
 const LOG = `${HOME}/.claude/hubblerc/likely/Test-Mac.jsonl`
@@ -241,7 +241,7 @@ test('a budget period starts on its day, or a short month\'s last; a new day and
 })
 
 test('the options: no key, the default caps, a start day held to 1-31', () => {
-  expect(likelyOptions({})).toEqual({ apiKey: '', model: 'claude-haiku-5-5', dailyCapUsd: 5, budgetUsd: 100, periodStartDay: 1, logDir: '' })
+  expect(likelyOptions({})).toEqual({ apiKey: '', model: 'claude-haiku-5-5', dailyCapUsd: 5, budgetUsd: 100, periodStartDay: 1, logDir: '', bashFail: false })
   expect(likelyOptions({ anthropicApiKey: ' k ', likelyPeriodStartDay: 40, likelyDailyCapUsd: -1, likelyModel: '' })).toMatchObject({ apiKey: 'k', periodStartDay: 31, dailyCapUsd: 5, model: 'claude-haiku-5-5' })
 })
 
@@ -421,7 +421,7 @@ test('with no key in the options or the keychain nothing is decided: no call, no
   expect(said).toContain('/plugin configure hubblerc@hubblerc')
 })
 
-test('a key in the keychain is read once as the session starts and used; it is kept nowhere but the module', async ($, on) => {
+test('a key in the keychain is read once as the session starts and used; it is kept nowhere but the module', { options: { likelyBashFail: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   const store = machine(on, standIn)
   const secret = 'sk-ant-api03-from-keychain-9999'
@@ -456,7 +456,7 @@ test('the options\' key comes first: the keychain is not asked', WITH_KEY, async
   expect(await likelyCommand($, '')).toContain('API 키: 설정 비밀 항목에 있음')
 })
 
-test('a key added to the keychain mid-session works from the next /likely, no reload', async ($, on) => {
+test('a key added to the keychain mid-session works from the next /likely, no reload', { options: { likelyBashFail: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn)
   standIn.anthropic = knowingModel({ predicate: 0.8 })
@@ -494,6 +494,18 @@ test('a Bash call is predicted in the background; the command does not wait, and
   expect(String(decision?.input)).toContain('What it is for: 테스트 실행')
   expect(String(decision?.input)).toContain('Working folder: /repo/hubblerc')
   expect(await likelyLineShown($)).toMatch(/^likely 오늘 1건 · 이번 달 \$0\.00 \/ \$100$/)
+})
+
+test('with the option off, as it is unless set, a Bash call is not predicted: no call, no log', { options: { anthropicApiKey: KEY } }, async ($, on) => {
+  const standIn = standInForEngine(on)
+  machine(on, standIn)
+  standIn.anthropic = knowingModel({ predicate: 0.2 })
+  await start($)
+
+  await bash($, 'false', { tool_use_id: 'toolu_off' })
+  await standIn.clock.advance(5000)
+  expect(standIn.anthropicCalls.length).toBe(0)
+  expect(lines(standIn)).toEqual([])
 })
 
 test('a command that answered is not failed; one refused, or run in the background, has no outcome to learn', WITH_KEY, async ($, on) => {
@@ -572,7 +584,7 @@ test('at the runaway cap nothing is decided for the day, and a toast says so onc
   expect(await likelyCommand($, '하늘은 파랗다')).toContain('폭주 방지 상한')
 })
 
-test('past the period\'s budget nothing is decided till the next period, with one toast', { options: { anthropicApiKey: KEY, likelyMonthlyBudgetUsd: 10, likelyPeriodStartDay: 15 } }, async ($, on) => {
+test('past the period\'s budget nothing is decided till the next period, with one toast', { options: { anthropicApiKey: KEY, likelyBashFail: true, likelyMonthlyBudgetUsd: 10, likelyPeriodStartDay: 15 } }, async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn, { likelySpend: { day: localDay(NOW), dayUsd: 0.5, dayCount: 1, period: periodStart(NOW, 15), periodUsd: 10, periodCount: 9 } })
   await start($)

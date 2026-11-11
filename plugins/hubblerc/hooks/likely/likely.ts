@@ -33,6 +33,8 @@ export type LikelyOptions = {
   periodStartDay: number
   /** The log's folder as set; '' for the default. */
   logDir: string
+  /** Whether each Bash call is predicted to fail or not (off since 2026-11-11: a forecast the command's text does not hold). */
+  bashFail: boolean
 }
 
 export function likelyOptions(raw: PluginOptions): LikelyOptions {
@@ -47,6 +49,7 @@ export function likelyOptions(raw: PluginOptions): LikelyOptions {
     budgetUsd: amount(raw.likelyMonthlyBudgetUsd, 100),
     periodStartDay: Math.min(31, Math.max(1, day)),
     logDir: text(raw.likelyLogDir),
+    bashFail: raw.likelyBashFail === true,
   }
 }
 
@@ -76,6 +79,11 @@ function apiKey(): string {
 /** Where the key comes from: the secret option, the keychain, or nowhere. */
 export function keySource(): 'options' | 'keychain' | null {
   return options.apiKey !== '' ? 'options' : keychainKey !== '' ? 'keychain' : null
+}
+
+/** Whether Bash calls are to be predicted: the option, off unless set. */
+export function predictsBash(): boolean {
+  return options.bashFail
 }
 
 /** Whether decisions can be made at all: an API key is set. */
