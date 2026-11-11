@@ -335,3 +335,37 @@ test('V1 a brief sent by a name whose answer names the agent: the runner is that
   expect((await sendMessage($, 'worker-c', `Read ${c}.`)).deny).toBeUndefined()
   expect(state(sim).tasks.find(task => task.id === 'C')?.runner).toBe('subagent worker-c')
 })
+
+// ── Verdict V2: one agent holding two tasks ──────────────────────────────────────────────
+
+test('V2 one agent holding two tasks: when the one dispatched last reports, it goes at the other’s effort; when both have reported, as sent; a session start agrees', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A', 'high')
+  const b = await newTask($, 'B', 'xhigh')
+  expect((await spawn($, `Follow ${a}.`)).agentId).toBe('ag-1')
+  // B sent to the same agent while A still runs: the agent goes at B's effort, dispatched last.
+  sim.engine = $
+  sim.finished = { 'ag-1': 'ag-1' }
+  expect((await sendMessage($, 'ag-1', `Also: ${b}.`)).deny).toBeUndefined()
+  expect(state(sim).tasks.map(task => [task.id, task.status, task.runner])).toEqual([
+    ['A', 'running', 'subagent ag-1'],
+    ['B', 'running', 'subagent ag-1'],
+  ])
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('xhigh')
+
+  // B reports; A still holds the agent: its effort again, with no file read as the request goes.
+  sim.files[`${DIR}/tasks/B-r1-report.md`] = doneReport('B-r1')
+  expect((await relay($, { action: 'report', run: RUN, task: 'B' })).deny).toBeUndefined()
+  const before = sim.reads
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('high')
+  expect(sim.reads).toBe(before)
+  // A session start works it out the same way.
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('high')
+
+  // A reports too: the agent holds no task, its requests go as sent.
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = doneReport('A-r1')
+  expect((await relay($, { action: 'report', run: RUN, task: 'A' })).deny).toBeUndefined()
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
+})

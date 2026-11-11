@@ -948,6 +948,11 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
   const startedAt = await $.clock.now()
   const before = await snapshot($, root)
   const outcomes: CheckOutcome[] = []
+  // check takes no lock, so the run may be abandoned while it runs: before each command and before
+  // the result file it reads the state again and stops there. A command already running ends first.
+  let commandsRun = 0
+  const stopped = async (): Promise<{ deny: string } | undefined> =>
+    (await readState($, root, state.run))?.status === 'abandoned' ? { deny: `검사 도중 묶음이 버려져 멈췄습니다: ${state.run}(기준 명령 ${commandsRun}개를 돌린 뒤, 결과 파일은 쓰지 않음)` } : undefined
   for (const criterion of task.criteria) {
     const expectExit = criterion.expectExit ?? 0
     const base = { id: criterion.id, text: criterion.text, expectExit }
@@ -955,6 +960,8 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
       outcomes.push({ ...base, result: 'unverified', reason: '명령 없음: 검증자·사용자 확인' })
       continue
     }
+    const halt = await stopped()
+    if (halt !== undefined) return halt
     const left = CHECK_TOTAL_MS - ((await $.clock.now()) - startedAt)
     if (left <= 0) {
       outcomes.push({ ...base, command: criterion.command, result: 'unverified', reason: `한 번 부를 때 합계 ${CHECK_TOTAL_MS / 1000}초를 넘어 돌리지 않음` })
@@ -962,6 +969,7 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
     }
     const limit = Math.min(CHECK_MS, left)
     const at = await $.clock.now()
+    commandsRun += 1
     try {
       const ran = await $.process.run(['/bin/sh', '-c', criterion.command], { cwd: root, timeoutMs: limit })
       const ms = (await $.clock.now()) - at
@@ -989,6 +997,8 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
         ? '작업 트리: 깨끗함(git이 모르는 파일도 없음)'
         : `작업 트리: 커밋하지 않은 변경·git이 모르는 파일 ${uncommittedOf(before.changes).join(', ')}`
   const path = checksFile(runDir(root, state.run), key)
+  const halt = await stopped()
+  if (halt !== undefined) return halt
   await $.fs.write(path, checksText(key, head, startedAt, outcomes, [tree]))
 
   // Where the worker's word and the commands disagree.

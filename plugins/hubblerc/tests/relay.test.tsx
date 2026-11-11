@@ -1537,3 +1537,34 @@ test('V1 a criterion reported as a pass with tries 3 shows its tries in the repo
   expect(body).toContain('- C1: 워커는 pass, 명령은 fail')
   expect(checked.result).toBe('pass 0 · fail 1 · 미확인 1 · 0 ms · 트리 깨끗함')
 })
+
+// ── Verdict V2's findings, each reproduced ──────────────────────────────────────────────
+
+/** The state as an abandon made by another call leaves it, written while a command of the check runs. */
+const abandonNow = (sim: Sim) => () => {
+  sim.files[`${DIR}/state.json`] = JSON.stringify({ ...state(sim), status: 'abandoned', abandonReason: 'stopped', abandonedAt: NOON })
+}
+
+test('V2 a run abandoned while its check runs a command: the command ends, the ones left do not run, no result file is written, and the check says it stopped', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, { ...TASK_A, done_when: [{ text: 'tests', command: 'make test' }, { text: 'lint', command: 'make lint' }, { text: 'reads well' }] })
+  sim.commands['make test'] = { exitCode: 0, effect: abandonNow(sim) }
+  sim.commands['make lint'] = { exitCode: 0 }
+  const checked = await said($, { action: 'check', run: RUN, task: 'A' })
+  expect(checked.problem).toBe(true)
+  expect(checked.result).toBe(`거절: 검사 도중 묶음이 버려져 멈췄습니다: ${RUN}(기준 명령 1개를 돌린 뒤, 결과 파일은 쓰지 않음)`)
+  expect(sim.ran).toEqual(['make test'])
+  expect(sim.files[`${DIR}/tasks/A-r1-checks.md`]).toBeUndefined()
+})
+
+test('V2 a run abandoned while the check’s last command runs: no result file is written either', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, { ...TASK_A, done_when: [{ text: 'tests', command: 'make test' }] })
+  sim.commands['make test'] = { exitCode: 0, effect: abandonNow(sim) }
+  const checked = await relay($, { action: 'check', run: RUN, task: 'A' })
+  expect(checked.deny).toBe(`검사 도중 묶음이 버려져 멈췄습니다: ${RUN}(기준 명령 1개를 돌린 뒤, 결과 파일은 쓰지 않음)`)
+  expect(sim.ran).toEqual(['make test'])
+  expect(sim.files[`${DIR}/tasks/A-r1-checks.md`]).toBeUndefined()
+})

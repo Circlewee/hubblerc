@@ -48,17 +48,51 @@ export function workerEffort(agentId: string): EffortLevel | undefined {
   return efforts.get(agentId)?.level
 }
 
+type Held = { at: number; effort: string; owner: WorkerOwner }
+
 /**
- * After a run's state is saved: its entries kept only while their task holds that worker (running,
- * launching, blocked after its launch) and its runner is that agent (or not yet written: a launch
- * under way); all of them once the run is finished or abandoned. Other runs' entries stay.
+ * The rule both the refill at session start and the settling after a save follow: per agent, of the
+ * active runs' tasks that are a subagent's (`subagent <id>`) and still hold their worker (running,
+ * launching, blocked after its launch), the one dispatched last.
+ */
+function heldWorkers(states: readonly RelayState[]): Map<string, Held> {
+  const latest = new Map<string, Held>()
+  for (const state of states) {
+    if (state.status !== 'active') continue
+    for (const task of state.tasks) {
+      const id = subagentOf(task.runner)
+      if (id === undefined || !isBusy(task)) continue
+      const at = task.dispatchedAt ?? 0
+      const known = latest.get(id)
+      if (known === undefined || at >= known.at) latest.set(id, { at, effort: task.effort, owner: { run: state.run, task: taskKey(task) } })
+    }
+  }
+
+  return latest
+}
+
+/**
+ * After a run's state is saved: its entries worked out again by the same rule as the refill. An
+ * agent that still holds a task of the run goes at the effort of the one dispatched last (another
+ * task it held may have just let it go); one that holds none is dropped, and all of them once the run
+ * is finished or abandoned. An entry noted for a launch under way (its task busy, its runner not yet
+ * written) stays as noted: it is the newest. Other runs' entries stay.
  */
 export function settleWorkerEfforts(state: RelayState): void {
+  const held = heldWorkers([state])
   for (const [id, { owner }] of [...efforts]) {
-    if (owner.run !== state.run) continue
+    if (owner.run !== state.run || held.has(id)) continue
     const task = state.status === 'active' ? state.tasks.find(other => taskKey(other) === owner.task) : undefined
-    const isHeld = task !== undefined && isBusy(task) && (task.runner === null || subagentOf(task.runner) === id)
-    if (!isHeld) efforts.delete(id)
+    const isLaunching = task !== undefined && isBusy(task) && task.runner === null
+    if (!isLaunching) efforts.delete(id)
+  }
+  for (const [id, { effort, owner }] of held) {
+    const known = efforts.get(id)
+    if (known !== undefined && known.owner.run !== state.run) continue
+    // A launch under way of this run stays: it was noted after the tasks the runners name.
+    const noted = known === undefined ? undefined : state.tasks.find(other => taskKey(other) === known.owner.task)
+    if (noted !== undefined && isBusy(noted) && noted.runner === null) continue
+    noteWorkerEffort(id, effort, owner)
   }
 }
 
@@ -75,16 +109,6 @@ export function subagentOf(runner: string | null): string | undefined {
  */
 export function refillWorkerEfforts(states: readonly RelayState[]): void {
   efforts.clear()
-  const latest = new Map<string, { at: number; effort: string; owner: WorkerOwner }>()
-  for (const state of states) {
-    for (const task of state.tasks) {
-      const id = subagentOf(task.runner)
-      if (id === undefined || !isBusy(task)) continue
-      const at = task.dispatchedAt ?? 0
-      const known = latest.get(id)
-      if (known === undefined || at >= known.at) latest.set(id, { at, effort: task.effort, owner: { run: state.run, task: taskKey(task) } })
-    }
-  }
-  const byTime = [...latest].sort(([, a], [, b]) => a.at - b.at)
+  const byTime = [...heldWorkers(states)].sort(([, a], [, b]) => a.at - b.at)
   for (const [id, { effort, owner }] of byTime) noteWorkerEffort(id, effort, owner)
 }
