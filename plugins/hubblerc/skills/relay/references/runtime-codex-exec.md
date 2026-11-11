@@ -1,6 +1,8 @@
 # Runtime: Codex verification with `codex exec`
 
-For a different model's verification when there is no Orca. Verification only: Codex reads, judges and writes a verdict; it changes nothing. Flags change between versions: read `codex exec --help` once before the first run, and prefer what it says over this note.
+The first choice for a different model's verification, with or without Orca. Verification only: Codex reads, judges and writes a verdict; it changes nothing. Flags change between versions: read `codex exec --help` once before the first run, and prefer what it says over this note.
+
+Why first, even inside Orca: an Orca Codex worker's sandbox blocks its connection to Orca (`EPERM`), so each `orca orchestration send` or `check` it runs waits for the user's approval (seen 2026-11-11: three approval prompts for one verification). `codex exec --sandbox read-only` writes its verdict to a file only and raises no prompt. Use an Orca Codex worker only when the job needs Orca itself.
 
 ## Run it
 
@@ -19,7 +21,13 @@ For a different model's verification when there is no Orca. Verification only: C
 
 ## Following up
 
-- `--ephemeral` keeps no session to resume. When the same verifier should look again (one verifier for the whole run keeps its standard), leave out `--ephemeral` on the first run, note the session id it prints, and later run `codex exec resume <session id> "<what changed; the new package path>"`. Never use `--last`: another Codex session may be newer.
+- `--ephemeral` keeps no session to resume. When the same verifier should look again (one verifier for the whole run keeps its standard), leave out `--ephemeral` on the first run and note the session id printed at the head of its log. Later, with the next `package`'s paths (seen working 2026-11-11):
+  ```bash
+  codex exec resume <session id> -c 'sandbox_mode="read-only"' \
+    --output-schema <schema path> -o <verdict path> \
+    "<what changed; the new package path>" < /dev/null
+  ```
+  `resume` has no `--sandbox` or `-C` (codex-cli 0.167.0): give the sandbox as a config value (`-c 'sandbox_mode="read-only"'`), keep it read-only, and run the command from the repository root. Never use `--last`: another Codex session may be newer.
 - It cannot ask you anything while it runs. A question in its verdict (`unverified` with a reason) is answered by the next package or by the user.
 
 ## If it fails

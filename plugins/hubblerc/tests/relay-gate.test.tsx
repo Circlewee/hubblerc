@@ -358,6 +358,35 @@ test('inside a run, a launch with no brief file is refused unless it says no-rel
   expect(sim.commands).toHaveLength(1)
 })
 
+test('inside a run, a worker-start or send asking for --help or -h passes with no check and no claim; -h as a value is no help', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const spec = await newTask($, 'A')
+  const writes = sim.stateWrites.length
+
+  const asks = [
+    'orca orchestration worker-start --help',
+    'orca orchestration worker-start -h',
+    `orca orchestration worker-start --spec-file ${spec} --help`,
+    `orca orchestration send --to dispatch:ctx_1 --body "Read and follow: ${spec}" -h`,
+    `orca orchestration send --help --to dispatch:ctx_1 --body "Read and follow: ${spec}"`,
+  ]
+  for (const command of asks) expect((await bash($, command)).deny).toBeUndefined()
+  expect(sim.commands).toEqual(asks)
+  expect(sim.stateWrites).toHaveLength(writes)
+  expect(state(sim).tasks[0]?.status).toBe('ready')
+  expect(state(sim).tasks[0]?.runner).toBeNull()
+  expect(readOrcaCalls('orca orchestration worker-start --help --json')?.[0]?.isHelp).toBe(true)
+  expect(readOrcaCalls('orca orchestration worker-start --spec-file x.md')?.[0]?.isHelp).toBe(false)
+
+  // An option's value that reads -h, and a worker-start with no brief and no help, are refused as before.
+  const valued = await bash($, 'orca orchestration worker-start --spec -h --agent claude')
+  expect(valued.deny).toContain(`relay 묶음 ${RUN}이 진행 중입니다.`)
+  const none = await bash($, 'orca orchestration worker-start --spec "do it" --agent claude')
+  expect(none.deny).toContain(`relay 묶음 ${RUN}이 진행 중입니다.`)
+  expect(sim.commands).toEqual(asks)
+})
+
 test('a spec file that is none of the run\'s briefs is other work and passes', async ($, on) => {
   const sim = standIn(on)
   await newRun($)

@@ -6,6 +6,7 @@ import { findActiveRuns, repoRoot, reserveDispatch, sha256 } from './relay'
 import type { ActiveRun } from './relay'
 import { isBusy, sameCommit, taskKey } from './relay-format'
 import type { RelayTask } from './relay-format'
+import { noteWorkerEffort, refillWorkerEfforts } from './worker-effort'
 
 /**
  * relay's gates, as hooks. Gate 1 looks at a worker about to start or to be sent a brief (`orca
@@ -19,14 +20,18 @@ import type { RelayTask } from './relay-format'
  * warns at an answer's end when the run holds finished work no other model has verified at the
  * current HEAD.
  *
+ * A subagent recorded as a brief's worker (started, or resumed by a new revision) gets the brief's
+ * effort noted for its agentId (worker-effort.ts), which its requests are then sent with. A call
+ * asking for help (`--help`, `-h`) starts nothing and passes unchecked.
+ *
  * Cost: every Bash, Agent and SendMessage call pays a text test and nothing else. Only a call that
  * names `worker-start` or a run's brief reads the files, and the repository's top folder is asked of
- * git once. No timers, no watching.
+ * git once. Session start reads the active runs once to refill the efforts. No timers, no watching.
  */
 
 const ORCA_COMMANDS = new Set(['orca', 'orca-dev', 'orca-ide'])
 /** Options of `orchestration` commands that take no value; every other `--option` takes the word after it. */
-const FLAGS = new Set(['--json', '--keep-open', '--full'])
+const FLAGS = new Set(['--json', '--keep-open', '--full', '--help'])
 const MODEL_ALIASES = ['opus', 'sonnet', 'haiku', 'fable']
 const GIT_MS = 10_000
 const ONE_AT_A_TIME = '워커는 한 번에 하나씩 띄우세요.'
@@ -57,6 +62,8 @@ export type OrcaCall = {
    * nowhere sure.
    */
   shifts: boolean
+  /** Asks for the command's help (`--help` or `-h`, not as an option's value): it starts and sends nothing. */
+  isHelp: boolean
 }
 
 /**
@@ -78,15 +85,18 @@ export function readOrcaCalls(command: string): OrcaCall[] | undefined {
     if (at < 0 || (sub !== 'worker-start' && sub !== 'send')) continue
     const rest = words.slice(at + 2)
     const options = new Map<string, string | true>()
+    let isHelp = false
     for (let i = 0; i < rest.length; i += 1) {
       const word = rest[i]?.text ?? ''
+      // An option's value is skipped below, so `--body -h` is no help.
+      if (word === '-h') isHelp = true
       if (!word.startsWith('--')) continue
       const equals = word.indexOf('=')
       if (equals > 0) options.set(word.slice(0, equals), word.slice(equals + 1))
       else if (FLAGS.has(word) || rest[i + 1] === undefined || (rest[i + 1]?.text ?? '').startsWith('--')) options.set(word, true)
       else options.set(word, rest[(i += 1)]?.text ?? '')
     }
-    calls.push({ sub, options, words: rest.map((word: CommandWord) => word.text), shifts })
+    calls.push({ sub, options, words: rest.map((word: CommandWord) => word.text), shifts, isHelp: isHelp || options.has('--help') })
   }
 
   return calls
@@ -191,6 +201,18 @@ function failureOf(ran: unknown): string | undefined {
   return oneLine(typeof why === 'string' ? why : (text ?? 'success: false'))
 }
 
+/**
+ * The agent a SendMessage resumed, as its answer names it (`{ success: true, message: "Resuming
+ * agent …", resumedAgentId: "<id>", … }`, seen 2026-11-11); undefined when it names none.
+ */
+function resumedIdIn(sent: unknown): string | undefined {
+  const call = sent as { text?: unknown; result?: unknown } | null
+  const record = recordOf(call?.result) ?? recordOf(call?.text)
+  const id = record?.resumedAgentId
+
+  return typeof id === 'string' && id.trim() !== '' ? id.trim() : undefined
+}
+
 // ── Finding the brief ──────────────────────────────────────────────
 
 type Named = { run: ActiveRun; task: RelayTask }
@@ -242,7 +264,7 @@ async function briefProblems($: EngineInterface, task: RelayTask): Promise<strin
  * A task to claim before the launch, and how the launch is told in the state afterwards: `brief` is
  * the brief's path as the state holds it, `act` whether a worker is started or a brief sent to one.
  */
-export type Hold = { root: string; run: string; task: string; brief: string; act: 'launch' | 'send'; runnerOf: (receipt: string) => string }
+export type Hold = { root: string; run: string; task: string; brief: string; act: 'launch' | 'send'; runnerOf: (receipt: string) => string; effort?: string }
 
 export type Plan = { deny: string } | { pass: true; hold?: Hold }
 
@@ -318,7 +340,7 @@ function withNote<R>(ran: R, note: string | undefined): R {
  * call's `{ success: false }`, 2026-11-11). That resume is the send's own: the send was checked and
  * holds the claim, so the spawn passes unchecked, and how it went is kept here for the send's receipt.
  */
-type Sending = { to: string; brief: string; resumed?: { deny?: string } }
+type Sending = { to: string; brief: string; effort: string; resumed?: { deny?: string; agentId?: string } }
 const sending = new Set<Sending>()
 
 /**
@@ -338,12 +360,20 @@ async function sendOf($: EngineInterface, e: AgentSpawnInput): Promise<Sending |
   return open.find(going => named.has(going.brief))
 }
 
-/** Starts the resume a send caused, keeping whether it was refused (or threw) for the send's receipt. */
-async function resumeOf<R extends { deny?: string }>(going: Sending, start: () => Promise<R>): Promise<R> {
+/**
+ * Starts the resume a send caused, keeping whether it was refused (or threw) for the send's
+ * receipt. A resume that went notes the brief's effort for the agent at once: it may send a request
+ * before the SendMessage call answers.
+ */
+async function resumeOf<R extends { deny?: string }>(going: Sending, agentId: string, start: () => Promise<R>): Promise<R> {
   going.resumed = {}
   try {
     const started = await start()
     if (typeof started.deny === 'string') going.resumed = { deny: started.deny }
+    else {
+      going.resumed = { agentId }
+      noteWorkerEffort(agentId, going.effort)
+    }
 
     return started
   } catch (error) {
@@ -373,7 +403,8 @@ const optionOf = (call: OrcaCall, name: string): string | undefined => {
 
 /** Gate 1 for the orca commands in a Bash command; the caller has tested the command's text already. */
 export async function planOrca($: EngineInterface, command: string): Promise<Plan> {
-  const calls = readOrcaCalls(command)?.filter(call => call.sub === 'worker-start' || mayNameBrief(call.words))
+  // A call asking for help starts and sends nothing: no check, no claim.
+  const calls = readOrcaCalls(command)?.filter(call => !call.isHelp && (call.sub === 'worker-start' || mayNameBrief(call.words)))
   if (calls === undefined || calls.length === 0) return { pass: true }
   const root = await rootOf($)
   if (root === undefined) return { pass: true }
@@ -447,7 +478,7 @@ export async function planSpawn($: EngineInterface, prompt: string, model: strin
   else if (!sameModel(model, task.model)) problems.push(`model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
   if (problems.length > 0) return refused(taskKey(task), problems)
 
-  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), brief: task.specPath, act: 'launch', runnerOf: id => `subagent ${id === '' ? '(agent id 미확인)' : id}` } }
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), brief: task.specPath, act: 'launch', runnerOf: id => `subagent ${id === '' ? '(agent id 미확인)' : id}`, effort: task.effort } }
 }
 
 /**
@@ -466,7 +497,7 @@ export async function planMessage($: EngineInterface, to: string, message: strin
   const problems = await briefProblems($, picked.task)
   if (problems.length > 0) return refused(taskKey(picked.task), problems)
 
-  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), brief: picked.task.specPath, act: 'send', runnerOf: () => `subagent ${to}` } }
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(picked.task), brief: picked.task.specPath, act: 'send', runnerOf: () => `subagent ${to}`, effort: picked.task.effort } }
 }
 
 // ── The answer's end ──────────────────────────────────────────────
@@ -498,6 +529,17 @@ export async function unverifiedLine($: EngineInterface): Promise<string | undef
   return lines.length === 0 ? undefined : lines.join('\n')
 }
 
+/**
+ * At session start: the subagent workers' efforts again from the active runs (see worker-effort.ts).
+ * One read of the runs, with git asked for the top folder (once for the session, shared with the gate).
+ */
+export async function startWorkerEfforts($: EngineInterface): Promise<void> {
+  refillWorkerEfforts([])
+  const root = await rootOf($)
+  if (root === undefined) return
+  refillWorkerEfforts((await findActiveRuns($, root)).map(run => run.state))
+}
+
 // ── Hooks ──────────────────────────────────────────────
 
 /** Whether a Bash command's text may hold a launch (the text test every Bash call pays). */
@@ -526,7 +568,7 @@ export function gateLaunches(on: On): void {
     const plan = await planMessage($, to, message)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
-    const going: Sending = { to, brief: resolvePath(plan.hold.brief, undefined) }
+    const going: Sending = { to, brief: resolvePath(plan.hold.brief, undefined), effort: plan.hold.effort ?? '' }
     const send = async () => {
       sending.add(going)
       try {
@@ -539,8 +581,11 @@ export function gateLaunches(on: On): void {
     const out = await claimed($, plan.hold, send, (sent): Receipt => {
       const refusal = going.resumed?.deny
       const why = failureOf(sent) ?? (refusal === undefined ? undefined : oneLine(`재개가 거절됐습니다: ${refusal}`))
+      if (why !== undefined) return { isOk: false, why }
+      // The agent's requests carry its agentId: the resumed one, else what the answer names, else the address (a name may not match).
+      noteWorkerEffort(going.resumed?.agentId ?? resumedIdIn(sent) ?? to, going.effort)
 
-      return why === undefined ? { isOk: true, text: '' } : { isOk: false, why }
+      return { isOk: true, text: '' }
     })
 
     return 'refused' in out ? { deny: out.refused } : withNote(out.ran, out.note)
@@ -549,7 +594,7 @@ export function gateLaunches(on: On): void {
   on('agent.spawn', async ($, e, next) => {
     // The resume a SendMessage of a claimed brief caused: that send was checked and holds the claim.
     const going = await sendOf($, e)
-    if (going !== undefined) return resumeOf(going, () => next(e))
+    if (going !== undefined && e.resume !== undefined) return resumeOf(going, e.resume.agentId, () => next(e))
     if (!e.prompt.includes('.relay/runs/')) return next(e)
     const plan = await planSpawn($, e.prompt, e.model)
     if ('deny' in plan) return { deny: plan.deny }
@@ -557,8 +602,11 @@ export function gateLaunches(on: On): void {
     const out = await claimed($, plan.hold, () => next(e), (started): Receipt => {
       const why = failureOf(started)
       if (why !== undefined) return { isOk: false, why }
+      const agentId = typeof started.agentId === 'string' ? started.agentId : ''
+      // Noted as soon as the start went, before the state is written: the subagent may already be sending requests.
+      if (agentId !== '' && plan.hold?.effort !== undefined) noteWorkerEffort(agentId, plan.hold.effort)
 
-      return { isOk: true, text: typeof started.agentId === 'string' ? started.agentId : '' }
+      return { isOk: true, text: agentId }
     })
     if ('refused' in out) return { deny: out.refused }
     if (out.note !== undefined) {

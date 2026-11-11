@@ -23,7 +23,7 @@ import { layoutOption, showSidebar, startSidebar } from './sidebar/sidebar'
 import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshModelLimits, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
 import { findTurnForLine, summarize } from './activity/summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
-import { gateLaunches, unverifiedLine } from './relay/gate'
+import { gateLaunches, startWorkerEfforts, unverifiedLine } from './relay/gate'
 import { registerRelayTool, serveRelayTool } from './relay/relay'
 import { showRelayLines } from './relay/relay-view'
 import { showToolLines } from './activity/tool-lines'
@@ -48,6 +48,8 @@ export const register: Register = (on, options) => {
     await startSidebar($, layout).catch(() => undefined)
     await startTodos($).catch(() => undefined)
     await registerRelayTool($).catch(() => undefined)
+    // The relay subagent workers still out: their requests go at their briefs' efforts again.
+    await startWorkerEfforts($).catch(() => undefined)
     await startLikely($).catch(() => undefined)
     await registerLikelyCommand($).catch(() => undefined)
     await startDevice($).catch(() => undefined)
