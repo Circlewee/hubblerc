@@ -16,6 +16,7 @@ plugins/hubblerc/
   shell/relaunch.zsh           /setup이 까는 셸 함수(claude 재시작, hubblerc-key)
   tests/                       claude plugin test용, tests/engine.ts가 엔진 대역
 tools/likely-replay.ts         likely 기록 재실행 실험(bun)
+tools/likely-task.ts           likely 판단 과제 시험(Haiku 대 Opus 기준), 과제 정의는 likely-tasks.ts
 ```
 
 ## 개발 루프
@@ -38,4 +39,4 @@ tools/likely-replay.ts         likely 기록 재실행 실험(bun)
 - **커밋·릴리스**: 커밋은 작업 단위로 알아서 한다. 버전 올리기·태그·push는 사용자가 지시할 때만. 릴리스는 `plugin.json` 버전 + spec "버전 규칙" 줄에 내용 추가 + 같은 커밋에 lightweight 태그 `v<버전>`.
 - **공개 저장소**: API 키·개인 정보·대화 원문을 넣지 않는다. likely·auto effort 기록(iCloud `hubblerc/`)의 명령·질문 원문은 저장소나 공유 문서로 옮기지 않고, 분석 결과는 숫자로만 적는다.
 - **likely API 키**: 플러그인 설정 비밀 항목 또는 키체인 `hubblerc-likely`에서만 읽는다. 환경 변수는 읽지 않고, 키를 출력하거나 파일에 쓰지 않는다.
-- **다른 세션과 같은 저장소를 쓸 때**: 시작 전에 `git status`로 남의 미커밋 변경을 확인하고, 커밋할 때는 바꾼 파일만 `git add`한다. `tools/likely-replay.ts`는 `hooks/likely/cost.ts`·`method.ts`를 import하니 둘의 위치·export를 바꾸면 그쪽도 고친다.
+- **다른 세션과 같은 저장소를 쓸 때**: 시작 전에 `git status`로 남의 미커밋 변경을 확인하고, 커밋할 때는 바꾼 파일만 `git add`한다. `tools/likely-replay.ts`는 `hooks/likely/cost.ts`·`method.ts`를 import하니 둘의 위치·export를 바꾸면 그쪽도 고친다(`tools/likely-task.ts`·`likely-tasks.ts`·`likely-turn.ts`는 `likely-replay.ts`의 export를 쓴다).
