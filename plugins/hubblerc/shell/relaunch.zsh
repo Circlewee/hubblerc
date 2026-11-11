@@ -5,7 +5,7 @@
 #
 # 아래 번호는 이 파일의 판이다. 내용을 바꾸면 올린다: `/setup`은 설치된 판이 같거나 새로우면 덮어쓰지
 # 않아서, 예전 hubblerc로 도는 다른 세션의 `/setup`이 새 파일을 되돌리지 못한다.
-# hubblerc-shell-version: 3
+# hubblerc-shell-version: 4
 
 # Orca의 터미널은 그림(kitty 유니코드 placeholder)을 그리지만, Claude Code는 Orca를 그림 되는 터미널로
 # 알아보지 못한다. Orca는 자기 에이전트 실행으로 띄운 Claude에만 이 값을 넣어 주므로, 탭에서 직접 띄울
@@ -36,8 +36,8 @@ fi
 # alias는 먼저 지운다(이 셸 세션에서만. ~/.zshrc의 alias 줄은 건드리지 않는다).
 unalias hcc hcc-sync claude hubblerc-key 2>/dev/null
 
-# _hubblerc_copy_sync <원본> <사본>: 원본을 사본으로 복사하고 표시를 남긴다.
-_hubblerc_copy_sync() {
+# hubblerc-copy-sync <원본> <사본>: 원본을 사본으로 복사하고 표시를 남긴다.
+hubblerc-copy-sync() {
   local src="${1%/}" dest="${2%/}"
   if [[ ! -f "$src/.claude-plugin/plugin.json" ]]; then
     print -r -- "원본 폴더가 아닙니다: $src (.claude-plugin/plugin.json이 없음)" >&2
@@ -58,7 +58,7 @@ hcc-sync() {
     print -r -- "HUBBLERC_DEV_SRC가 정해져 있지 않습니다. ~/.zshrc에 개발판 원본 위치를 넣으세요: export HUBBLERC_DEV_SRC=<저장소>/plugins/hubblerc" >&2
     return 1
   fi
-  _hubblerc_copy_sync "$HUBBLERC_DEV_SRC" "${HUBBLERC_DEV_COPY:-$HOME/.cache/hubblerc-live}"
+  hubblerc-copy-sync "$HUBBLERC_DEV_SRC" "${HUBBLERC_DEV_COPY:-$HOME/.cache/hubblerc-live}"
 }
 
 hcc() {
@@ -66,13 +66,13 @@ hcc() {
   claude --plugin-dir "${HUBBLERC_DEV_COPY:-$HOME/.cache/hubblerc-live}" "$@"
 }
 
-# _hubblerc_resync <--plugin-dir 값>: hcc가 만든 사본이면 원본에서 새로 복사한다. 아니면 아무것도 안 한다.
-_hubblerc_resync() {
+# hubblerc-resync <--plugin-dir 값>: hcc가 만든 사본이면 원본에서 새로 복사한다. 아니면 아무것도 안 한다.
+hubblerc-resync() {
   local dir="${1%/}"
   [[ -f "$dir/.hubblerc-source" ]] || return 0
   local src
   src="$(<"$dir/.hubblerc-source")"
-  _hubblerc_copy_sync "$src" "$dir" || print -r -- "개발판 사본을 새로 복사하지 못했습니다. 있던 사본으로 다시 띄웁니다: $dir" >&2
+  hubblerc-copy-sync "$src" "$dir" || print -r -- "개발판 사본을 새로 복사하지 못했습니다. 있던 사본으로 다시 띄웁니다: $dir" >&2
   return 0
 }
 
@@ -106,9 +106,9 @@ claude() {
     local k
     for (( k = 1; k <= ${#keep}; k++ )); do
       case "${keep[k]}" in
-        --plugin-dir|--plugin-dir-no-mcp) _hubblerc_resync "${keep[k+1]}" ;;
-        --plugin-dir=*) _hubblerc_resync "${keep[k]#--plugin-dir=}" ;;
-        --plugin-dir-no-mcp=*) _hubblerc_resync "${keep[k]#--plugin-dir-no-mcp=}" ;;
+        --plugin-dir|--plugin-dir-no-mcp) hubblerc-resync "${keep[k+1]}" ;;
+        --plugin-dir=*) hubblerc-resync "${keep[k]#--plugin-dir=}" ;;
+        --plugin-dir-no-mcp=*) hubblerc-resync "${keep[k]#--plugin-dir-no-mcp=}" ;;
       esac
     done
     HUBBLERC_RELAUNCH_FILE="$file" command claude "${keep[@]}" --resume "$id"
