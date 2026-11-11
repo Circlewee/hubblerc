@@ -4,10 +4,9 @@ import { findCommands } from '../commit/commit-command'
 import type { CommandWord } from '../commit/commit-command'
 import { findActiveRuns, repoRoot, reserveDispatch, sha256 } from './relay'
 import type { ActiveRun } from './relay'
-import { isBusy, sameCommit, statusLabel, taskKey } from './relay-format'
+import { isBusy, sameCommit, taskKey } from './relay-format'
 import type { RelayTask } from './relay-format'
-import { noteWorkerEffort, refillWorkerEfforts, subagentOf } from './worker-effort'
-import type { WorkerOwner } from './worker-effort'
+import { workerTypeOf } from './worker-types'
 
 /**
  * relay's gates, as hooks. Gate 1 looks at a worker about to start or to be sent a brief (`orca
@@ -21,13 +20,14 @@ import type { WorkerOwner } from './worker-effort'
  * warns at an answer's end when the run holds finished work no other model has verified at the
  * current HEAD.
  *
- * A subagent recorded as a brief's worker (started, or resumed by a new revision) gets the brief's
- * effort noted for its agentId (worker-effort.ts), which its requests are then sent with. A call
+ * A subagent started on a brief is started as the worker type of the brief's effort
+ * (worker-types.ts), so its effort is fixed when it starts. A brief sent to a finished worker whose
+ * recorded task ran at another effort is refused: that worker cannot change its effort. A call
  * asking for help (`--help`, `-h`) starts nothing and passes unchecked.
  *
  * Cost: every Bash, Agent and SendMessage call pays a text test and nothing else. Only a call that
  * names `worker-start` or a run's brief reads the files, and the repository's top folder is asked of
- * git once. Session start reads the active runs once to refill the efforts. No timers, no watching.
+ * git once. No timers, no watching, nothing on each request.
  */
 
 const ORCA_COMMANDS = new Set(['orca', 'orca-dev', 'orca-ide'])
@@ -341,7 +341,7 @@ function withNote<R>(ran: R, note: string | undefined): R {
  * call's `{ success: false }`, 2026-11-11). That resume is the send's own: the send was checked and
  * holds the claim, so the spawn passes unchecked, and how it went is kept here for the send's receipt.
  */
-type Sending = { to: string; brief: string; effort: string; owner: WorkerOwner; resumed?: { deny?: string; agentId?: string } }
+type Sending = { to: string; brief: string; resumed?: { deny?: string; agentId?: string } }
 const sending = new Set<Sending>()
 
 /**
@@ -361,20 +361,12 @@ async function sendOf($: EngineInterface, e: AgentSpawnInput): Promise<Sending |
   return open.find(going => named.has(going.brief))
 }
 
-/**
- * Starts the resume a send caused, keeping whether it was refused (or threw) for the send's
- * receipt. A resume that went notes the brief's effort for the agent at once: it may send a request
- * before the SendMessage call answers.
- */
+/** Starts the resume a send caused, keeping whether it was refused (or threw), and the agent it reached, for the send's receipt. */
 async function resumeOf<R extends { deny?: string }>(going: Sending, agentId: string, start: () => Promise<R>): Promise<R> {
   going.resumed = {}
   try {
     const started = await start()
-    if (typeof started.deny === 'string') going.resumed = { deny: started.deny }
-    else {
-      going.resumed = { agentId }
-      noteWorkerEffort(agentId, going.effort, going.owner)
-    }
+    going.resumed = typeof started.deny === 'string' ? { deny: started.deny } : { agentId }
 
     return started
   } catch (error) {
@@ -464,30 +456,31 @@ export async function planOrca($: EngineInterface, command: string): Promise<Pla
 
 // ── Subagents ──────────────────────────────────────────────
 
-/**
- * One subagent works one task at a time (the user's decision, 2026-11-11): a brief sent to an agent
- * that already holds a task of an active run (it is that task's runner, and the task is running,
- * launching or blocked after its launch), or that another send is on its way to, is refused before
- * any claim. An agent addressed by a name no runner carries is not known to hold anything.
- */
-function busyAgentRefusal(runs: readonly ActiveRun[], agent: string, key: string): { deny: string } | undefined {
-  const held = runs.flatMap(run => run.state.tasks.filter(task => isBusy(task) && subagentOf(task.runner) === agent).map(task => ({ run: run.run, task })))
-  const out = [...sending].find(going => going.to === agent || going.resumed?.agentId === agent)
-  if (held.length === 0 && out === undefined) return undefined
-  const what =
-    held.length > 0
-      ? held.map(({ run, task }) => `${taskKey(task)}(${statusLabel(task)}${runs.length === 1 ? '' : ` · ${run}`})`).join(', ')
-      : `보내는 중인 ${out?.owner.task ?? '지시서'}`
-  const then =
-    held.length > 0
-      ? `${held.map(({ task }) => taskKey(task)).join(', ')}의 보고를 기다리거나, 그 워커가 멈춘 것을 확인하고 cancel(confirmed_stopped: true)한 뒤 다시 보내거나, 새 서브에이전트를 띄우세요.`
-      : '그 보내기가 끝난 뒤 다시 보내거나, 새 서브에이전트를 띄우세요.'
+/** The agentId in a runner the gate wrote (`subagent <agentId>`); undefined for any other runner. */
+function subagentOf(runner: string | null): string | undefined {
+  // `subagent (agent id 미확인)` holds spaces: no match.
+  return /^subagent (\S+)$/.exec(runner ?? '')?.[1]
+}
 
-  return { deny: `서브에이전트 ${agent}는 이미 ${what}를 잡고 있어 ${key}를 보내지 않았습니다. 한 서브에이전트는 한 번에 한 작업만 맡습니다: ${then}` }
+/**
+ * A subagent's effort is fixed when it starts (its worker type, worker-types.ts): a brief sent to a
+ * worker at another effort is refused before any claim. The worker's effort is that of the first
+ * task the active runs record it as the runner of (the start that fixed it). A worker addressed by a
+ * name no runner carries is not known, and passes.
+ */
+function effortRefusal(runs: readonly ActiveRun[], agent: string, task: RelayTask): { deny: string } | undefined {
+  const started = runs
+    .flatMap(run => run.state.tasks.filter(other => subagentOf(other.runner) === agent))
+    .sort((a, b) => (a.dispatchedAt ?? 0) - (b.dispatchedAt ?? 0))[0]
+  if (started === undefined || started.effort.trim() === task.effort.trim()) return undefined
+
+  return {
+    deny: `서브에이전트 ${agent}는 effort ${started.effort}로 띄워졌고(${taskKey(started)}) 새 지시서 ${taskKey(task)}는 effort ${task.effort}입니다. 서브에이전트의 effort는 띄울 때 정해져 바꿀 수 없으니 이 지시서는 새 서브에이전트로 띄우세요.`,
+  }
 }
 
 /** Gate 1 for a subagent about to start: only a prompt naming a brief of an active run is looked at. */
-export async function planSpawn($: EngineInterface, prompt: string, model: string | undefined, resumed?: string): Promise<Plan> {
+export async function planSpawn($: EngineInterface, prompt: string, model: string | undefined): Promise<Plan> {
   if (!mayNameBrief([prompt])) return { pass: true }
   const root = await rootOf($)
   if (root === undefined) return { pass: true }
@@ -496,9 +489,6 @@ export async function planSpawn($: EngineInterface, prompt: string, model: strin
   if (picked === undefined) return { pass: true }
   if ('deny' in picked) return picked
   const task = picked.task
-  // A resume no send caused is checked as a start, of an agent that may already hold a task.
-  const busy = resumed === undefined ? undefined : busyAgentRefusal(runs, resumed, taskKey(task))
-  if (busy !== undefined) return busy
   const problems = await briefProblems($, task)
   if (model === undefined || model.trim() === '') problems.push(`모델이 지정되지 않았습니다: Agent의 model에 지시서의 모델 ${task.model}을 적으세요(안 적으면 물려받은 모델로 돌아 비용이 커집니다).`)
   else if (!sameModel(model, task.model)) problems.push(`model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
@@ -520,8 +510,8 @@ export async function planMessage($: EngineInterface, to: string, message: strin
   const picked = pickBrief(briefsNamed([message], runs, await $.session.cwd().catch(() => undefined)))
   if (picked === undefined) return { pass: true }
   if ('deny' in picked) return picked
-  const busy = busyAgentRefusal(runs, to, taskKey(picked.task))
-  if (busy !== undefined) return busy
+  const fixed = effortRefusal(runs, to, picked.task)
+  if (fixed !== undefined) return fixed
   const problems = await briefProblems($, picked.task)
   if (problems.length > 0) return refused(taskKey(picked.task), problems)
 
@@ -558,17 +548,6 @@ export async function unverifiedLine($: EngineInterface): Promise<string | undef
   return lines.length === 0 ? undefined : lines.join('\n')
 }
 
-/**
- * At session start: the subagent workers' efforts again from the active runs (see worker-effort.ts).
- * One read of the runs, with git asked for the top folder (once for the session, shared with the gate).
- */
-export async function startWorkerEfforts($: EngineInterface): Promise<void> {
-  refillWorkerEfforts([])
-  const root = await rootOf($)
-  if (root === undefined) return
-  refillWorkerEfforts((await findActiveRuns($, root)).map(run => run.state))
-}
-
 // ── Hooks ──────────────────────────────────────────────
 
 /** Whether a Bash command's text may hold a launch (the text test every Bash call pays). */
@@ -597,7 +576,7 @@ export function gateLaunches(on: On): void {
     const plan = await planMessage($, to, message)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
-    const going: Sending = { to, brief: resolvePath(plan.hold.brief, undefined), effort: plan.hold.effort ?? '', owner: { run: plan.hold.run, task: plan.hold.task } }
+    const going: Sending = { to, brief: resolvePath(plan.hold.brief, undefined) }
     const send = async () => {
       sending.add(going)
       try {
@@ -611,10 +590,9 @@ export function gateLaunches(on: On): void {
       const refusal = going.resumed?.deny
       const why = failureOf(sent) ?? (refusal === undefined ? undefined : oneLine(`재개가 거절됐습니다: ${refusal}`))
       if (why !== undefined) return { isOk: false, why }
-      // The agent's requests carry its agentId: the resumed one, else what the answer names, else the address (a name may not match).
-      // The runner is written with the same id, so the refill at session start finds that worker again.
+      // The runner is the agent the send reached: the resumed one, else what the answer names, else the address
+      // (a name may match no later runner, so the effort check of a later send may not find it).
       const reached = going.resumed?.agentId ?? resumedIdIn(sent)
-      noteWorkerEffort(reached ?? to, going.effort, going.owner)
 
       return { isOk: true, text: reached ?? '' }
     })
@@ -627,15 +605,18 @@ export function gateLaunches(on: On): void {
     const going = await sendOf($, e)
     if (going !== undefined && e.resume !== undefined) return resumeOf(going, e.resume.agentId, () => next(e))
     if (!e.prompt.includes('.relay/runs/')) return next(e)
-    const plan = await planSpawn($, e.prompt, e.model, e.resume?.agentId)
+    const plan = await planSpawn($, e.prompt, e.model)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
-    const out = await claimed($, plan.hold, () => next(e), (started): Receipt => {
+    // A fresh start goes as the worker type of the brief's effort, whatever type the call named: its
+    // effort is fixed from its first request. A resume keeps its type (its content is fixed); an effort
+    // that is no level leaves the type as called.
+    const type = e.resume === undefined ? workerTypeOf(plan.hold.effort ?? '') : undefined
+    const start = type === undefined || type === e.subagentType ? e : { ...e, subagentType: type }
+    const out = await claimed($, plan.hold, () => next(start), (started): Receipt => {
       const why = failureOf(started)
       if (why !== undefined) return { isOk: false, why }
       const agentId = typeof started.agentId === 'string' ? started.agentId : ''
-      // Noted as soon as the start went, before the state is written: the subagent may already be sending requests.
-      if (agentId !== '' && plan.hold?.effort !== undefined) noteWorkerEffort(agentId, plan.hold.effort, { run: plan.hold.run, task: plan.hold.task })
 
       return { isOk: true, text: agentId }
     })

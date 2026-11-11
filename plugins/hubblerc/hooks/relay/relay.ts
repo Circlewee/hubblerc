@@ -51,7 +51,6 @@ import {
 } from './relay-format'
 import type { BriefInput, CheckOutcome, Criterion, FileChange, RelayPackage, RelayState, RelayTask, RunnerKind, TaskStatus } from './relay-format'
 import { noteRun, runStatus, setRuns, statusText } from './relay-status'
-import { settleWorkerEfforts } from './worker-effort'
 import type { RelayRunStatus } from '../../types'
 import { THEME_COLORS } from '../shared/style'
 
@@ -297,8 +296,6 @@ const progressPath = (root: string, run: string): string => `${runDir(root, run)
  */
 async function writeState($: EngineInterface, root: string, state: RelayState, progress?: string | null): Promise<void> {
   await $.fs.write(`${runDir(root, state.run)}/state.json`, `${JSON.stringify(state, null, 2)}\n`)
-  // A worker its task let go (reported, cancelled, the run closed) sends as the engine says again.
-  settleWorkerEfforts(state)
   await noteSaved($, root, state, progress).catch(() => undefined)
 }
 

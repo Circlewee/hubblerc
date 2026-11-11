@@ -6,7 +6,6 @@ import { autoLevelFor, isAutoOn } from './auto-effort'
 import { noteFirstRequest } from './effort-record'
 import { addTokens } from '../status/forecast'
 import { noteRequest } from '../commit/trailers'
-import { workerEffort } from '../relay/worker-effort'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
 const engineEffort = atom({ plugin: 'hubblerc', key: 'engineEffort' } as const, null)
@@ -35,20 +34,16 @@ export function effortSamples(): readonly EffortSample[] {
  * request's tokens also add up on its turn (the answer's closing line), and its return is when the
  * prompt cache was last warmed.
  *
- * A subagent that is a relay brief's worker sends its requests at the brief's effort (noted by the
- * gate, relay/worker-effort.ts); other subagents' requests go as the engine sent them.
+ * A subagent's requests go as the engine sent them (a relay worker's effort is fixed at its start by
+ * its agent type, relay/worker-types.ts).
  *
  * Session only: the engine's setting (and other sessions) are untouched.
  */
 export function controlEffort(on: On, autoByDefault: boolean): void {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined) {
-      // A relay worker's request goes out at its brief's effort (module memory, no file read), only
-      // where the model takes effort and the level differs; any other subagent's as the engine sent it.
-      const brief = workerEffort(e.agentId)
-      const effort = e.effort !== undefined && brief !== undefined && brief !== e.effort ? brief : e.effort
-      noteRequest(e.agentId, e.model, effort === undefined ? undefined : String(effort), false)
-      return yield* next(effort === e.effort ? e : { ...e, effort })
+      noteRequest(e.agentId, e.model, e.effort === undefined ? undefined : String(e.effort), false)
+      return yield* next(e)
     }
     if (e.effort === undefined) {
       noteRequest(undefined, e.model, undefined, false)
