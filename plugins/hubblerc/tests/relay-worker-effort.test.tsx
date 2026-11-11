@@ -20,6 +20,10 @@ type Sim = {
   /** The finished subagents a SendMessage resumes, by address; what a SendMessage answers instead (no resume). */
   finished: Record<string, string>
   sendAnswer: Record<string, unknown> | undefined
+  /** What happens after a SendMessage's resume went and before the call answers (the send still out). */
+  duringSend?: () => Promise<void>
+  /** What a SendMessage answers after its resume went, in place of success (a send that failed late). */
+  answerAfterResume?: Record<string, unknown>
   engine: Engine | undefined
   spawned: number
   /** Every read of a file, existence test, listing and process the plugin asked for. */
@@ -89,7 +93,9 @@ function standIn(on: On): Sim {
       if (agentId === undefined || sim.engine === undefined) return { result: {} as never }
       const resume = { tool_use_id: 'toolu_first_start', prompt: String(e.message), description: 'worker', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, model: 'claude-sonnet-5-5', parentModel: 'claude-opus-5-5', resume: { agentId } }
       const resumed = (await sim.engine.agent.spawn(resume as never)) as { deny?: string }
-      const record = resumed.deny === undefined ? { success: true, message: `Resuming agent ${agentId}`, resumedAgentId: agentId } : { success: false, message: resumed.deny }
+      if (resumed.deny === undefined) await sim.duringSend?.()
+      const record =
+        resumed.deny !== undefined ? { success: false, message: resumed.deny } : (sim.answerAfterResume ?? { success: true, message: `Resuming agent ${agentId}`, resumedAgentId: agentId })
 
       return { result: record as never, text: JSON.stringify(record) }
     }
@@ -369,3 +375,167 @@ test('V2 one agent holding two tasks: when the one dispatched last reports, it g
   expect((await relay($, { action: 'report', run: RUN, task: 'A' })).deny).toBeUndefined()
   expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
 })
+
+// ── The one rule, as a table: events in order → the effort of the agent's next request ──────────────
+//
+// Every ask sends a medium request for the agent and names the effort it must go out with. The
+// subagents started get the ids ag-1, ag-2… in order.
+
+type Step =
+  | ['task', string, string] // a brief for the task id at that effort (a new revision when the id has one)
+  | ['spawn', string] // a subagent started on the id's latest brief
+  | ['send', string, string] // the id's latest brief sent to the agent by SendMessage (it resumes)
+  | ['sendHeld', string, string, Step[]] // the same, with the steps done after the resume went and before the call answers
+  | ['sendFails', string, string, Step[]] // the same, the call then answering success: false
+  | ['message', string] // a SendMessage carrying no brief
+  | ['report', string] // the id's latest revision reports DONE
+  | ['cancel', string] // the id's latest revision cancelled, its worker confirmed stopped
+  | ['doneElsewhere'] // every task done and verified at HEAD, as another session wrote it (no save here)
+  | ['finish']
+  | ['abandon']
+  | ['restart'] // a session start
+  | ['ask', string, string] // the agent's next medium request goes out at this
+
+const TABLE: { name: string; steps: Step[] }[] = [
+  { name: 'V1 a worker that reported goes as sent', steps: [['task', 'A', 'high'], ['spawn', 'A'], ['ask', 'ag-1', 'high'], ['report', 'A'], ['ask', 'ag-1', 'medium']] },
+  { name: 'V1 a worker cancelled goes as sent', steps: [['task', 'A', 'high'], ['spawn', 'A'], ['ask', 'ag-1', 'high'], ['cancel', 'A'], ['ask', 'ag-1', 'medium']] },
+  // Done in another session: this one sees it at its own next save of the run (a known limit).
+  { name: 'V1 a run finished: its worker goes as sent', steps: [['task', 'A', 'high'], ['spawn', 'A'], ['doneElsewhere'], ['ask', 'ag-1', 'high'], ['finish'], ['ask', 'ag-1', 'medium']] },
+  { name: 'V1 a run abandoned: its worker goes as sent', steps: [['task', 'A', 'high'], ['spawn', 'A'], ['doneElsewhere'], ['ask', 'ag-1', 'high'], ['abandon'], ['ask', 'ag-1', 'medium']] },
+  {
+    name: 'V1 a message with no brief to a worker that reported goes as sent; another worker still running keeps its brief’s effort',
+    steps: [['task', 'A', 'high'], ['task', 'B', 'xhigh'], ['spawn', 'A'], ['spawn', 'B'], ['report', 'A'], ['message', 'ag-1'], ['ask', 'ag-1', 'medium'], ['ask', 'ag-2', 'xhigh']],
+  },
+  {
+    name: 'V2 one agent, two tasks: the one sent last reports → the other’s effort (a session start agrees); both let go → as sent',
+    steps: [['task', 'A', 'high'], ['task', 'B', 'xhigh'], ['spawn', 'A'], ['send', 'B', 'ag-1'], ['ask', 'ag-1', 'xhigh'], ['report', 'B'], ['ask', 'ag-1', 'high'], ['restart'], ['ask', 'ag-1', 'high'], ['report', 'A'], ['ask', 'ag-1', 'medium']],
+  },
+  {
+    name: 'V3 a brief that leaves the effort sent to an agent that holds another: as sent before a save, after it and after the answer',
+    steps: [
+      ['task', 'A', 'high'],
+      ['task', 'B', 'ultra'],
+      ['spawn', 'A'],
+      ['ask', 'ag-1', 'high'],
+      ['sendHeld', 'B', 'ag-1', [['ask', 'ag-1', 'medium'], ['task', 'C', 'low'], ['ask', 'ag-1', 'medium']]],
+      ['ask', 'ag-1', 'medium'],
+      ['restart'],
+      ['ask', 'ag-1', 'medium'],
+    ],
+  },
+  {
+    name: 'a send that fails after its resume went: its effort while it is out, then the owner before it again',
+    steps: [['task', 'A', 'high'], ['task', 'B', 'xhigh'], ['spawn', 'A'], ['sendFails', 'B', 'ag-1', [['ask', 'ag-1', 'xhigh'], ['task', 'C', 'low'], ['ask', 'ag-1', 'xhigh']]], ['ask', 'ag-1', 'high']],
+  },
+  {
+    name: 'a level, then a new revision that leaves it, then one at a level again',
+    steps: [
+      ['task', 'A', 'high'],
+      ['spawn', 'A'],
+      ['ask', 'ag-1', 'high'],
+      ['report', 'A'],
+      ['task', 'A', 'ultra'],
+      ['send', 'A', 'ag-1'],
+      ['ask', 'ag-1', 'medium'],
+      ['report', 'A'],
+      ['task', 'A', 'low'],
+      ['send', 'A', 'ag-1'],
+      ['ask', 'ag-1', 'low'],
+      ['report', 'A'],
+      ['ask', 'ag-1', 'medium'],
+    ],
+  },
+]
+
+/** The id's latest revision as the state holds it. */
+const latestKey = (sim: Sim, id: string): string => {
+  const rev = Math.max(0, ...state(sim).tasks.filter(task => task.id === id).map(task => task.rev))
+
+  return `${id}-r${rev}`
+}
+
+/** Runs the steps; each ask notes `<agent> → <effort it went at>` (and any file read while it went). */
+async function play($: Engine, sim: Sim, steps: readonly Step[], seen: string[]): Promise<void> {
+  const brief = (id: string) => `${DIR}/tasks/${latestKey(sim, id)}.md`
+  const sendBrief = async (id: string, to: string, during: readonly Step[], fails: boolean) => {
+    sim.engine = $
+    sim.finished = { ...sim.finished, [to]: to }
+    sim.duringSend = during.length === 0 ? undefined : () => play($, sim, during, seen)
+    sim.answerAfterResume = fails ? { success: false, message: 'the agent went away' } : undefined
+    await sendMessage($, to, `Read ${brief(id)}.`)
+    sim.duringSend = undefined
+    sim.answerAfterResume = undefined
+  }
+  for (const step of steps) {
+    switch (step[0]) {
+      case 'task': {
+        const rev = state(sim).tasks.filter(task => task.id === step[1]).length + 1
+        await newTask($, step[1], step[2], rev)
+        break
+      }
+      case 'spawn':
+        await spawn($, `Follow ${brief(step[1])}.`)
+        break
+      case 'send':
+        await sendBrief(step[1], step[2], [], false)
+        break
+      case 'sendHeld':
+        await sendBrief(step[1], step[2], step[3], false)
+        break
+      case 'sendFails':
+        await sendBrief(step[1], step[2], step[3], true)
+        break
+      case 'message':
+        sim.engine = $
+        sim.finished = { ...sim.finished, [step[1]]: step[1] }
+        await sendMessage($, step[1], 'One more question about your notes.')
+        break
+      case 'report': {
+        const key = latestKey(sim, step[1])
+        sim.files[`${DIR}/tasks/${key}-report.md`] = doneReport(key)
+        await relay($, { action: 'report', run: RUN, task: key })
+        break
+      }
+      case 'cancel':
+        await relay($, { action: 'cancel', run: RUN, task: latestKey(sim, step[1]), reason: 'stopped', confirmed_stopped: true })
+        break
+      case 'doneElsewhere':
+        setState(sim, next => {
+          const done = next.tasks.filter(task => task.status !== 'cancelled')
+          for (const task of done) Object.assign(task, { status: 'done', reportedAt: NOON })
+          next.packages = [{ id: 'V1', at: NOON + 1, head: HEAD, tasks: done.map(task => ({ key: `${task.id}-r${task.rev}`, criteria: ['C1'] })), files: [] }]
+          next.verdicts = [{ id: 'V1', at: NOON + 1, commit: HEAD, path: `${DIR}/reviews/V1-verdict.json`, result: 'pass' }]
+        })
+        break
+      case 'finish':
+        await relay($, { action: 'finish', run: RUN })
+        break
+      case 'abandon':
+        await relay($, { action: 'abandon', run: RUN, reason: 'trial run' })
+        break
+      case 'restart':
+        await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+        break
+      case 'ask': {
+        const before = sim.reads
+        const went = await request($, sim, step[1], 'medium')
+        seen.push(`${step[1]} → ${String(went)}${sim.reads === before ? '' : ` (${sim.reads - before} reads)`}`)
+        break
+      }
+    }
+  }
+}
+
+/** The asks of the steps, in the order they run, as `play` notes them when all goes right. */
+const asked = (steps: readonly Step[]): string[] =>
+  steps.flatMap(step => (step[0] === 'ask' ? [`${step[1]} → ${step[2]}`] : step[0] === 'sendHeld' || step[0] === 'sendFails' ? asked(step[3]) : []))
+
+for (const row of TABLE) {
+  test(`the rule: ${row.name}`, async ($, on) => {
+    const sim = standIn(on)
+    await newRun($)
+    const seen: string[] = []
+    await play($, sim, row.steps, seen)
+    expect(seen).toEqual(asked(row.steps))
+  })
+}
