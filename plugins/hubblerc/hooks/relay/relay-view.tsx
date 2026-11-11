@@ -26,6 +26,8 @@ const GOAL_CHARS = 30
 const REASON_CHARS = 30
 const RUNNER_CHARS = 24
 const WARNING_CHARS = 40
+/** A package call names this many tasks; the rest are counted, so the line does not overflow. */
+const PACKAGE_TASKS_SHOWN = 3
 const FALLBACK_CHARS = 120
 
 /** One line of a text, whitespace folded, cut to `max` characters with `…`. */
@@ -103,7 +105,14 @@ export function callLine(input: unknown, answer?: string, status: RelayStatus | 
     case 'package': {
       const tasks = Array.isArray(call.tasks) ? call.tasks.filter((task): task is string => typeof task === 'string') : []
 
-      return `relay 검증 꾸러미 · ${tasks.length === 0 ? '전체' : tasks.join(', ')}`
+      const shown = tasks.slice(0, PACKAGE_TASKS_SHOWN).map(task => {
+        const found = findTaskLine(status, field(call, 'run'), task)
+
+        return found === undefined ? task : taskName(found, NAME_CHARS)
+      })
+      const more = tasks.length - shown.length
+
+      return `relay 검증 꾸러미 · ${tasks.length === 0 ? '전체' : `${shown.join(', ')}${more > 0 ? ` 외 ${more}` : ''}`}`
     }
     case 'verdict':
       return `relay 판정 ${field(call, 'id')}`

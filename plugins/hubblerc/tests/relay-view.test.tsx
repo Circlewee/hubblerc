@@ -126,6 +126,11 @@ test('a task is named by its title, "n번째 지시서" from the second brief; t
   expect(callLine({ action: 'report', run: '2026-11-01-old', task: 'B-r2' }, undefined, SUMMARY)).toBe('relay 보고 확인 B-r2')
   expect(callLine({ action: 'report', task: 'Z-r1' }, undefined, SUMMARY)).toBe('relay 보고 확인 Z-r1')
   expect(callLine({ action: 'report', task: 'A-r1' }, undefined, null)).toBe('relay 보고 확인 A-r1')
+  // A package names each of its tasks the same way: the title where known, the key where not, the rest counted.
+  expect(callLine({ action: 'package', run: '2026-11-10-demo', tasks: ['A-r1', 'B-r2', 'Z-r1'] }, undefined, SUMMARY)).toBe('relay 검증 꾸러미 · Add the tool, Wire the sidebar box (2번째 지시서), Z-r1')
+  expect(callLine({ action: 'package', run: '2026-11-10-demo', tasks: ['A', 'B', 'A-r1', 'B-r2', 'Z'] }, undefined, SUMMARY)).toBe('relay 검증 꾸러미 · Add the tool, Wire the sidebar box (2번째 지시서), Add the tool 외 2')
+  expect(callLine({ action: 'package', tasks: ['B-r2'] }, undefined, null)).toBe('relay 검증 꾸러미 · B-r2')
+  expect(callLine({ action: 'package', run: '2026-11-10-demo' }, undefined, SUMMARY)).toBe('relay 검증 꾸러미 · 전체')
   // A brief written is named by the title it carries; the revision is told from the answer.
   expect(callLine({ action: 'task', id: 'A', title: 'Add the tool', model: 'claude-opus-5-5', effort: 'high', done_when: [] }, '지시서: /r/tasks/A-r1.md')).toBe('relay 지시서 Add the tool · opus-5-5/high · 기준 0')
 })
