@@ -27,6 +27,8 @@ export type RelayTask = {
   reportedAt: number | null
   /** Fixes made per criterion, counted across revisions. */
   tries: Record<string, number>
+  /** The effort the worker ran at, as its report told: its commits' Effort trailer, else the report's own line. Absent: not known. */
+  actualEffort?: string
   /** The hash of the brief as sent (its copy is `tasks/<key>.dispatched.md`); absent before a dispatch. */
   dispatchedHash?: string
   /** Why it was cancelled, when it was. */
@@ -588,6 +590,27 @@ export type ParsedReport = {
 }
 
 const NONE = /^(none|없음|-|n\/a)$/i
+
+/**
+ * The effort a worker ran at, from what its report gives. First the Effort trailer of its commits,
+ * the last that has one: hubblerc writes there the effort that agent's requests were sent with
+ * (`auto · xhigh` reads `xhigh`). Else the report's `Model / effort` line, only when its effort is
+ * one plain word (a worker that does not know writes 미확인, or the brief's value with a note).
+ * Undefined: not known.
+ */
+export function effortRan(trailers: readonly string[], modelEffort: string): string | undefined {
+  const word = (value: string): string | undefined => {
+    const plain = value.replace(/^auto\s*·\s*/i, '').trim().toLowerCase()
+
+    return /^[a-z]+$/.test(plain) && !/^(unknown|unverified|none)$/.test(plain) ? plain : undefined
+  }
+  for (const trailer of [...trailers].reverse()) {
+    const found = word(trailer)
+    if (found !== undefined) return found
+  }
+
+  return modelEffort.includes('/') ? word(modelEffort.split('/').at(-1) ?? '') : undefined
+}
 
 function headValue(lines: readonly string[], key: string): string | undefined {
   const pattern = new RegExp(`^[-*]\\s*\\**${key.replace(/[/]/g, '\\/')}\\**\\s*:\\s*(.*)$`, 'i')

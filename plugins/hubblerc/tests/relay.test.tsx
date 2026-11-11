@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { checkTask, decisionRows, globsOverlap, isPending, isTestFile, parseReport, pathMatches, reportMismatches, withoutSections } from '../hooks/relay/relay-format'
+import { checkTask, decisionRows, effortRan, globsOverlap, isPending, isTestFile, parseReport, pathMatches, reportMismatches, withoutSections } from '../hooks/relay/relay-format'
 import type { RelayState } from '../hooks/relay/relay-format'
 import { registerRelayTool, reserveDispatch } from '../hooks/relay/relay'
 import { callLine, resultView } from '../hooks/relay/relay-view'
@@ -19,8 +19,8 @@ const NOON = new Date(2026, 10, 9, 12, 0).getTime()
 const RUN = '2026-11-09-demo'
 const DIR = `${ROOT}/.relay/runs/${RUN}`
 
-/** A commit: its Task trailer, subject, files; its Run trailer (the demo run when absent); whether it descends from the base. */
-type Commit = { task: string; subject: string; files: string[]; run?: string; offBase?: boolean; numstat?: 'fail' | string[] }
+/** A commit: its Task trailer, subject, files; its Run trailer (the demo run when absent); whether it descends from the base; its Effort trailer. */
+type Commit = { task: string; subject: string; files: string[]; run?: string; offBase?: boolean; numstat?: 'fail' | string[]; effort?: string }
 type Sim = {
   files: Record<string, string>
   head: string
@@ -96,6 +96,7 @@ function runIn(sim: Sim, argv: readonly string[], stdin = '') {
     return out(Object.entries(sim.commits).map(([sha, found]) => `${sha}\x1f${found.task}\x1f${found.run ?? RUN}\n`).join(''))
   }
   if (argv[1] === 'log' && argv.some(arg => arg.includes('trailers:key=Task'))) return out(`${commit?.task ?? ''}\n`)
+  if (argv[1] === 'log' && argv.some(arg => arg.includes('trailers:key=Effort'))) return out(`${commit?.effort ?? ''}\n`)
   if (argv[1] === 'log' && argv.includes('--format=%s')) return out(`${commit?.subject ?? ''}\n`)
   // Three lines added and one removed in each file the commit changed.
   if (argv[1] === 'show' && argv.includes('--numstat')) {
@@ -406,6 +407,44 @@ test('a DONE report with a failed criterion is a mismatch, and the task is block
   expect(checked.result).toContain('DONE인데 통과하지 않은 기준: C1(fail)')
   expect(state(sim).tasks[0]?.status).toBe('blocked')
   expect((await relay($, { action: 'report', run: RUN, task: 'Z' })).deny).toBe('작업이 없습니다: Z')
+})
+
+test('the effort a worker ran at is read from its commits’ Effort trailer, else from a report line that is one plain word', () => {
+  expect(effortRan(['xhigh'], 'claude-opus-5-5 / high')).toBe('xhigh')
+  // An auto pick is signed `auto · <level>`; of several commits the last signed one speaks.
+  expect(effortRan(['medium', 'auto · xhigh', ''], '')).toBe('xhigh')
+  expect(effortRan([], 'claude-opus-5-5 / high')).toBe('high')
+  // A worker that does not know, or copies the brief's value with a note: not known.
+  expect(effortRan([], 'claude-opus-5-5 / 미확인 (지시서는 high)')).toBeUndefined()
+  expect(effortRan([], 'claude-sonnet-5-5 / high (지시서 값; 실제 값 미확인)')).toBeUndefined()
+  expect(effortRan([], 'claude-sonnet-5-5 / unverified')).toBeUndefined()
+  expect(effortRan([], 'high')).toBeUndefined()
+  expect(effortRan([], '')).toBeUndefined()
+})
+
+test('a report records the effort its commits were signed with, and says so where it is not the brief’s', async ($, on) => {
+  const sim = standIn(on)
+  await begin($, sim)
+  await relay($, TASK_A)
+  await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent worker-a' })
+  // The brief says high; the report cannot tell; the commit is signed xhigh.
+  sim.commits[SHA_A] = { task: 'A-r1', subject: 'Add the relay tool', files: ['hooks/relay/relay.ts'], effort: 'auto · xhigh' }
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report().replace('claude-opus-5-5 / high', 'claude-opus-5-5 / 미확인 (지시서는 high)')
+  const told = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(told.result).toContain('effort: 지시서 high · 실제 xhigh(커밋 꼬리말)')
+  expect(state(sim).tasks[0]).toMatchObject({ effort: 'high', actualEffort: 'xhigh' })
+
+  // No trailer and a plain report line that agrees with the brief: recorded, nothing said.
+  sim.commits[SHA_A] = { task: 'A-r1', subject: 'Add the relay tool', files: ['hooks/relay/relay.ts'] }
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report()
+  const again = await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect(again.result).not.toContain('effort:')
+  expect(state(sim).tasks[0]).toMatchObject({ actualEffort: 'high' })
+
+  // Neither tells: not known, and an earlier reading does not stay.
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report().replace('claude-opus-5-5 / high', 'claude-opus-5-5 / 미확인')
+  await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect('actualEffort' in (state(sim).tasks[0] ?? {})).toBe(false)
 })
 
 test('a report lists the files its own commits changed outside the edit scope, the test files, and an unsigned commit', async ($, on) => {

@@ -29,6 +29,7 @@ import {
   localDate,
   outsideScope,
   parseNumstat,
+  effortRan,
   parseReport,
   parseVerdict,
   progressText,
@@ -849,6 +850,16 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
   const spec = await readText($, task.specPath)
   if (spec === undefined || (await sha256($, spec)) !== (task.dispatchedHash ?? task.specHash)) warnings.push('지시서가 보낸 뒤에 바뀌었거나 없습니다: 워커가 본 지시서와 다를 수 있습니다.')
 
+  // The effort it ran at: what hubblerc signed its commits with, else what the report itself says.
+  const signed: string[] = []
+  for (const sha of report.commits.filter(sha => !look.missing.includes(sha))) {
+    const trailer = await git($, root, ['log', '-1', '--format=%(trailers:key=Effort,valueonly)', sha]).catch(() => undefined)
+    signed.push(...(trailer?.exitCode === 0 ? trailer.stdout : '').split('\n').map(line => line.trim()).filter(line => line !== ''))
+  }
+  const ran = effortRan(signed, report.modelEffort)
+  if (ran === undefined) delete task.actualEffort
+  else task.actualEffort = ran
+
   const status: TaskStatus = mismatches.length > 0 || report.status === null ? 'blocked' : STATUS_OF[report.status]
   // The worker reported: it is no longer out (a mismatch is its report to fix, not a live worker).
   const wasLive = task.workerLive === true
@@ -866,6 +877,7 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
     `커밋: ${report.commits.length === 0 ? '없음' : report.commits.join(', ')}`,
     `범위 밖 파일: ${look.outside.length === 0 ? '없음' : look.outside.join(', ')}`,
     `테스트·검사 파일 변경: ${look.tests.length === 0 ? '없음' : look.tests.join(', ')}`,
+    ...(ran === undefined || ran === task.effort.trim().toLowerCase() ? [] : [`effort: 지시서 ${task.effort} · 실제 ${ran}(${signed.length > 0 ? '커밋 꼬리말' : '보고서'})`]),
     ...(mismatches.length === 0 ? [] : ['', '보고서 불일치(워커에게 고쳐 달라고 하세요):', ...mismatches.map(problem => `- ${problem}`)]),
     ...(status === 'done' || status === 'done_with_concerns' ? ['', `다음: check로 기준 명령을 직접 돌리세요(${key}).`] : []),
   ]

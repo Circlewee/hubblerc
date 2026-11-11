@@ -245,7 +245,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const decisions = await read($, likelyStatus)
     const likelyLine = decisions === null ? '' : statusLine(decisions)
     // relay's runs not finished, in small: written as a run's state is saved, never read from files here.
-    const relay = relayLines(await read($, relayStatus), THEME_COLORS)
+    const relayRuns = await read($, relayStatus)
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
@@ -266,6 +266,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const width = e.props.bodyColumns
     /** What a box holds: the width less the box's frame. */
     const inner = Math.max(1, width - BOX_FRAME)
+    // Each task's line fitted to the box: the title takes what the status and the tail leave.
+    const relay = relayLines(relayRuns, THEME_COLORS, inner)
 
     const isAuto = (auto ?? autoByDefault) && override === null
     const effort = override ?? (isAuto ? (pick?.level ?? null) : engine)

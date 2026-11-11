@@ -69,3 +69,17 @@ function isEmojiInBmp(code: number): boolean {
 
   return EMOJI_IN_BMP.some(([from, to]) => code >= from && code <= to)
 }
+
+/** `text` cut to `max` cells, an ellipsis taking the last. */
+export function clipCells(text: string, max: number): string {
+  if (cellWidth(text) <= max) return text
+  if (max <= 0) return ''
+
+  let clipped = ''
+  for (const char of text) {
+    if (cellWidth(clipped + char) > max - 1) break
+    clipped += char
+  }
+
+  return `${clipped}…`
+}

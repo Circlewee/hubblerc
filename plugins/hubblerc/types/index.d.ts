@@ -192,10 +192,20 @@ export type RelayTaskLine = {
   /** The model's id and the effort, as the brief names them. */
   model: string
   effort: string
+  /** The effort it ran at, where its report told (its commits' Effort trailer, else the report's own line); absent: not known. */
+  actualEffort?: string
   /** Where it runs, the runner's first word (`orca`, `subagent`); '' before its launch. */
   runner: string
   /** When it was launched; null before. */
   dispatchedAt: number | null
+}
+
+/** A revision of a task's brief by name: what a relay call in the conversation calls it. */
+export type RelayTaskName = {
+  key: string
+  id: string
+  rev: number
+  title: string
 }
 
 /** A relay run not finished, in small: what the sidebar's relay box draws. */
@@ -203,6 +213,8 @@ export type RelayRunStatus = {
   run: string
   /** Each task's latest revision, and an earlier one still holding a worker, in the order written. */
   tasks: RelayTaskLine[]
+  /** The revisions `tasks` leaves out, by name: a call that named one keeps its title after a later brief. */
+  earlier?: RelayTaskName[]
   /** Decisions waiting on the person (asked, on hold); null when progress.md could not be read. */
   pending: number | null
   /** The last verdict, with HEAD as read when this summary was made (absent when it could not be). */

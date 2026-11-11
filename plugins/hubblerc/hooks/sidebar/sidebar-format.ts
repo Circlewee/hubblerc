@@ -1,5 +1,5 @@
 import type { GitInfo, TurnRecord } from '../../types'
-import { cellWidth } from '../shared/text-width'
+import { cellWidth, clipCells } from '../shared/text-width'
 import { elapsed } from '../shared/time-text'
 import { isListed } from '../status/git'
 import { basename, fileTotals } from '../activity/summary'
@@ -205,19 +205,8 @@ export function fileUrl(path: string): string {
     .join('/')}`
 }
 
-/** `text` cut to `max` cells, an ellipsis taking the last. */
-export function clipCells(text: string, max: number): string {
-  if (cellWidth(text) <= max) return text
-  if (max <= 0) return ''
-
-  let clipped = ''
-  for (const char of text) {
-    if (cellWidth(clipped + char) > max - 1) break
-    clipped += char
-  }
-
-  return `${clipped}…`
-}
+// Cut to cells: the shared one, said here too for the boxes that take it from this file.
+export { clipCells }
 
 /** One page of the contents: its entries, which page it is (0 the newest) and how many there are. */
 export type TocPage = { entries: TocEntry[]; page: number; pages: number }

@@ -67,17 +67,23 @@ export function outputText(output: unknown): string | undefined {
 // ── The call ──────────────────────────────────────────────
 
 /**
- * A call as one line, from its input. `answer` (the result text, when the call has ended) only
- * supplies the revision a `task` call was written as (`A-r3`); without it the title stands alone.
+ * A call as one line, from its input. `answer` (the result text, when the call has ended) supplies
+ * the revision: the one a `task` call was written as (`A-r3`; without it the title stands alone),
+ * and the one a call that named a task by its id reached.
  * `status` (the sidebar's summary of the runs) gives a task named by key or id its title; a task it
  * does not hold is named by what the call said.
  */
 export function callLine(input: unknown, answer?: string, status: RelayStatus | null = null): string {
   const call = isRecord(input) ? input : {}
   const action = field(call, 'action')
+  // An answer that starts with a key (`A-r2: …`, `A-r2 검사 결과…`) says which revision the call
+  // reached: that one is named, so a later brief of the same id does not rename a call already made.
+  const reached = /^([A-Za-z][A-Za-z0-9_.]*-r\d+)(?=[:\s])/.exec(answer ?? '')?.[1]
   const named = (key: string): string => {
     const name = field(call, key)
-    const found = findTaskLine(status, field(call, 'run'), name)
+    const run = field(call, 'run')
+    const isSame = reached !== undefined && (reached === name || reached.replace(/-r\d+$/, '') === name)
+    const found = (isSame ? findTaskLine(status, run, reached) : undefined) ?? findTaskLine(status, run, name)
 
     return found === undefined ? name : taskName(found, NAME_CHARS)
   }

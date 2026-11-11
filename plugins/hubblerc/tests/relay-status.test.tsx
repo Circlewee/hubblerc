@@ -6,6 +6,7 @@ import { localDate } from '../hooks/relay/relay-format'
 import type { RelayState, RelayTask, TaskStatus } from '../hooks/relay/relay-format'
 import { findTaskLine, relayLines, runStatus, statusText, taskName, withRun } from '../hooks/relay/relay-status'
 import { THEME_COLORS } from '../hooks/shared/style'
+import { cellWidth } from '../hooks/shared/text-width'
 import { NOW, standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
 
@@ -71,26 +72,63 @@ const texts = (lines: ReturnType<typeof relayLines>): string[] => lines.map(line
 
 // ── In small ──────────────────────────────────────────────
 
-test('a run in small: each task’s latest revision with its status, model/effort, runner and launch time; the decisions waiting; the last verdict', () => {
+test('a run in small: each task’s latest revision with its status first, then its title, brief number, model/effort, runner and launch time; the decisions waiting; the last verdict', () => {
   const status = runStatus(STATE, PROGRESS, 'c'.repeat(40))
   expect(status.tasks.map(line => line.key)).toEqual(['A-r2', 'B-r1', 'C-r1', 'D-r1'])
+  // The revision left out of the lines is kept by name, for a call that named it.
+  expect(status.earlier).toEqual([{ key: 'A-r1', id: 'A', rev: 1, title: 'Add the tool' }])
   expect(status.pending).toBe(1)
 
+  // As `/relay-status` writes it: nothing cut, the model whole, the runner said; the statuses in one column.
   const lines = relayLines({ runs: [status] }, THEME_COLORS)
   expect(texts(lines)).toEqual([
     RUN,
-    `Add the tool (2번째 지시서) 끝 · sonnet-5-5/medium · orca · ${hhmm(AT)}`,
-    `Wire the box 띄운 뒤 막힘 · opus-5-5/high · subagent · ${hhmm(AT)}`,
-    'Write docs 띄우기 전 · opus-5-5/high',
-    'D-r1 취소 · opus-5-5/high',
+    `끝            Add the tool · 2판 · sonnet-5-5/medium · orca · ${hhmm(AT)}`,
+    `띄운 뒤 막힘  Wire the box · opus-5-5/high · subagent · ${hhmm(AT)}`,
+    '띄우기 전     Write docs · opus-5-5/high',
+    '취소          D-r1 · opus-5-5/high',
     '사용자 답을 기다리는 결정 1개',
     '판정 V1 fail · ccccccc = HEAD',
   ])
   // Done green, blocked red, a cancelled task dim; a failed verdict red.
-  expect(lines[1]?.[1]).toMatchObject({ color: THEME_COLORS.ok })
-  expect(lines[2]?.[1]).toMatchObject({ color: THEME_COLORS.alert })
-  expect(lines[4]?.[0]).toMatchObject({ dim: true })
+  expect(lines[1]?.[0]).toMatchObject({ color: THEME_COLORS.ok })
+  expect(lines[2]?.[0]).toMatchObject({ color: THEME_COLORS.alert })
+  expect(lines[4]?.[2]).toMatchObject({ text: 'D-r1', dim: true })
   expect(lines[6]?.[1]).toMatchObject({ text: 'fail', color: THEME_COLORS.alert })
+})
+
+test('in the box a task’s line fits the width: the tail at the right edge, the title cut to what is left, the tail giving way when narrow', () => {
+  const tasks = [
+    task({ id: 'A', rev: 4, title: 'relay 한 줄 그리기 다듬기: 약어 대신 이름, 줄 사이 빈 줄', status: 'running', runner: 'subagent ag-1', model: 'claude-sonnet-5-5', dispatchedAt: AT }),
+    task({ id: 'B', rev: 3, title: '사이드바 relay 상자와 /relay 명령', status: 'done_with_concerns', runner: 'subagent ag-2', dispatchedAt: AT, actualEffort: 'xhigh' }),
+    task({ id: 'C', rev: 1, title: 'Write docs', status: 'done', runner: 'orca dispatch:x', dispatchedAt: AT, actualEffort: 'high' }),
+  ]
+  const status = { runs: [runStatus({ ...STATE, tasks, verdicts: [] }, PROGRESS, undefined)] }
+  const at = (width?: number): string[] => texts(relayLines(status, THEME_COLORS, width)).slice(1, 4)
+  // The statuses pad to one column (the long one said short), the tails end at the same cell.
+  expect(at(76)).toEqual([
+    `도는 중   relay 한 줄 그리기 다듬기: 약어 대신 …  4판 · sonnet/high · ${hhmm(AT)}`,
+    `끝(걱정)  사이드바 relay 상자와 /relay 명령   3판 · opus/high→xhigh · ${hhmm(AT)}`,
+    `끝        Write docs                                      opus/high · ${hhmm(AT)}`,
+  ])
+  // A cell stays free at the right edge.
+  expect(at(76).map(cellWidth)).toEqual([75, 75, 75])
+  // An effort that ran other than the brief's is coloured; one that ran as the brief said is not marked.
+  const wide = relayLines(status, THEME_COLORS, 76)
+  expect(wide[2]?.find(segment => segment.text === '→xhigh')).toMatchObject({ color: THEME_COLORS.warn })
+  expect(at(76)[2]).not.toContain('→')
+
+  // Narrower, a title under twenty cells takes the tail's room: the launch time first, then the model, then the brief's number.
+  expect(at(52)).toEqual(['도는 중   relay 한 줄 그리기 다…  4판 · sonnet/high', '끝(걱정)  사이드바 relay 상자와 /relay 명령     3판', `끝        Write docs              opus/high · ${hhmm(AT)}`])
+  // A short title needs no more than its own cells, so its tail stays.
+  expect(at(40)).toEqual(['도는 중   relay 한 줄 그리기 다듬…  4판', '끝(걱정)  사이드바 relay 상자와 /…  3판', `끝        Write docs  opus/high · ${hhmm(AT)}`])
+  expect(at(30)).toEqual(['도는 중   relay 한 줄 그리기…', '끝(걱정)  사이드바 relay 상…', '끝        Write docs'])
+  // `/relay-status` cuts nothing, says the status in full, the model with its version and the runner.
+  expect(at()).toEqual([
+    `도는 중         relay 한 줄 그리기 다듬기: 약어 대신 이름, 줄 사이 빈 줄 · 4판 · sonnet-5-5/high · subagent · ${hhmm(AT)}`,
+    `걱정과 함께 끝  사이드바 relay 상자와 /relay 명령 · 3판 · opus-5-5/high→xhigh · subagent · ${hhmm(AT)}`,
+    `끝              Write docs · opus-5-5/high · orca · ${hhmm(AT)}`,
+  ])
 })
 
 test('a task is named by its title, "n번째 지시서" from the second brief, its key where the title is not known', () => {
@@ -111,7 +149,9 @@ test('a task is named by its title, "n번째 지시서" from the second brief, i
   expect(findTaskLine(runs, RUN, 'A')?.rev).toBe(2)
   expect(findTaskLine(runs, '', 'B')?.key).toBe('B-r1')
   expect(findTaskLine(runs, '2026-11-01-other', 'B')).toBeUndefined()
-  expect(findTaskLine(runs, RUN, 'A-r1')).toBeUndefined()
+  // An earlier revision is found by its key, whatever came after it.
+  expect(findTaskLine(runs, RUN, 'A-r1')).toEqual({ key: 'A-r1', id: 'A', rev: 1, title: 'Add the tool' })
+  expect(findTaskLine(runs, RUN, 'A-r9')).toBeUndefined()
   expect(findTaskLine(null, RUN, 'A')).toBeUndefined()
 })
 
@@ -234,12 +274,13 @@ test('a run under way at session start: its box is drawn from state, with no fil
   const ran = standIn.ran.length
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   const lines = await boxLines(ui)
+  // The pane is 56 cells wide, a line 52: the launch time gives way where the title would not fit whole.
   expect(lines?.slice(0, -1)).toEqual([
     RUN,
-    `Add the tool (2번째 지시서) 끝 · sonnet-5-5/medium · orca · ${hhmm(AT)}`,
-    `Wire the box 띄운 뒤 막힘 · opus-5-5/high · subagent · ${hhmm(AT)}`,
-    'Write docs 띄우기 전 · opus-5-5/high',
-    'D-r1 취소 · opus-5-5/high',
+    '끝            Add the tool      2판 · sonnet/medium',
+    `띄운 뒤 막힘  Wire the box        opus/high · ${hhmm(AT)}`,
+    '띄우기 전     Write docs                  opus/high',
+    '취소          D-r1                        opus/high',
     '사용자 답을 기다리는 결정 1개',
   ])
   // The stand-in's HEAD is its folder: another commit than the verdict's.
@@ -281,14 +322,17 @@ test('the relay tool’s changes show at the next drawing: the run started, a ta
     runner_kind: 'claude',
   })
   expect(written.deny).toBeUndefined()
-  expect((await boxLines(ui))?.[1]).toBe('Add the box 띄우기 전 · opus-5-5/high')
+  expect((await boxLines(ui))?.[1]).toBe('띄우기 전  Add the box                    opus/high')
 
   expect((await relay($, { action: 'dispatched', run, task: 'A', runner: 'subagent worker-a' })).deny).toBeUndefined()
   const shown = await boxLines(ui)
-  expect(shown?.[1]).toBe(`Add the box 도는 중 · opus-5-5/high · subagent · ${hhmm(NOW)}`)
+  expect(shown?.[1]).toBe(`도는 중  Add the box              opus/high · ${hhmm(NOW)}`)
   await ui.unmount()
 
-  expect(await relayStatus($)).toBe(['진행 중인 relay 묶음 1개:', (shown ?? []).join('\n')].join('\n\n'))
+  // The same run as text: the line whole, with the model's version and the runner.
+  expect(await relayStatus($)).toBe(
+    ['진행 중인 relay 묶음 1개:', [run, `도는 중  Add the box · opus-5-5/high · subagent · ${hhmm(NOW)}`, '사용자 답을 기다리는 결정 없음', '판정 없음'].join('\n')].join('\n\n'),
+  )
 })
 
 test('a relay call in the conversation names its task by the title held in state, drawn with no file read; a blank line above it', async ($, on) => {

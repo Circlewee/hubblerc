@@ -126,6 +126,19 @@ test('a task is named by its title, "n번째 지시서" from the second brief; t
   expect(callLine({ action: 'report', run: '2026-11-01-old', task: 'B-r2' }, undefined, SUMMARY)).toBe('relay 보고 확인 B-r2')
   expect(callLine({ action: 'report', task: 'Z-r1' }, undefined, SUMMARY)).toBe('relay 보고 확인 Z-r1')
   expect(callLine({ action: 'report', task: 'A-r1' }, undefined, null)).toBe('relay 보고 확인 A-r1')
+  // A call that named a task by its id keeps the revision its answer names, after a later brief of that id:
+  // the first brief's report and check are not renamed to the second's.
+  const later: RelayStatus = {
+    runs: [{ run: '2026-11-10-demo', tasks: [line('T-r2', 'T', 2, 'Write the second line')], earlier: [{ key: 'T-r1', id: 'T', rev: 1, title: 'Write one line' }], pending: 0, verdict: null }],
+  }
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, 'T-r1: 보고 DONE → 상태 done\n보고서: /x', later)).toBe('relay 보고 확인 Write one line')
+  expect(callLine({ action: 'check', run: '2026-11-10-demo', task: 'T' }, 'T-r1 검사 결과(HEAD abc1234): /x', later)).toBe('relay 완료 검사 Write one line')
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T-r1' }, undefined, later)).toBe('relay 보고 확인 Write one line')
+  // Still running (no answer), or refused (no key in the answer): the id's latest, as before.
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, undefined, later)).toBe('relay 보고 확인 Write the second line (2번째 지시서)')
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, '보고서가 없습니다: /x', later)).toBe('relay 보고 확인 Write the second line (2번째 지시서)')
+  // An answer about another task than the one named changes nothing.
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, 'B-r2: 보고 DONE → 상태 done', later)).toBe('relay 보고 확인 Write the second line (2번째 지시서)')
   // A package names each of its tasks the same way: the title where known, the key where not, the rest counted.
   expect(callLine({ action: 'package', run: '2026-11-10-demo', tasks: ['A-r1', 'B-r2', 'Z-r1'] }, undefined, SUMMARY)).toBe('relay 검증 꾸러미 · Add the tool, Wire the sidebar box (2번째 지시서), Z-r1')
   expect(callLine({ action: 'package', run: '2026-11-10-demo', tasks: ['A', 'B', 'A-r1', 'B-r2', 'Z'] }, undefined, SUMMARY)).toBe('relay 검증 꾸러미 · Add the tool, Wire the sidebar box (2번째 지시서), Add the tool 외 2')

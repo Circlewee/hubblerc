@@ -1,8 +1,9 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { RelayRunStatus, RelayStatus, RelayTaskLine } from '../../types'
+import type { RelayRunStatus, RelayStatus, RelayTaskLine, RelayTaskName } from '../../types'
 import type { Palette, Segment } from '../shared/style'
+import { cellWidth, clipCells } from '../shared/text-width'
 import { decisionRows, isBusy, isPending, latestRevs, sameCommit, taskKey } from './relay-format'
 import type { RelayState, RelayTask } from './relay-format'
 
@@ -42,8 +43,9 @@ function cut(value: string, max: number): string {
 }
 
 /**
- * What a task is called where a person reads: its title (cut to `max`), with ` (n번째 지시서)` when it
- * is a brief sent again (n > 1); the key when the title is not known. Never made up.
+ * What a task is called in a relay call's line: its title (cut to `max`), with ` (n번째 지시서)` when
+ * it is a brief sent again (n > 1); the key when the title is not known. Never made up. (The box
+ * and `/relay-status` say the brief's number short, `n판`: `taskSegments`.)
  */
 export function taskName(task: { key: string; rev: number; title: string }, max: number): string {
   const title = cut(task.title, max)
@@ -54,26 +56,28 @@ export function taskName(task: { key: string; rev: number; title: string }, max:
 
 /**
  * The task a call names (`B-r2`, or the id `B` for its latest revision) among the runs in small;
- * with `run`, only that run's. Undefined when the summary does not hold it (a finished run).
+ * with `run`, only that run's. A key finds any revision, an earlier one too; an id its latest.
+ * Undefined when the summary does not hold it (a finished run).
  */
-export function findTaskLine(status: RelayStatus | null, run: string, name: string): RelayTaskLine | undefined {
-  const lines = (status?.runs ?? []).filter(other => run === '' || other.run === run).flatMap(other => other.tasks)
-  const exact = lines.find(line => line.key === name)
+export function findTaskLine(status: RelayStatus | null, run: string, name: string): RelayTaskName | undefined {
+  const runs = (status?.runs ?? []).filter(other => run === '' || other.run === run)
+  const names: RelayTaskName[] = runs.flatMap(other => [...other.tasks, ...(other.earlier ?? [])])
+  const exact = names.find(line => line.key === name)
   if (exact !== undefined) return exact
 
-  return lines.filter(line => line.id === name).sort((a, b) => b.rev - a.rev)[0]
+  return names.filter(line => line.id === name).sort((a, b) => b.rev - a.rev)[0]
 }
+
+const taskNameOf = (task: RelayTask): RelayTaskName => ({ key: taskKey(task), id: task.id, rev: task.rev, title: cut(task.title, TITLE_CHARS_IN_STATE) })
 
 function taskLine(task: RelayTask): RelayTaskLine {
   return {
-    key: taskKey(task),
-    id: task.id,
-    rev: task.rev,
-    title: cut(task.title, TITLE_CHARS_IN_STATE),
+    ...taskNameOf(task),
     status: task.status,
     ...(task.status === 'blocked' && task.workerLive === true ? { isLiveBlocked: true as const } : {}),
     model: task.model,
     effort: task.effort,
+    ...(task.actualEffort === undefined ? {} : { actualEffort: task.actualEffort }),
     runner: (task.runner ?? '').trim().split(/\s+/)[0] ?? '',
     dispatchedAt: task.dispatchedAt,
   }
@@ -81,16 +85,20 @@ function taskLine(task: RelayTask): RelayTaskLine {
 
 /**
  * A run in small: each task's latest revision, and an earlier one still holding a worker (an
- * earlier one cancelled or done is left out); the decisions waiting on the person, from progress.md
- * (undefined: not read); the last verdict, with HEAD as read now (undefined: not read).
+ * earlier one cancelled or done is left out of the lines and kept by name alone, for the calls
+ * that named it); the decisions waiting on the person, from progress.md (undefined: not read);
+ * the last verdict, with HEAD as read now (undefined: not read).
  */
 export function runStatus(state: RelayState, progress: string | undefined, head: string | undefined): RelayRunStatus {
   const latest = new Set(latestRevs(state.tasks))
   const last = state.verdicts.at(-1)
+  const isShown = (task: RelayTask): boolean => latest.has(task) || isBusy(task)
+  const earlier = state.tasks.filter(task => !isShown(task)).map(taskNameOf)
 
   return {
     run: state.run,
-    tasks: state.tasks.filter(task => latest.has(task) || isBusy(task)).map(taskLine),
+    tasks: state.tasks.filter(isShown).map(taskLine),
+    ...(earlier.length === 0 ? {} : { earlier }),
     pending: progress === undefined ? null : decisionRows(progress).filter(isPending).length,
     verdict: last === undefined ? null : { id: last.id, result: last.result, commit: last.commit, ...(head === undefined ? {} : { head }) },
   }
@@ -127,9 +135,6 @@ function clockTime(at: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-/** The model's name without its `claude-` head, and the effort: `opus-5-5/high`. */
-const modelEffort = (task: RelayTaskLine): string => [task.model.replace(/^claude-/, ''), task.effort].filter(part => part !== '').join('/')
-
 function statusColor(task: RelayTaskLine, palette: Palette): string | undefined {
   switch (task.status) {
     case 'launching':
@@ -147,19 +152,77 @@ function statusColor(task: RelayTaskLine, palette: Palette): string | undefined 
   }
 }
 
-const BOX_TITLE_CHARS = 14
+/** The status as the box's first column says it: the long one short, so the column stays narrow. */
+const BOX_STATUS_WORDS: Record<string, string> = { done_with_concerns: '끝(걱정)' }
 
-/** A task's line: its name (title; the key when unknown), its status, model/effort, where it runs and when it was launched. A cancelled one dim. */
-export function taskSegments(task: RelayTaskLine, palette: Palette): Segment[] {
-  const word = task.isLiveBlocked === true ? LIVE_BLOCKED_WORD : statusWord(task.status)
+/** A title longer than this is not cut below this many cells: parts of the tail go first, the launch time before the model. */
+const MIN_TITLE_CELLS = 20
+/** Between the status column and the title, and between the title and the tail. */
+const GAP = '  '
+
+const statusOf = (task: RelayTaskLine, isShort: boolean): string =>
+  task.isLiveBlocked === true ? LIVE_BLOCKED_WORD : ((isShort ? BOX_STATUS_WORDS[task.status] : undefined) ?? statusWord(task.status))
+
+/** The widest status among the tasks, in cells: the column every task line pads its status to. */
+const statusColumn = (tasks: readonly RelayTaskLine[], isShort: boolean): number => Math.max(0, ...tasks.map(task => cellWidth(statusOf(task, isShort))))
+
+/** The model without its `claude-` head; in the box without its version too: `claude-opus-5-5` → `opus`. */
+const modelName = (model: string, isShort: boolean): string => {
+  const bare = model.replace(/^claude-/, '')
+
+  return isShort ? bare.replace(/(-\d+)+$/, '') : bare
+}
+
+/** `opus/high`; `opus/high→xhigh` (the second part coloured) where the report told another effort than the brief's. */
+function modelEffort(task: RelayTaskLine, isShort: boolean, palette: Palette): Segment[] {
+  const said = [modelName(task.model, isShort), task.effort].filter(part => part !== '').join('/')
+  const ran = task.actualEffort
+  if (said === '') return []
+
+  return ran === undefined || ran === task.effort.trim().toLowerCase() ? [{ text: said, dim: true }] : [{ text: said, dim: true }, { text: `→${ran}`, color: palette.warn }]
+}
+
+const SEPARATOR: Segment = { text: ' · ', dim: true }
+const joined = (parts: readonly Segment[][]): Segment[] => parts.flatMap((part, i) => (i === 0 ? part : [SEPARATOR, ...part]))
+const cells = (segments: readonly Segment[]): number => cellWidth(segments.map(segment => segment.text).join(''))
+
+/**
+ * A task's line: its status in a column `column` cells wide, its name (title; the key when
+ * unknown), then which brief it is (`2판`, from the second), the model and effort, and when it was
+ * launched. A cancelled one dim.
+ *
+ * With `width` (the box): the tail sits at the right edge and the title takes the cells between,
+ * cut with `…`; too narrow for the title's MIN_TITLE_CELLS (or the whole of a shorter one), the
+ * tail gives up the time, then the model, then the brief's number. The model is said short and the
+ * runner left out.
+ * Without (`/relay-status`'s text): nothing is cut, the model is whole and the runner is said.
+ */
+export function taskSegments(task: RelayTaskLine, palette: Palette, column: number, width?: number): Segment[] {
+  const isBox = width !== undefined
+  const word = statusOf(task, isBox)
   const color = statusColor(task, palette)
-  const tail = [modelEffort(task), task.runner, task.dispatchedAt === null ? '' : clockTime(task.dispatchedAt)].filter(part => part !== '')
+  const status: Segment = { text: word + ' '.repeat(Math.max(0, column - cellWidth(word))), ...(color === undefined ? { dim: true } : { color }) }
+  const title = task.title === '' ? task.key : task.title
+  const titleStyle = task.status === 'cancelled' ? { dim: true as const } : { bold: true as const }
+  const parts: Segment[][] = [
+    task.rev > 1 ? [{ text: `${task.rev}판`, dim: true }] : [],
+    modelEffort(task, isBox, palette),
+    !isBox && task.runner !== '' ? [{ text: task.runner, dim: true }] : [],
+    task.dispatchedAt === null ? [] : [{ text: clockTime(task.dispatchedAt), dim: true }],
+  ].filter(part => part.length > 0)
 
-  return [
-    { text: taskName(task, BOX_TITLE_CHARS), ...(task.status === 'cancelled' ? { dim: true } : { bold: true }) },
-    { text: ` ${word}`, ...(color === undefined ? { dim: true } : { color }) },
-    ...(tail.length === 0 ? [] : [{ text: ` · ${tail.join(' · ')}`, dim: true }]),
-  ]
+  if (!isBox) return [status, { text: GAP }, { text: title, ...titleStyle }, ...(parts.length === 0 ? [] : [SEPARATOR, ...joined(parts)])]
+
+  // A cell is left free at the right edge, so a character the terminal draws wider than counted cuts nothing.
+  const room = (tail: readonly Segment[][]): number => width - 1 - cellWidth(status.text) - GAP.length - (tail.length === 0 ? 0 : GAP.length + cells(joined(tail)))
+  const tail = [...parts]
+  // A short title asks for no more than its own cells: its tail stays whole.
+  const wanted = Math.min(MIN_TITLE_CELLS, cellWidth(title))
+  while (tail.length > 0 && room(tail) < wanted) tail.pop()
+  const shown = clipCells(title, Math.max(1, room(tail)))
+  const fill = ' '.repeat(Math.max(0, room(tail) - cellWidth(shown)))
+
+  return [status, { text: GAP }, { text: shown, ...titleStyle }, ...(tail.length === 0 ? [] : [{ text: fill + GAP }, ...joined(tail)])]
 }
 
 function pendingSegments(pending: number | null, palette: Palette): Segment[] {
@@ -183,11 +246,21 @@ function verdictSegments(verdict: RelayRunStatus['verdict'], palette: Palette): 
   return [{ text: `판정 ${verdict.id} `, dim: true }, { text: verdict.result, color: verdict.result === 'pass' ? palette.ok : palette.alert }, head]
 }
 
-/** What the box draws and `/relay-status` writes, one line each: per run its name, its tasks, the decisions waiting and the last verdict. */
-export function relayLines(status: RelayStatus | null, palette: Palette): Segment[][] {
-  return (status?.runs ?? []).flatMap(run => [
+/**
+ * What the box draws (`width`: the cells a line has) and `/relay-status` writes (no width), one
+ * line each: per run its name, its tasks, the decisions waiting and the last verdict.
+ */
+export function relayLines(status: RelayStatus | null, palette: Palette, width?: number): Segment[][] {
+  const runs = status?.runs ?? []
+  // One column for every run in the box, so the statuses line up down the whole of it.
+  const column = statusColumn(
+    runs.flatMap(run => run.tasks),
+    width !== undefined,
+  )
+
+  return runs.flatMap(run => [
     [{ text: run.run, bold: true }],
-    ...(run.tasks.length === 0 ? [[{ text: '작업 없음', dim: true }]] : run.tasks.map(task => taskSegments(task, palette))),
+    ...(run.tasks.length === 0 ? [[{ text: '작업 없음', dim: true }]] : run.tasks.map(task => taskSegments(task, palette, column, width))),
     pendingSegments(run.pending, palette),
     verdictSegments(run.verdict, palette),
   ])
