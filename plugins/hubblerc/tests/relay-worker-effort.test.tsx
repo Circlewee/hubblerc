@@ -225,7 +225,7 @@ test('a brief effort that is no level, and a request that carries no effort, go 
   expect(sim.commands.at(-1)).not.toContain('Effort:')
 })
 
-test('session start fills the efforts again from the active runs: subagent tasks still holding their worker, the latest per agent', async ($, on) => {
+test('session start fills the efforts again from the active runs: subagent tasks still holding their worker, one per agent', async ($, on) => {
   const sim = standIn(on)
   await newRun($)
   const a = await newTask($, 'A', 'high')
@@ -239,14 +239,16 @@ test('session start fills the efforts again from the active runs: subagent tasks
     const by = (id: string) => next.tasks.find(task => task.id === id)
     Object.assign(by('A') ?? {}, { status: 'done' })
     Object.assign(by('B') ?? {}, { status: 'running', runner: 'subagent ag-old', dispatchedAt: NOON - 2000 })
-    Object.assign(by('C') ?? {}, { status: 'running', runner: 'subagent ag-old', dispatchedAt: NOON - 1000 })
+    // One subagent holds one task at a time (the gate refuses a second): C has an agent of its own.
+    Object.assign(by('C') ?? {}, { status: 'running', runner: 'subagent ag-two', dispatchedAt: NOON - 1000 })
     Object.assign(by('D') ?? {}, { status: 'blocked', workerLive: true, runner: 'subagent ag-live', dispatchedAt: NOON })
     Object.assign(by('E') ?? {}, { status: 'running', runner: 'orca dispatch:ctx_1', dispatchedAt: NOON })
   })
 
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
 
-  expect(await request($, sim, 'ag-old', 'medium')).toBe('xhigh')
+  expect(await request($, sim, 'ag-old', 'medium')).toBe('low')
+  expect(await request($, sim, 'ag-two', 'medium')).toBe('xhigh')
   expect(await request($, sim, 'ag-live', 'medium')).toBe('max')
   expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
   expect(await request($, sim, 'ctx_1', 'medium')).toBe('medium')
@@ -342,38 +344,76 @@ test('V1 a brief sent by a name whose answer names the agent: the runner is that
   expect(state(sim).tasks.find(task => task.id === 'C')?.runner).toBe('subagent worker-c')
 })
 
-// ── Verdict V2: one agent holding two tasks ──────────────────────────────────────────────
+// ── One subagent, one task at a time (2026-11-11): a brief sent to a busy agent is refused ──────────────
 
-test('V2 one agent holding two tasks: when the one dispatched last reports, it goes at the other’s effort; when both have reported, as sent; a session start agrees', async ($, on) => {
+test('a brief sent to a subagent that holds a task is refused before any claim, naming the task and what to do; once that task reported it goes', async ($, on) => {
   const sim = standIn(on)
   await newRun($)
   const a = await newTask($, 'A', 'high')
   const b = await newTask($, 'B', 'xhigh')
   expect((await spawn($, `Follow ${a}.`)).agentId).toBe('ag-1')
-  // B sent to the same agent while A still runs: the agent goes at B's effort, dispatched last.
   sim.engine = $
   sim.finished = { 'ag-1': 'ag-1' }
-  expect((await sendMessage($, 'ag-1', `Also: ${b}.`)).deny).toBeUndefined()
-  expect(state(sim).tasks.map(task => [task.id, task.status, task.runner])).toEqual([
-    ['A', 'running', 'subagent ag-1'],
-    ['B', 'running', 'subagent ag-1'],
-  ])
-  expect(await request($, sim, 'ag-1', 'medium')).toBe('xhigh')
-
-  // B reports; A still holds the agent: its effort again, with no file read as the request goes.
-  sim.files[`${DIR}/tasks/B-r1-report.md`] = doneReport('B-r1')
-  expect((await relay($, { action: 'report', run: RUN, task: 'B' })).deny).toBeUndefined()
-  const before = sim.reads
+  const before = sim.files[`${DIR}/state.json`]
+  const refused = await sendMessage($, 'ag-1', `Also: ${b}.`)
+  expect(refused.deny).toBe(
+    '서브에이전트 ag-1는 이미 A-r1(running)를 잡고 있어 B-r1를 보내지 않았습니다. 한 서브에이전트는 한 번에 한 작업만 맡습니다: A-r1의 보고를 기다리거나, 그 워커가 멈춘 것을 확인하고 cancel(confirmed_stopped: true)한 뒤 다시 보내거나, 새 서브에이전트를 띄우세요.',
+  )
+  // Nothing claimed, nothing resumed: the state is as it was, B still ready; the agent goes at A's effort.
+  expect(sim.files[`${DIR}/state.json`]).toBe(before)
+  expect(state(sim).tasks.find(task => task.id === 'B')?.status).toBe('ready')
+  const reads = sim.reads
   expect(await request($, sim, 'ag-1', 'medium')).toBe('high')
-  expect(sim.reads).toBe(before)
-  // A session start works it out the same way.
-  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
-  expect(await request($, sim, 'ag-1', 'medium')).toBe('high')
+  expect(sim.reads).toBe(reads)
 
-  // A reports too: the agent holds no task, its requests go as sent.
+  // A reports: the agent holds nothing, B goes to it and its requests go at B's effort; B reports: as sent.
   sim.files[`${DIR}/tasks/A-r1-report.md`] = doneReport('A-r1')
   expect((await relay($, { action: 'report', run: RUN, task: 'A' })).deny).toBeUndefined()
+  expect((await sendMessage($, 'ag-1', `Now: ${b}.`)).deny).toBeUndefined()
+  expect(state(sim).tasks.find(task => task.id === 'B')).toMatchObject({ status: 'running', runner: 'subagent ag-1' })
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('xhigh')
+  sim.files[`${DIR}/tasks/B-r1-report.md`] = doneReport('B-r1')
+  expect((await relay($, { action: 'report', run: RUN, task: 'B' })).deny).toBeUndefined()
   expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
+})
+
+test('a subagent busy in one run takes no brief of another run; a resume no send caused is refused the same way', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  const a = await newTask($, 'A', 'high')
+  expect((await spawn($, `Follow ${a}.`)).agentId).toBe('ag-1')
+  // A second run under way, with a brief of its own.
+  const other = `${ROOT}/.relay/runs/2026-11-09-other`
+  expect((await relay($, { action: 'start', name: 'other', goal: 'Another run.', done_when: ['tests pass'] })).deny).toBeUndefined()
+  const made = await relay($, { action: 'task', run: '2026-11-09-other', id: 'X', title: 'Task X', goal: 'Do it.', model: 'claude-sonnet-5-5', effort: 'low', edit_scope: ['area-x/**'], reads: [], done_when: [{ text: 'works', command: 'true' }], runner_kind: 'claude' })
+  expect(made.deny).toBeUndefined()
+  sim.engine = $
+  sim.finished = { 'ag-1': 'ag-1' }
+  const before = sim.files[`${other}/state.json`]
+  const refused = await sendMessage($, 'ag-1', `Read ${other}/tasks/X-r1.md.`)
+  expect(refused.deny).toContain(`서브에이전트 ag-1는 이미 A-r1(running · ${RUN})를 잡고 있어 X-r1를 보내지 않았습니다`)
+  expect(sim.files[`${other}/state.json`]).toBe(before)
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('high')
+
+  // A resume of the busy agent that no SendMessage of a brief caused (another plugin's) is checked as a start, and refused.
+  const resumed = (await $.agent.spawn({ tool_use_id: 'toolu_r', prompt: `Read ${other}/tasks/X-r1.md.`, description: 'x', subagentType: 'general-purpose', provider: { plugin: 'other', tier: 'core' }, parentModel: 'claude-opus-5-5', model: 'sonnet', resume: { agentId: 'ag-1' } } as never)) as { deny?: string }
+  expect(resumed.deny).toContain('서브에이전트 ag-1는 이미 A-r1(running · ')
+  expect(sim.files[`${other}/state.json`]).toBe(before)
+})
+
+test('the table holds 50 agents at most: a 51st noted drops the one noted first', async ($, on) => {
+  const sim = standIn(on)
+  await newRun($)
+  await newTask($, 'A', 'high')
+  // 51 tasks each holding its own subagent, dispatched one after another; a session start fills the table from them.
+  setState(sim, next => {
+    const first = next.tasks[0]!
+    next.tasks = Array.from({ length: 51 }, (_, at) => ({ ...first, id: `T${at + 1}`, status: 'running' as const, runner: `subagent ag-${at + 1}`, dispatchedAt: NOON + at }))
+  })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  expect(await request($, sim, 'ag-1', 'medium')).toBe('medium')
+  expect(await request($, sim, 'ag-2', 'medium')).toBe('high')
+  expect(await request($, sim, 'ag-51', 'medium')).toBe('high')
 })
 
 // ── The one rule, as a table: events in order → the effort of the agent's next request ──────────────
@@ -387,6 +427,7 @@ type Step =
   | ['send', string, string] // the id's latest brief sent to the agent by SendMessage (it resumes)
   | ['sendHeld', string, string, Step[]] // the same, with the steps done after the resume went and before the call answers
   | ['sendFails', string, string, Step[]] // the same, the call then answering success: false
+  | ['sendRefused', string, string] // the id's latest brief sent to an agent that holds a task: refused, the state untouched
   | ['message', string] // a SendMessage carrying no brief
   | ['report', string] // the id's latest revision reports DONE
   | ['cancel', string] // the id's latest revision cancelled, its worker confirmed stopped
@@ -406,26 +447,33 @@ const TABLE: { name: string; steps: Step[] }[] = [
     name: 'V1 a message with no brief to a worker that reported goes as sent; another worker still running keeps its brief’s effort',
     steps: [['task', 'A', 'high'], ['task', 'B', 'xhigh'], ['spawn', 'A'], ['spawn', 'B'], ['report', 'A'], ['message', 'ag-1'], ['ask', 'ag-1', 'medium'], ['ask', 'ag-2', 'xhigh']],
   },
+  // V2–V4 put two tasks on one agent: since 2026-11-11 the second brief is refused, and the first task's effort stays.
   {
-    name: 'V2 one agent, two tasks: the one sent last reports → the other’s effort (a session start agrees); both let go → as sent',
-    steps: [['task', 'A', 'high'], ['task', 'B', 'xhigh'], ['spawn', 'A'], ['send', 'B', 'ag-1'], ['ask', 'ag-1', 'xhigh'], ['report', 'B'], ['ask', 'ag-1', 'high'], ['restart'], ['ask', 'ag-1', 'high'], ['report', 'A'], ['ask', 'ag-1', 'medium']],
+    name: 'V2 a second task sent to an agent that holds one is refused; the first task’s effort stays (a session start agrees); after its report the second goes',
+    steps: [['task', 'A', 'high'], ['task', 'B', 'xhigh'], ['spawn', 'A'], ['sendRefused', 'B', 'ag-1'], ['ask', 'ag-1', 'high'], ['restart'], ['ask', 'ag-1', 'high'], ['report', 'A'], ['send', 'B', 'ag-1'], ['ask', 'ag-1', 'xhigh'], ['report', 'B'], ['ask', 'ag-1', 'medium']],
   },
   {
-    name: 'V3 a brief that leaves the effort sent to an agent that holds another: as sent before a save, after it and after the answer',
+    name: 'V3 a brief that leaves the effort, sent to an agent that holds another, is refused; the held task’s effort stays across a save and a session start',
+    steps: [['task', 'A', 'high'], ['task', 'B', 'ultra'], ['spawn', 'A'], ['ask', 'ag-1', 'high'], ['sendRefused', 'B', 'ag-1'], ['task', 'C', 'low'], ['ask', 'ag-1', 'high'], ['restart'], ['ask', 'ag-1', 'high']],
+  },
+  {
+    name: 'V4 a second send to an agent while the first is still out is refused; the first send’s effort stays',
     steps: [
       ['task', 'A', 'high'],
-      ['task', 'B', 'ultra'],
       ['spawn', 'A'],
-      ['ask', 'ag-1', 'high'],
-      ['sendHeld', 'B', 'ag-1', [['ask', 'ag-1', 'medium'], ['task', 'C', 'low'], ['ask', 'ag-1', 'medium']]],
+      ['report', 'A'],
+      ['task', 'B', 'ultra'],
+      ['task', 'C', 'xhigh'],
+      ['sendHeld', 'B', 'ag-1', [['ask', 'ag-1', 'medium'], ['sendRefused', 'C', 'ag-1'], ['ask', 'ag-1', 'medium']]],
       ['ask', 'ag-1', 'medium'],
-      ['restart'],
-      ['ask', 'ag-1', 'medium'],
+      ['report', 'B'],
+      ['send', 'C', 'ag-1'],
+      ['ask', 'ag-1', 'xhigh'],
     ],
   },
   {
-    name: 'a send that fails after its resume went: its effort while it is out, then the owner before it again',
-    steps: [['task', 'A', 'high'], ['task', 'B', 'xhigh'], ['spawn', 'A'], ['sendFails', 'B', 'ag-1', [['ask', 'ag-1', 'xhigh'], ['task', 'C', 'low'], ['ask', 'ag-1', 'xhigh']]], ['ask', 'ag-1', 'high']],
+    name: 'a send that fails after its resume went: its effort while it is out, then no entry',
+    steps: [['task', 'A', 'high'], ['spawn', 'A'], ['report', 'A'], ['task', 'B', 'xhigh'], ['sendFails', 'B', 'ag-1', [['ask', 'ag-1', 'xhigh'], ['task', 'C', 'low'], ['ask', 'ag-1', 'xhigh']]], ['ask', 'ag-1', 'medium']],
   },
   {
     name: 'a level, then a new revision that leaves it, then one at a level again',
@@ -485,6 +533,14 @@ async function play($: Engine, sim: Sim, steps: readonly Step[], seen: string[])
       case 'sendFails':
         await sendBrief(step[1], step[2], step[3], true)
         break
+      case 'sendRefused': {
+        const before = sim.files[`${DIR}/state.json`]
+        const key = latestKey(sim, step[1])
+        const sent = await sendMessage($, step[2], `Read ${brief(step[1])}.`)
+        const isRefused = (sent.deny ?? '').includes(`서브에이전트 ${step[2]}는 이미 `) && sim.files[`${DIR}/state.json`] === before
+        seen.push(isRefused ? `refused ${key}` : `not refused ${key}: ${sent.deny ?? 'sent'}`)
+        break
+      }
       case 'message':
         sim.engine = $
         sim.finished = { ...sim.finished, [step[1]]: step[1] }
@@ -528,7 +584,9 @@ async function play($: Engine, sim: Sim, steps: readonly Step[], seen: string[])
 
 /** The asks of the steps, in the order they run, as `play` notes them when all goes right. */
 const asked = (steps: readonly Step[]): string[] =>
-  steps.flatMap(step => (step[0] === 'ask' ? [`${step[1]} → ${step[2]}`] : step[0] === 'sendHeld' || step[0] === 'sendFails' ? asked(step[3]) : []))
+  steps.flatMap(step =>
+    step[0] === 'ask' ? [`${step[1]} → ${step[2]}`] : step[0] === 'sendRefused' ? [`refused ${step[1]}-r1`] : step[0] === 'sendHeld' || step[0] === 'sendFails' ? asked(step[3]) : [],
+  )
 
 for (const row of TABLE) {
   test(`the rule: ${row.name}`, async ($, on) => {

@@ -761,9 +761,10 @@ test('V1-07b: the same note follows a SendMessage and an Agent call; a launch th
   sim.whileLaunching = () => {
     sim.files[a] = `${sim.files[a]}\nchanged`
   }
-  const sent = await message('worker-1', `Read ${a}.`)
+  // worker-1 holds C-r1 now: one task at a time, so A goes to another subagent.
+  const sent = await message('worker-2', `Read ${a}.`)
   expect(sent.context?.[0]).toContain('⚠ relay: A-r1를 blocked로 두었습니다')
-  expect(sent.context?.[0]).toContain('subagent worker-1')
+  expect(sent.context?.[0]).toContain('subagent worker-2')
 
   sim.whileLaunching = () => {
     sim.files[b] = `${sim.files[b]}\nchanged`
@@ -856,7 +857,9 @@ test('V1-11: a SendMessage to a subagent carrying a brief of the run is checked 
   expect(state(sim).tasks[0]?.status).toBe('running')
   expect(state(sim).tasks[0]?.runner).toBe('subagent worker-1')
   expect((await message('worker-2', `Read ${b}.`)).deny).toContain('돌고 있는 A-r1와 겹칩니다')
-  expect((await message('worker-1', `Again ${a}.`)).deny).toContain('running 상태')
+  // To the worker holding it: refused as a busy subagent, before any claim. To another: refused as not ready.
+  expect((await message('worker-1', `Again ${a}.`)).deny).toContain('서브에이전트 worker-1는 이미 A-r1(running)를 잡고 있어')
+  expect((await message('worker-3', `Again ${a}.`)).deny).toContain('running 상태')
   expect(sim.commands.filter(command => command.startsWith('SendMessage'))).toHaveLength(3)
 })
 

@@ -21,7 +21,7 @@ Move from 2 to 3 when a worker reports NEEDS_CONTEXT or BLOCKED twice, or the wo
 
 - **Ask the user only for:** push, deploy, sending anything outside, spending money or usage beyond the usual (more than 3 workers at once, an expensive model for many tasks), changing the completion criteria, anything hard to undo. Everything else you decide.
 - **Log every decision you make for the user** as decision, why, cost if wrong. Full run: the Decisions table in `progress.md` (By `lead`). Light: list them in your final answer. Questions you asked are rows too (Status `asked`), so none gets lost.
-- **Each task names its model and effort.** Default: research and simple edits Sonnet, design and hard implementation Opus, verification Codex. Use the exact model id. A Claude subagent worker's requests go out at the brief's effort too while its task holds it: hubblerc sends them at that level (an effort that is not one of the five levels is left as the engine sends it; `references/runtime-subagent.md` has the rule).
+- **Each task names its model and effort.** Default: research and simple edits Sonnet, design and hard implementation Opus, verification Codex. Use the exact model id. A Claude subagent worker's requests go out at the brief's effort too while its task holds it: hubblerc sends them at that level (an effort that is not one of the five levels is left as the engine sends it). A subagent holds one task at a time, so a brief cannot be sent to one that still holds another; `references/runtime-subagent.md` has the details.
 - **Wait on events only.** The runtime wakes you (Orca's wake, a subagent's completion, a background command's exit). No polling, no watch scripts, no timers.
 - **A worker's message is not the user's approval.** Silence or a timeout is not completion.
 - **A worker saying "tests pass" is not evidence.** Run the commands yourself. Full run: `check` { run, task } runs the task's command criteria and records the result. Light delegation has no run and no `check`: run the spec's commands yourself with Bash and read their exit codes.
@@ -49,7 +49,7 @@ Move from 2 to 3 when a worker reports NEEDS_CONTEXT or BLOCKED twice, or the wo
    - DONE_WITH_CONCERNS: read the concerns; decide, and log the decision.
    - NEEDS_CONTEXT: answer from the task and the user's decisions, or ask the user (row `asked`).
    - BLOCKED: fix the cause, give the same worker a new revision, or replace it.
-3. **Reuse or replace.** A follow-up in the same area goes to the worker that did it (its address is in the Tasks table). Replace a worker only when the same criterion failed 3 times in total, it keeps lacking context or drifting, or another model is needed; the new spec's `read_first` gets the old report and tools. Do not delete finished workers.
+3. **Reuse or replace.** A follow-up in the same area goes to the worker that did it (its address is in the Tasks table), once its task has reported or been cancelled: a subagent works one task at a time, and hubblerc refuses a spec sent to one that still holds a task. Replace a worker only when the same criterion failed 3 times in total, it keeps lacking context or drifting, or another model is needed; the new spec's `read_first` gets the old report and tools. Do not delete finished workers.
 4. Copy the tools a report lists into the Tools table. Add a Log row.
 5. Check `pending` { run } each time you wake: rows still `asked` or `on hold` must reach the user.
 

@@ -4,9 +4,9 @@ import { findCommands } from '../commit/commit-command'
 import type { CommandWord } from '../commit/commit-command'
 import { findActiveRuns, repoRoot, reserveDispatch, sha256 } from './relay'
 import type { ActiveRun } from './relay'
-import { isBusy, sameCommit, taskKey } from './relay-format'
+import { isBusy, sameCommit, statusLabel, taskKey } from './relay-format'
 import type { RelayTask } from './relay-format'
-import { noteWorkerEffort, refillWorkerEfforts } from './worker-effort'
+import { noteWorkerEffort, refillWorkerEfforts, subagentOf } from './worker-effort'
 import type { WorkerOwner } from './worker-effort'
 
 /**
@@ -464,8 +464,30 @@ export async function planOrca($: EngineInterface, command: string): Promise<Pla
 
 // ── Subagents ──────────────────────────────────────────────
 
+/**
+ * One subagent works one task at a time (the user's decision, 2026-11-11): a brief sent to an agent
+ * that already holds a task of an active run (it is that task's runner, and the task is running,
+ * launching or blocked after its launch), or that another send is on its way to, is refused before
+ * any claim. An agent addressed by a name no runner carries is not known to hold anything.
+ */
+function busyAgentRefusal(runs: readonly ActiveRun[], agent: string, key: string): { deny: string } | undefined {
+  const held = runs.flatMap(run => run.state.tasks.filter(task => isBusy(task) && subagentOf(task.runner) === agent).map(task => ({ run: run.run, task })))
+  const out = [...sending].find(going => going.to === agent || going.resumed?.agentId === agent)
+  if (held.length === 0 && out === undefined) return undefined
+  const what =
+    held.length > 0
+      ? held.map(({ run, task }) => `${taskKey(task)}(${statusLabel(task)}${runs.length === 1 ? '' : ` · ${run}`})`).join(', ')
+      : `보내는 중인 ${out?.owner.task ?? '지시서'}`
+  const then =
+    held.length > 0
+      ? `${held.map(({ task }) => taskKey(task)).join(', ')}의 보고를 기다리거나, 그 워커가 멈춘 것을 확인하고 cancel(confirmed_stopped: true)한 뒤 다시 보내거나, 새 서브에이전트를 띄우세요.`
+      : '그 보내기가 끝난 뒤 다시 보내거나, 새 서브에이전트를 띄우세요.'
+
+  return { deny: `서브에이전트 ${agent}는 이미 ${what}를 잡고 있어 ${key}를 보내지 않았습니다. 한 서브에이전트는 한 번에 한 작업만 맡습니다: ${then}` }
+}
+
 /** Gate 1 for a subagent about to start: only a prompt naming a brief of an active run is looked at. */
-export async function planSpawn($: EngineInterface, prompt: string, model: string | undefined): Promise<Plan> {
+export async function planSpawn($: EngineInterface, prompt: string, model: string | undefined, resumed?: string): Promise<Plan> {
   if (!mayNameBrief([prompt])) return { pass: true }
   const root = await rootOf($)
   if (root === undefined) return { pass: true }
@@ -474,6 +496,9 @@ export async function planSpawn($: EngineInterface, prompt: string, model: strin
   if (picked === undefined) return { pass: true }
   if ('deny' in picked) return picked
   const task = picked.task
+  // A resume no send caused is checked as a start, of an agent that may already hold a task.
+  const busy = resumed === undefined ? undefined : busyAgentRefusal(runs, resumed, taskKey(task))
+  if (busy !== undefined) return busy
   const problems = await briefProblems($, task)
   if (model === undefined || model.trim() === '') problems.push(`모델이 지정되지 않았습니다: Agent의 model에 지시서의 모델 ${task.model}을 적으세요(안 적으면 물려받은 모델로 돌아 비용이 커집니다).`)
   else if (!sameModel(model, task.model)) problems.push(`model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
@@ -495,6 +520,8 @@ export async function planMessage($: EngineInterface, to: string, message: strin
   const picked = pickBrief(briefsNamed([message], runs, await $.session.cwd().catch(() => undefined)))
   if (picked === undefined) return { pass: true }
   if ('deny' in picked) return picked
+  const busy = busyAgentRefusal(runs, to, taskKey(picked.task))
+  if (busy !== undefined) return busy
   const problems = await briefProblems($, picked.task)
   if (problems.length > 0) return refused(taskKey(picked.task), problems)
 
@@ -600,7 +627,7 @@ export function gateLaunches(on: On): void {
     const going = await sendOf($, e)
     if (going !== undefined && e.resume !== undefined) return resumeOf(going, e.resume.agentId, () => next(e))
     if (!e.prompt.includes('.relay/runs/')) return next(e)
-    const plan = await planSpawn($, e.prompt, e.model)
+    const plan = await planSpawn($, e.prompt, e.model, e.resume?.agentId)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)
     const out = await claimed($, plan.hold, () => next(e), (started): Receipt => {
