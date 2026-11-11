@@ -23,8 +23,9 @@ export const TASK_LABELS: Record<TaskKind, string> = { ask: '질문·조회', ro
  * tasks, so `ask` and `routine` are read off them, not measured. Rule: `ask` the lowest level before
  * the scores fall off, `routine` the lowest within about 3 points of `high` on everyday coding sets,
  * `hard` the level past which a step buys under about 3 points for twice the cost or more, `long`
- * one above it where a gain was published. `long` is work of 30 minutes or more with no one
- * watching: the size at which the sweeps show a gain above `high`.
+ * one above it where a gain was published, never past `xhigh` (above it is only `max`, which auto
+ * never sends), so `long` equals `hard` where `hard` is already `xhigh`. `long` is work of 30
+ * minutes or more with no one watching: the size at which the sweeps show a gain above `high`.
  */
 export const EFFORT_TABLE: Readonly<Record<string, Readonly<Record<TaskKind, EffortLevel>>>> = {
   // low falls off (AA index 35 to 48, Terminal-Bench 4.0 38.5% to 57.6%); medium within 2.5 of high on SWE-bench Pro and
@@ -34,9 +35,11 @@ export const EFFORT_TABLE: Readonly<Record<string, Readonly<Record<TaskKind, Eff
   // xhigh its top there (49.1%, max lower) but level with high on the AA index for 1.6 times: the person chose xhigh for long.
   'claude-fable-5-2': { ask: 'low', routine: 'medium', hard: 'high', long: 'xhigh' },
   // medium 7 to 15 points under high on coding; xhigh +5.3 on CursorBench and +8 on the AA index.
-  'claude-sonnet-5-5': { ask: 'medium', routine: 'high', hard: 'high', long: 'xhigh' },
+  // hard xhigh (2026-11-11, the person's decision to follow the rule): high to xhigh still buys over 3 points (+8 AA, +5.3 CursorBench) for 2.5 times.
+  'claude-sonnet-5-5': { ask: 'medium', routine: 'high', hard: 'xhigh', long: 'xhigh' },
   // No coding sweep published: from the AA index (19, 25, 30, 35, 36) and ARC-AGI-2 alone. The weakest row.
-  'claude-haiku-5-5': { ask: 'medium', routine: 'high', hard: 'high', long: 'xhigh' },
+  // hard xhigh (2026-11-11, the person's decision to follow the rule): high to xhigh buys +5 on the AA index for 1.6 times.
+  'claude-haiku-5-5': { ask: 'medium', routine: 'high', hard: 'xhigh', long: 'xhigh' },
 }
 
 /** The model's row, its id matched with or without a `[1m]` suffix; undefined for a model without one. */

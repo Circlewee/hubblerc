@@ -144,6 +144,25 @@ test('the same kind gets the level of the row for the turn\'s model: ask is low 
   expect(sent).toEqual(['low', 'medium', 'low'])
 })
 
+test('hard is xhigh on Sonnet 5.5 and Haiku 5.5 and high on Opus 5.5; a failed pick, taken for hard, sends the same', { options: { autoEffort: true } }, async ($, on) => {
+  const standIn = standInForEngine(on)
+  const sent = answerRequests(on)
+  await start($)
+
+  standIn.completion = 'hard - 원인 모를 실패'
+  await ask($, 't1', '왜 깨지는지 찾아 줘', 1, undefined, 'claude-sonnet-5-5')
+  await ask($, 't2', '왜 깨지는지 찾아 줘', 1, undefined, 'claude-haiku-5-5')
+  await ask($, 't3', '왜 깨지는지 찾아 줘', 1, undefined, 'claude-opus-5-5')
+  standIn.completion = null
+  await ask($, 't4', '질문', 1, undefined, 'claude-sonnet-5-5')
+  await ask($, 't5', '질문', 1, undefined, 'claude-haiku-5-5')
+  expect(sent).toEqual(['xhigh', 'xhigh', 'high', 'xhigh', 'xhigh'])
+
+  const log = (await $.command.run({ command: 'effort-log', ...COMMAND })).text ?? ''
+  expect(log).toContain('#5        0  대체 xhigh')
+  expect(log).toContain('마지막 auto 판정: 제때 오지 않아 xhigh로 보냄')
+})
+
 test('a model without a row: the request goes out at the engine effort without waiting for the pick, and the band and /effort-log say there is no row', { options: { autoEffort: true } }, async ($, on) => {
   const standIn = standInForEngine(on)
   const sent = answerRequests(on)
