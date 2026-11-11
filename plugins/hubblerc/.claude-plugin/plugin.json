@@ -58,6 +58,12 @@
       "description": "판정 기록(기기별 <기기>.jsonl)을 둘 폴더. 비우면 iCloud Drive의 hubblerc/likely, iCloud Drive가 없으면 ~/.claude/hubblerc/likely.",
       "default": ""
     },
+    "likelyTodos": {
+      "type": "boolean",
+      "title": "likely 할 일 제안",
+      "description": "질문을 보낼 때와 답변이 끝날 때, 적어 둔 할 일 가운데 시작했거나 끝낸 것이 있는지 판정해 할 일 탭에 '시작?'·'완료?' 줄로 묻습니다. 상태는 맞음을 눌러야 바뀝니다. API 키가 있고 대기·진행 중인 할 일이 있을 때만 판정합니다(판정마다 Haiku 호출 3번).",
+      "default": true
+    },
     "likelyBashFail": {
       "type": "boolean",
       "title": "likely Bash 실패 예측",

@@ -272,9 +272,9 @@ export function editItem(record: TodoRecord, id: number, text: string): TodoReco
   return { ...record, items: record.items.map(item => (item.id === id ? { ...item, text } : item)) }
 }
 
-/** The rows under the items: "완료 N개 지우기", "↶ 되돌리기", the field. */
-export function footerRows(done: number, undo: number, hasInput: boolean): number {
-  return (done > 0 ? 1 : 0) + (undo > 0 ? 1 : 0) + (hasInput ? 1 : 0)
+/** The rows under the items: a suggestion ("시작?", "완료?"), "완료 N개 지우기", "↶ 되돌리기", the field. */
+export function footerRows(done: number, undo: number, hasInput: boolean, hasSuggestion = false): number {
+  return (hasSuggestion ? 1 : 0) + (done > 0 ? 1 : 0) + (undo > 0 ? 1 : 0) + (hasInput ? 1 : 0)
 }
 
 /** The rows the tab's body wants: up to `size` items (an empty list's line), "외 N개", and the footer's rows. */

@@ -23,6 +23,7 @@ import { layoutOption, showSidebar, startSidebar } from './sidebar/sidebar'
 import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshModelLimits, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
 import { findTurnForLine, summarize } from './activity/summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
+import { judgeTodoEnd, judgeTodoStart, startTodoJudge } from './todo/todo-judge'
 import { gateLaunches, unverifiedLine } from './relay/gate'
 import { registerRelayTool, serveRelayTool } from './relay/relay'
 import { showRelayLines } from './relay/relay-view'
@@ -47,6 +48,7 @@ export const register: Register = (on, options) => {
     await startEffort($).catch(() => undefined)
     await startSidebar($, layout).catch(() => undefined)
     await startTodos($).catch(() => undefined)
+    startTodoJudge()
     await registerRelayTool($).catch(() => undefined)
     await startLikely($).catch(() => undefined)
     await registerLikelyCommand($).catch(() => undefined)
@@ -62,7 +64,11 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined) noteAnswering(true)
     if (e.agentId === undefined) noteMainTurn(e.turnId, true)
     // After the turn's record opened: an item offered by its ↗ and sent as offered takes this answer's number.
-    if (e.agentId === undefined) await startTodoTurn($, e.text).catch(() => undefined)
+    if (e.agentId === undefined) {
+      const isOffered = await startTodoTurn($, e.text).catch(() => false)
+      // Not awaited: the question is judged against the waiting to-dos (likely) while the answer starts.
+      void judgeTodoStart($, e.text, isOffered).catch(() => undefined)
+    }
     if (e.agentId === undefined) await closeEffortPicker($).catch(() => undefined)
     // Not awaited: the status is read while the model starts its answer, so what changed while idle
     // (an edit in an editor) shows as the question goes.
@@ -106,6 +112,8 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.agentId === undefined) {
       void noteTurnDone($, e.turnId).catch(() => undefined)
+      // Not awaited: the answer is judged against the to-dos in progress (likely).
+      void judgeTodoEnd($, e).catch(() => undefined)
       await refreshStatus($).catch(() => undefined)
       // Not awaited: a request to the usage endpoint, at most one every five minutes.
       void refreshModelLimits($).catch(() => undefined)

@@ -35,6 +35,8 @@ export type LikelyOptions = {
   logDir: string
   /** Whether each Bash call is predicted to fail or not (off since 2026-11-11: a forecast the command's text does not hold). */
   bashFail: boolean
+  /** Whether a question and an answer are judged against the to-dos (`todo/todo-judge.ts`); on unless set off. */
+  todos: boolean
 }
 
 export function likelyOptions(raw: PluginOptions): LikelyOptions {
@@ -50,6 +52,7 @@ export function likelyOptions(raw: PluginOptions): LikelyOptions {
     periodStartDay: Math.min(31, Math.max(1, day)),
     logDir: text(raw.likelyLogDir),
     bashFail: raw.likelyBashFail === true,
+    todos: raw.likelyTodos !== false,
   }
 }
 
@@ -84,6 +87,11 @@ export function keySource(): 'options' | 'keychain' | null {
 /** Whether Bash calls are to be predicted: the option, off unless set. */
 export function predictsBash(): boolean {
   return options.bashFail
+}
+
+/** Whether questions and answers are judged against the to-dos: the option, on unless set off. */
+export function judgesTodos(): boolean {
+  return options.todos
 }
 
 /** Whether decisions can be made at all: an API key is set. */

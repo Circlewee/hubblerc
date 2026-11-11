@@ -241,7 +241,7 @@ test('a budget period starts on its day, or a short month\'s last; a new day and
 })
 
 test('the options: no key, the default caps, a start day held to 1-31', () => {
-  expect(likelyOptions({})).toEqual({ apiKey: '', model: 'claude-haiku-5-5', dailyCapUsd: 5, budgetUsd: 100, periodStartDay: 1, logDir: '', bashFail: false })
+  expect(likelyOptions({})).toEqual({ apiKey: '', model: 'claude-haiku-5-5', dailyCapUsd: 5, budgetUsd: 100, periodStartDay: 1, logDir: '', bashFail: false, todos: true })
   expect(likelyOptions({ anthropicApiKey: ' k ', likelyPeriodStartDay: 40, likelyDailyCapUsd: -1, likelyModel: '' })).toMatchObject({ apiKey: 'k', periodStartDay: 31, dailyCapUsd: 5, model: 'claude-haiku-5-5' })
 })
 

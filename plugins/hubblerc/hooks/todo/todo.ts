@@ -122,6 +122,13 @@ export async function todosForDrawing($: EngineInterface): Promise<UserTodo[]> {
   return loaded.record.items
 }
 
+/** The project's items as the store holds them now. */
+export async function currentTodos($: EngineInterface): Promise<UserTodo[]> {
+  await refreshTodos($)
+
+  return loaded?.record.items ?? []
+}
+
 /** Keeps a record read or written, and redraws the readers when it changed. */
 async function keep($: EngineInterface, key: string, record: TodoRecord): Promise<void> {
   const signature = JSON.stringify(record)
@@ -130,7 +137,11 @@ async function keep($: EngineInterface, key: string, record: TodoRecord): Promis
   await update($, userTodoVersion, n => n + 1)
 }
 
-/** Draws the readers again: what the module keeps beside the list (the undo, the edit) changed. */
+/** Draws the readers again: what the module keeps beside the list (the undo, the edit, a suggestion) changed. */
+export async function redrawTodos($: EngineInterface): Promise<void> {
+  await redraw($)
+}
+
 async function redraw($: EngineInterface): Promise<void> {
   await update($, userTodoVersion, n => n + 1)
 }
@@ -140,7 +151,7 @@ async function redraw($: EngineInterface): Promise<void> {
  * was read), then written back. `change` answers null to leave the list as it is. Any change takes
  * the undo away: the one a delete leaves is set after it.
  */
-async function changeTodos($: EngineInterface, change: (record: TodoRecord) => TodoRecord | null): Promise<TodoRecord | null> {
+export async function changeTodos($: EngineInterface, change: (record: TodoRecord) => TodoRecord | null): Promise<TodoRecord | null> {
   const key = todoStoreKey(await $.session.root())
   const current = parseTodoRecord(await $.store.get(key))
   const next = change(current)
@@ -160,7 +171,7 @@ async function changeTodos($: EngineInterface, change: (record: TodoRecord) => T
 }
 
 /** The answer running now, or the last one, by its number in this session; 0 before the first. */
-async function currentTurn($: EngineInterface): Promise<TurnRef> {
+export async function currentTurn($: EngineInterface): Promise<TurnRef> {
   const list = await read($, turns)
   const session = await $.session.id().catch(() => '')
 
@@ -423,17 +434,19 @@ export async function offerTodo($: EngineInterface, item: UserTodo): Promise<voi
  * At a main-loop turn's start, after its record opened: the list read again, and an item offered by
  * its ↗ and sent is taken up by this answer (in progress, its number). Sent is, for a suggestion, a
  * question of its text alone (spaces around aside); for a draft it went into, a question holding it.
+ * Answers whether an item was taken up so: the question then needs no judging against the to-dos.
  */
-export async function startTodoTurn($: EngineInterface, text: string): Promise<void> {
+export async function startTodoTurn($: EngineInterface, text: string): Promise<boolean> {
   const pending = offered
   offered = null
   if (pending === null || !isOfferSent(pending, text)) {
     await refreshTodos($)
 
-    return
+    return false
   }
   const taken = await currentTurn($)
-  await changeTodos($, record => setItemStatus(record, pending.id, 'in_progress', taken))
+
+  return (await changeTodos($, record => setItemStatus(record, pending.id, 'in_progress', taken))) !== null
 }
 
 /** Whether the question sent carries the offer as it was put in: alone as a suggestion, anywhere in a draft. */
