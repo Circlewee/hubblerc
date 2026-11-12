@@ -20,7 +20,7 @@ import { restoreTurns } from './activity/restore'
 import { checkSetup } from './system/setup'
 import { resendPicture } from './sidebar/picture'
 import { layoutOption, showSidebar, startSidebar } from './sidebar/sidebar'
-import { markRunning, noteAnswering, noteCall, noteEffortCommand, noteRename, noteTranscript, refreshModelLimits, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
+import { markRunning, noteAnswering, noteCall, noteHere, noteEffortCommand, noteRename, noteTranscript, refreshModelLimits, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
 import { findTurnForLine, summarize } from './activity/summary'
 import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
 import { judgeTodoEnd, judgeTodoStart, startTodoJudge } from './todo/todo-judge'
@@ -73,6 +73,8 @@ export const register: Register = (on, options) => {
     // Not awaited: the status is read while the model starts its answer, so what changed while idle
     // (an edit in an editor) shows as the question goes.
     if (e.agentId === undefined) void requestGitRefresh($).catch(() => undefined)
+    // The person is here: the models' weekly limits are asked for when five minutes have passed.
+    if (e.agentId === undefined) void noteHere($, false).catch(() => undefined)
     // The person is here: the cat's picture again, which Orca may have dropped behind another tab.
     if (e.agentId === undefined) void resendPicture($).catch(() => undefined)
     await startAutoEffort($, e, autoByDefault).catch(() => undefined)
@@ -115,8 +117,9 @@ export const register: Register = (on, options) => {
       // Not awaited: the answer is judged against the to-dos in progress (likely).
       void judgeTodoEnd($, e).catch(() => undefined)
       await refreshStatus($).catch(() => undefined)
-      // Not awaited: a request to the usage endpoint, at most one every five minutes.
-      void refreshModelLimits($).catch(() => undefined)
+      // Not awaited: a request to the usage endpoint, when this answer's requests may have moved a
+      // model's weekly limit, at most one a minute.
+      void refreshModelLimits($, 'moved').catch(() => undefined)
       await noteFiveHourUsed($, e.turnId).catch(() => undefined)
       await noteShellChanges($, e.turnId).catch(() => undefined)
       // relay's gate 2: a finished run's work with no verdict at HEAD gets a line beneath the answer.
@@ -169,6 +172,7 @@ export const register: Register = (on, options) => {
   // this hook for the box it shows.
   on('prompt.edit', ($, e, next) => {
     void resendPicture($).catch(() => undefined)
+    void noteHere($, true).catch(() => undefined)
 
     return next(e)
   }).catch(($, e, next) => next(e))

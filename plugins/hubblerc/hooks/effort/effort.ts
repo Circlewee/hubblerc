@@ -43,14 +43,14 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
       noteRequest(e.agentId, e.model, e.effort === undefined ? undefined : String(e.effort), false)
       const answered = yield* next(e)
       // A subagent's response reports the account's windows too.
-      void refreshUsage($, true).catch(() => undefined)
+      void refreshUsage($, true, e.model).catch(() => undefined)
 
       return answered
     }
     if (e.effort === undefined) {
       noteRequest(undefined, e.model, undefined, false)
       const answered = yield* watchPhase($, next(e))
-      void refreshUsage($, true).catch(() => undefined)
+      void refreshUsage($, true, e.model).catch(() => undefined)
 
       return answered
     }
@@ -82,7 +82,7 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
       .then(now => update($, lastRequestAt, () => now))
       .catch(() => undefined)
     // Not awaited: the context's fill and the windows as this response left them, mid-answer too.
-    void refreshUsage($, true).catch(() => undefined)
+    void refreshUsage($, true, e.model).catch(() => undefined)
 
     return result
   })

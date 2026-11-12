@@ -5,8 +5,10 @@ import { isRecord } from '../shared/values'
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 /** A name longer than this is cut: the sidebar pads every usage label to the longest. */
 const NAME_CELLS = 8
-/** The endpoint is asked at most this often, by all the sessions that share the store together. */
+/** With nothing known to have moved the limits, the endpoint is asked at most this often, by all the sessions that share the store together. */
 export const MODEL_LIMITS_GAP_MS = 5 * 60_000
+/** With a sign that they moved (a request to such a model, then the 5-hour window a point on, or the answer's end), at most this often. */
+export const MODEL_LIMITS_FLOOR_MS = 60_000
 /** Refused (429, 403), it is left alone this long at least and an hour at most, as the engine's own `/usage` leaves it. */
 const REFUSAL_MAX_MS = 60 * 60_000
 /** What the sessions share under `$.store`: one asks, the others take what it learned. */
@@ -16,7 +18,14 @@ export const MODEL_LIMITS_KEY = 'modelLimits'
  * What the last ask of the usage endpoint learned, whichever session made it: the limits, when the
  * endpoint may be asked next, and how many times in a row it refused.
  */
-export type SharedModelLimits = { limits: ModelLimit[]; nextAt: number; refusals: number }
+export type SharedModelLimits = { limits: ModelLimit[]; nextAt: number; refusals: number; askedAt: number }
+
+/** Whether a request to `model` counts toward one of the limits known: its name is in the model's id (`Fable`, `claude-fable-5-2`). With none known, Fable's. */
+export function countsToward(model: string, limits: readonly ModelLimit[]): boolean {
+  const id = model.toLowerCase()
+
+  return limits.length === 0 ? id.includes('fable') : limits.some(limit => id.includes(limit.name.trim().toLowerCase()))
+}
 
 /** The store's record as far as it holds: null when unset or not of that shape. */
 export function readSharedModelLimits(value: unknown): SharedModelLimits | null {
@@ -27,7 +36,10 @@ export function readSharedModelLimits(value: unknown): SharedModelLimits | null 
     limits.push({ name: limit.name, percent: limit.percent, ...(typeof limit.resetsAt === 'string' ? { resetsAt: limit.resetsAt } : {}) })
   }
 
-  return { limits, nextAt: value.nextAt, refusals: typeof value.refusals === 'number' && value.refusals > 0 ? Math.floor(value.refusals) : 0 }
+  // A record written before `askedAt` was kept: the ask was a gap before the next.
+  const askedAt = typeof value.askedAt === 'number' && Number.isFinite(value.askedAt) ? value.askedAt : value.nextAt - MODEL_LIMITS_GAP_MS
+
+  return { limits, nextAt: value.nextAt, refusals: typeof value.refusals === 'number' && value.refusals > 0 ? Math.floor(value.refusals) : 0, askedAt }
 }
 
 /**

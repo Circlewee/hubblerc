@@ -5,7 +5,7 @@ import type { AgentSeen, ModelLimit, RunningCall, UsageSnapshot } from '../../ty
 import { parseGitStatus } from './git'
 import { bashPurpose } from '../activity/bash-purpose'
 import { addFiveHourPoint } from './forecast'
-import { MODEL_LIMITS_GAP_MS, MODEL_LIMITS_KEY, parseModelLimits, readSharedModelLimits, refusalWaitMs, USAGE_URL } from './model-limits'
+import { countsToward, MODEL_LIMITS_FLOOR_MS, MODEL_LIMITS_GAP_MS, MODEL_LIMITS_KEY, parseModelLimits, readSharedModelLimits, refusalWaitMs, USAGE_URL } from './model-limits'
 import type { SharedModelLimits } from './model-limits'
 import { hasSameWindows, readSharedUsage, sharedFrom, USAGE_SHARE_GAP_MS, USAGE_SHARED_KEY, withSharedUsage } from './usage-share'
 import type { SharedUsage } from './usage-share'
@@ -73,6 +73,16 @@ let lastUsageShareAt = 0
 let modelLimits: ModelLimit[] = []
 let nextModelLimitsAt = 0
 let modelLimitsRefusals = 0
+/** When the endpoint was last asked, by any session of the store's. */
+let modelLimitsAskedAt = 0
+/** When a request of this session's last went to a model one of the limits counts (0: none). */
+let lastScopedRequestAt = 0
+/** The 5-hour window's whole percent as the last response left it: a point on is the sign the limits moved. */
+let fiveHourPoint: number | null = null
+/** When a key in the prompt box last looked whether the limits are due. */
+let lastHereAt = 0
+/** A key in the prompt box looks at most this often. */
+const HERE_GAP_MS = 10_000
 /** The sidebar has shown once this session and the limits were looked for: after that only as an answer ends. */
 let hasLookedForModelLimits = false
 /** No sign-in the usage endpoint takes (an API key, a gateway): not asked this session. */
@@ -99,6 +109,10 @@ export async function startStatus($: EngineInterface): Promise<void> {
   modelLimits = []
   nextModelLimitsAt = 0
   modelLimitsRefusals = 0
+  modelLimitsAskedAt = 0
+  lastScopedRequestAt = 0
+  fiveHourPoint = null
+  lastHereAt = 0
   // What the store holds of the models' limits, before the first snapshot: a restart or a reload
   // draws them at once and asks the endpoint nothing.
   await takeSharedModelLimits($).catch(() => undefined)
@@ -130,6 +144,8 @@ export async function startStatus($: EngineInterface): Promise<void> {
       if (await isSidebarShown($).catch(() => false)) {
         // Once, when the sidebar first shows: after that only as an answer ends.
         if (!hasLookedForModelLimits) void refreshModelLimits($).catch(() => undefined)
+        // What another session asked shows here within the half minute: the store is read, the endpoint is not asked.
+        else await takeSharedModelLimits($).then(() => showModelLimits($)).catch(() => undefined)
         await refreshSessionName($).catch(() => undefined)
         // Another session's to-dos (the same project) show within the half minute.
         await refreshTodos($).catch(() => undefined)
@@ -232,10 +248,11 @@ export async function refreshStatus($: EngineInterface): Promise<void> {
  * the store's record and draws its windows when they are newer; a session whose own are the newest
  * writes them, as its answer ends and mid-answer at most each half minute.
  */
-export async function refreshUsage($: EngineInterface, isFromResponse = false): Promise<void> {
+export async function refreshUsage($: EngineInterface, isFromResponse = false, model?: string): Promise<void> {
   const now = await $.clock.now()
   const own = snapshot(await $.session.usage())
   if (isFromResponse) ownUsageAt = now
+  if (isFromResponse && model !== undefined) noteScopedRequest($, model, own.fiveHour?.percent, now)
   else sharedUsage = readSharedUsage(await $.store.get(USAGE_SHARED_KEY).catch(() => undefined)) ?? sharedUsage
   const figuresNow = withSharedUsage(own, ownUsageAt, sharedUsage, now)
   if (JSON.stringify(figuresNow) !== JSON.stringify(await read($, usage))) await update($, usage, () => figuresNow)
@@ -264,11 +281,11 @@ export async function refreshUsage($: EngineInterface, isFromResponse = false): 
  * the store, a session whose turn it is not takes the record and makes no request, and a refusal
  * (429, 403) is left alone for what the endpoint names, or the gap doubled each time, an hour at most.
  */
-export async function refreshModelLimits($: EngineInterface): Promise<void> {
+export async function refreshModelLimits($: EngineInterface, reason: 'due' | 'moved' = 'due'): Promise<void> {
   if (isModelLimitsOff) return
   const now = await $.clock.now()
-  if (now < nextModelLimitsAt) {
-    hasLookedForModelLimits = true
+  if (!mayAskModelLimits(now, reason)) {
+    if (reason === 'due') hasLookedForModelLimits = true
 
     return
   }
@@ -284,9 +301,10 @@ export async function refreshModelLimits($: EngineInterface): Promise<void> {
   hasLookedForModelLimits = true
   // Another session may have asked since: its answer, and its turn, stand.
   await takeSharedModelLimits($)
-  if (now < nextModelLimitsAt) return showModelLimits($)
+  if (!mayAskModelLimits(now, reason)) return showModelLimits($)
 
   // The turn is taken in the store before the request goes, so a session ending an answer meanwhile waits.
+  modelLimitsAskedAt = now
   nextModelLimitsAt = now + MODEL_LIMITS_GAP_MS
   await shareModelLimits($)
   const response = await $.http.fetch(USAGE_URL, { auth: auth.handle })
@@ -311,11 +329,48 @@ async function takeSharedModelLimits($: EngineInterface): Promise<void> {
   modelLimits = shared.limits
   nextModelLimitsAt = shared.nextAt
   modelLimitsRefusals = shared.refusals
+  modelLimitsAskedAt = shared.askedAt
+}
+
+/**
+ * Whether the endpoint may be asked now. `due`: nothing says the limits moved, so once the gap
+ * (five minutes) or a refusal's wait is up. `moved`: a request of this session's went to a model
+ * they count since the last ask, so a minute after that ask, never while a refusal's wait runs.
+ */
+function mayAskModelLimits(now: number, reason: 'due' | 'moved'): boolean {
+  if (reason === 'due' || modelLimitsRefusals > 0) return now >= nextModelLimitsAt
+
+  return lastScopedRequestAt > modelLimitsAskedAt && now >= modelLimitsAskedAt + MODEL_LIMITS_FLOOR_MS
+}
+
+/**
+ * As a response returns (`refreshUsage`): a request to a model the limits count is noted, and when
+ * the 5-hour window stands a whole point on from the last response, the limits are asked for (not
+ * awaited). The window comes with every response for nothing: its move is the sign theirs moved.
+ */
+function noteScopedRequest($: EngineInterface, model: string, fiveHour: number | undefined, now: number): void {
+  if (countsToward(model, modelLimits)) lastScopedRequestAt = now
+  const point = fiveHour === undefined ? null : Math.floor(fiveHour)
+  const hasMoved = point !== null && fiveHourPoint !== null && point !== fiveHourPoint
+  fiveHourPoint = point
+  if (hasMoved) void refreshModelLimits($, 'moved').catch(() => undefined)
+}
+
+/**
+ * The person is here (a question goes out, a key in the prompt box): the limits are asked for when
+ * the gap is up, so what another machine used shows. A key looks at most every ten seconds. An
+ * idle session asks nothing: it draws what the store holds (the half-minute read).
+ */
+export async function noteHere($: EngineInterface, isKey: boolean): Promise<void> {
+  const now = await $.clock.now()
+  if (isKey && now - lastHereAt < HERE_GAP_MS) return
+  lastHereAt = now
+  await refreshModelLimits($)
 }
 
 /** This session's record into the store for the others; a store that refuses the write leaves each session asking for itself. */
 async function shareModelLimits($: EngineInterface): Promise<void> {
-  const record: SharedModelLimits = { limits: modelLimits, nextAt: nextModelLimitsAt, refusals: modelLimitsRefusals }
+  const record: SharedModelLimits = { limits: modelLimits, nextAt: nextModelLimitsAt, refusals: modelLimitsRefusals, askedAt: modelLimitsAskedAt }
   await $.store.set(MODEL_LIMITS_KEY, record).catch(() => undefined)
 }
 

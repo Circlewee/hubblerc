@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { statusParts } from '../hooks/status/band-format'
-import { MODEL_LIMITS_KEY, parseModelLimits, readSharedModelLimits, refusalWaitMs } from '../hooks/status/model-limits'
+import { countsToward, MODEL_LIMITS_KEY, parseModelLimits, readSharedModelLimits, refusalWaitMs } from '../hooks/status/model-limits'
 import { NOW, standInForEngine, start } from './engine'
 import type { StandIn } from './engine'
 
@@ -94,7 +94,7 @@ test("wide, a model's weekly limit is a line beneath 7d, every label padded to i
   expect(lines(plain as typeof usage, 50).find(line => line.startsWith('7d'))?.startsWith('7d  ━')).toBe(true)
 })
 
-test("as an answer ends, the sidebar showing, Fable's week is read with the session's sign-in, at most once in five minutes", async ($, on) => {
+test("as a question goes out, the sidebar showing, Fable's week is read with the session's sign-in, at most once in five minutes", async ($, on) => {
   const standIn = standInForEngine(on)
   memoryStore(on)
   standIn.signIn = 'bearer'
@@ -266,4 +266,118 @@ test("a model's weekly limit is coloured by its pace, as 7d is: running out befo
   // Six days in at 40%: under half by the reset.
   const late = new Date(NOW + 24 * HOUR).toISOString()
   expect(line(late, late)?.endsWith(' 40%')).toBe(true)
+})
+
+/** The engine beneath answers every request; one made through `step` comes back a millisecond on. */
+function answerRequests(on: On): void {
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+  })
+}
+
+async function step($: Engine, standIn: StandIn, index: number, model: string): Promise<void> {
+  const stream = $.turn.step({ turnId: 't1', index, model, effort: 'high', messageCount: 1 })
+  for await (const chunk of stream) void chunk
+  await standIn.clock.advance(1)
+}
+
+test("a request counts toward a limit whose name is in its model's id; with no limit known, toward Fable's", () => {
+  const fable = [{ name: 'Fable', percent: 4 }]
+  expect(countsToward('claude-fable-5-2', fable)).toBe(true)
+  expect(countsToward('claude-opus-5-5', fable)).toBe(false)
+  expect(countsToward('claude-fable-5-2[1m]', [])).toBe(true)
+  expect(countsToward('claude-haiku-5-5', [])).toBe(false)
+})
+
+test("mid-answer, Fable's week is asked for when the 5-hour window stands a point on after a Fable request, at most once a minute; as the answer ends, once more", async ($, on) => {
+  const standIn = standInForEngine(on)
+  answerRequests(on)
+  memoryStore(on)
+  standIn.signIn = 'bearer'
+  standIn.usageAnswer = { status: 200, body: usageBody(2) }
+  await start($)
+  showSidebar(standIn)
+
+  // The question going out asks (nothing was known): the gap runs from here.
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await standIn.clock.advance(1)
+  expect(standIn.usageCalls.length).toBe(1)
+
+  // Fable requests with the window where it was: nothing says the limit moved.
+  await step($, standIn, 0, 'claude-fable-5-2')
+  await step($, standIn, 1, 'claude-fable-5-2')
+  expect(standIn.usageCalls.length).toBe(1)
+
+  // The window a point on, within the minute: not yet. A minute after the ask, the next point asks.
+  standIn.fiveHourPercent = 26
+  await step($, standIn, 2, 'claude-fable-5-2')
+  expect(standIn.usageCalls.length).toBe(1)
+  await standIn.clock.advance(MIN)
+  standIn.fiveHourPercent = 27
+  await step($, standIn, 3, 'claude-fable-5-2')
+  expect(standIn.usageCalls.length).toBe(2)
+
+  // The answer's end: a Fable request went since that ask, so once the minute is up it asks; within it, not.
+  await step($, standIn, 4, 'claude-fable-5-2')
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 1000 })
+  await standIn.clock.advance(1)
+  expect(standIn.usageCalls.length).toBe(2)
+})
+
+test("an answer that asked no model the limits count asks nothing as it ends, the window moved or not", async ($, on) => {
+  const standIn = standInForEngine(on)
+  answerRequests(on)
+  memoryStore(on)
+  standIn.signIn = 'bearer'
+  standIn.usageAnswer = { status: 200, body: usageBody(2) }
+  await start($)
+  showSidebar(standIn)
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await standIn.clock.advance(1)
+  expect(standIn.usageCalls.length).toBe(1)
+
+  await standIn.clock.advance(2 * MIN)
+  await step($, standIn, 0, 'claude-opus-5-5')
+  standIn.fiveHourPercent = 40
+  await step($, standIn, 1, 'claude-opus-5-5')
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 1000 })
+  await standIn.clock.advance(1)
+  expect(standIn.usageCalls.length).toBe(1)
+
+  // A Fable request, and the answer's end more than a minute after the ask: asked.
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await step($, standIn, 0, 'claude-fable-5-2')
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 1000 })
+  await standIn.clock.advance(1)
+  expect(standIn.usageCalls.length).toBe(2)
+})
+
+test('an idle session asks nothing and draws what another session asked within the half minute; a key in the prompt box asks once the gap is up', async ($, on) => {
+  const standIn = standInForEngine(on)
+  on('prompt.edit', (_, e) => ({ text: e.text, cursor: e.cursor }))
+  standIn.signIn = 'bearer'
+  standIn.usageAnswer = { status: 200, body: usageBody(9) }
+  const stored = memoryStore(on, { [MODEL_LIMITS_KEY]: { limits: [{ name: 'Fable', percent: 4, resetsAt: WEEK_RESET }], nextAt: NOW + 5 * MIN, refusals: 0, askedAt: NOW } })
+  await start($)
+  showSidebar(standIn)
+  await standIn.clock.advance(MIN)
+
+  // Another session asked meanwhile: its record shows here with no request.
+  stored[MODEL_LIMITS_KEY] = { limits: [{ name: 'Fable', percent: 6, resetsAt: WEEK_RESET }], nextAt: NOW + 7 * MIN, refusals: 0, askedAt: NOW + 2 * MIN }
+  await standIn.clock.advance(MIN)
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await pane.find({ type: 'Text', text: /^ +6%$/ }))?.text).toBe('  6%')
+  await pane.unmount()
+  await standIn.clock.advance(HOUR)
+  expect(standIn.usageCalls).toEqual([])
+
+  // The person is back: a key asks, the gap long up; the keys after it ask nothing.
+  const typeKey = () => ($.prompt as unknown as { edit: (e: unknown) => Promise<unknown> }).edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'a' })
+  await typeKey()
+  await standIn.clock.advance(1)
+  expect(standIn.usageCalls.length).toBe(1)
+  await standIn.clock.advance(20_000)
+  await typeKey()
+  await standIn.clock.advance(1)
+  expect(standIn.usageCalls.length).toBe(1)
 })
