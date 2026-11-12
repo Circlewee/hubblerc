@@ -173,3 +173,24 @@ test('a survey keeps the band to itself', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^Opus/ })).toBeUndefined()
   await ui.unmount()
 })
+
+test('collapsed, the band draws nothing and reads no state; uncollapsed, it draws whole again', async ($, on) => {
+  standInForEngine(on)
+  let reads = 0
+  on('state.get', ($, e, next) => {
+    reads += 1
+
+    return next(e)
+  })
+  await start($)
+
+  const from = reads
+  const collapsed = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND_PROPS, isCollapsed: true } })
+  expect(await collapsed.find({ type: 'Text' })).toBeUndefined()
+  expect(reads - from).toBe(0)
+  await collapsed.unmount()
+
+  const shown = await $.ui.mount({ ...BAND, surface: 'terminal', props: BAND_PROPS })
+  expect((await shown.find({ type: 'Text', text: /^Opus/ }))?.text).toBe('Opus 5.5')
+  await shown.unmount()
+})

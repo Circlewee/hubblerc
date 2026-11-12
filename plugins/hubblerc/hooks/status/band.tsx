@@ -44,6 +44,12 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const isSidebarUp = await syncSidebar($, layout, e.viewport).catch(() => false)
     if (e.props.hasSurvey) return next(e)
+    // Collapsed (ctrl+x ctrl+a), nothing of the tree is on screen: an empty one, and no state read, so
+    // the timer's writes redraw nothing. Uncollapsing changes the prop and draws it whole again.
+    if (e.props.isCollapsed) {
+      const { Box } = $.ui.resolve(e)
+      return <Box />
+    }
 
     const [turnList, runningList, agentList, figures, gitInfo, projectName, modelId, override, engine, pickerOpenedAt, auto, pick, log, lastRequestTime, lastSample] =
       await Promise.all([
