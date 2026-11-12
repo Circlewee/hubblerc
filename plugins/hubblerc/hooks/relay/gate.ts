@@ -381,7 +381,7 @@ const orcaRunner = (id: string | undefined, fallback?: string): string => {
   if (id !== undefined) return `orca dispatch:${id}`
   if (fallback !== undefined && fallback !== '') return fallback.startsWith('dispatch:') ? `orca ${fallback}` : `orca dispatch:${fallback}`
 
-  return 'orca (dispatch id 미확인)'
+  return 'orca (dispatch id unknown)'
 }
 
 const optionOf = (call: OrcaCall, name: string): string | undefined => {
@@ -467,7 +467,7 @@ export async function planSpawn($: EngineInterface, prompt: string, model: strin
   else if (!sameModel(model, task.model)) problems.push(`model ${model}이 brief의 모델 ${task.model}과 다릅니다.`)
   if (problems.length > 0) return refused(taskKey(task), problems)
 
-  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), brief: task.specPath, act: 'launch', runnerOf: id => `subagent ${id === '' ? '(agent id 미확인)' : id}` } }
+  return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), brief: task.specPath, act: 'launch', runnerOf: id => `subagent ${id === '' ? '(agent id unknown)' : id}` } }
 }
 
 /**
@@ -513,7 +513,7 @@ export async function unverifiedLine($: EngineInterface): Promise<string | undef
   for (const { run, state } of candidates) {
     const last = state.verdicts.at(-1)
     if (head !== '' && last !== undefined && sameCommit(last.commit, head)) continue
-    lines.push(`⚠ relay ${run}: 검증되지 않은 커밋입니다(HEAD ${head === '' ? '미확인' : head.slice(0, 7)}, 마지막 verdict ${last === undefined ? '없음' : last.commit.slice(0, 7)}). 끝내기 전에 package → 다른 모델 검증 → finish.`)
+    lines.push(`⚠ relay ${run}: 검증되지 않은 커밋입니다(HEAD ${head === '' ? 'unknown' : head.slice(0, 7)}, 마지막 verdict ${last === undefined ? '없음' : last.commit.slice(0, 7)}). 끝내기 전에 package → 다른 모델 검증 → finish.`)
   }
 
   return lines.length === 0 ? undefined : lines.join('\n')

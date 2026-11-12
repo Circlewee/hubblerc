@@ -83,10 +83,10 @@ test('a run in small: each task’s latest revision with its status first, then 
   const lines = relayLines({ runs: [status] }, THEME_COLORS)
   expect(texts(lines)).toEqual([
     RUN,
-    `끝            Add the tool · r2 · sonnet-5-5/medium · orca · ${hhmm(AT)}`,
-    `띄운 뒤 막힘  Wire the box · opus-5-5/high · subagent · ${hhmm(AT)}`,
-    '띄우기 전     Write docs · opus-5-5/high',
-    '취소          D-r1 · opus-5-5/high',
+    `done            Add the tool · r2 · sonnet-5-5/medium · orca · ${hhmm(AT)}`,
+    `blocked (live)  Wire the box · opus-5-5/high · subagent · ${hhmm(AT)}`,
+    'ready           Write docs · opus-5-5/high',
+    'cancelled       D-r1 · opus-5-5/high',
     '사용자 답을 기다리는 결정 1개',
     'verdict V1 fail · ccccccc = HEAD',
   ])
@@ -107,9 +107,9 @@ test('in the box a task’s line fits the width: the tail at the right edge, the
   const at = (width?: number): string[] => texts(relayLines(status, THEME_COLORS, width)).slice(1, 4)
   // The statuses pad to one column (the long one said short), the tails end at the same cell.
   expect(at(76)).toEqual([
-    `도는 중   relay 한 줄 그리기 다듬기: 약어 대신 …   r4 · sonnet/high · ${hhmm(AT)}`,
-    `끝(걱정)  사이드바 relay 상자와 /relay 명령    r3 · opus/high→xhigh · ${hhmm(AT)}`,
-    `끝        Write docs                                      opus/high · ${hhmm(AT)}`,
+    `running   relay 한 줄 그리기 다듬기: 약어 대신 …   r4 · sonnet/high · ${hhmm(AT)}`,
+    `concerns  사이드바 relay 상자와 /relay 명령    r3 · opus/high→xhigh · ${hhmm(AT)}`,
+    `done      Write docs                                      opus/high · ${hhmm(AT)}`,
   ])
   // A cell stays free at the right edge.
   expect(at(76).map(cellWidth)).toEqual([75, 75, 75])
@@ -119,15 +119,15 @@ test('in the box a task’s line fits the width: the tail at the right edge, the
   expect(at(76)[2]).not.toContain('→')
 
   // Narrower, a title under twenty cells takes the tail's room: the launch time first, then the model, then the brief's number.
-  expect(at(52)).toEqual(['도는 중   relay 한 줄 그리기 다…   r4 · sonnet/high', '끝(걱정)  사이드바 relay 상자와 /relay 명령      r3', `끝        Write docs              opus/high · ${hhmm(AT)}`])
+  expect(at(52)).toEqual(['running   relay 한 줄 그리기 다…   r4 · sonnet/high', 'concerns  사이드바 relay 상자와 /relay 명령      r3', `done      Write docs              opus/high · ${hhmm(AT)}`])
   // A short title needs no more than its own cells, so its tail stays.
-  expect(at(40)).toEqual(['도는 중   relay 한 줄 그리기 다듬…   r4', '끝(걱정)  사이드바 relay 상자와 /r…  r3', `끝        Write docs  opus/high · ${hhmm(AT)}`])
-  expect(at(30)).toEqual(['도는 중   relay 한 줄 그리기…', '끝(걱정)  사이드바 relay 상…', '끝        Write docs'])
+  expect(at(40)).toEqual(['running   relay 한 줄 그리기 다듬…   r4', 'concerns  사이드바 relay 상자와 /r…  r3', `done      Write docs  opus/high · ${hhmm(AT)}`])
+  expect(at(30)).toEqual(['running   relay 한 줄 그리기…', 'concerns  사이드바 relay 상…', 'done      Write docs'])
   // `/relay-status` cuts nothing, says the status in full, the model with its version and the runner.
   expect(at()).toEqual([
-    `도는 중         relay 한 줄 그리기 다듬기: 약어 대신 이름, 줄 사이 빈 줄 · r4 · sonnet-5-5/high · subagent · ${hhmm(AT)}`,
-    `걱정과 함께 끝  사이드바 relay 상자와 /relay 명령 · r3 · opus-5-5/high→xhigh · subagent · ${hhmm(AT)}`,
-    `끝              Write docs · opus-5-5/high · orca · ${hhmm(AT)}`,
+    `running          relay 한 줄 그리기 다듬기: 약어 대신 이름, 줄 사이 빈 줄 · r4 · sonnet-5-5/high · subagent · ${hhmm(AT)}`,
+    `done (concerns)  사이드바 relay 상자와 /relay 명령 · r3 · opus-5-5/high→xhigh · subagent · ${hhmm(AT)}`,
+    `done             Write docs · opus-5-5/high · orca · ${hhmm(AT)}`,
   ])
 })
 
@@ -158,7 +158,7 @@ test('a task is named by its title, "(rN)" from the second brief, its key where 
 test('a verdict of another commit than HEAD, HEAD not read, no verdict, no decisions, progress.md unread, no task yet: each says so', () => {
   const other = texts(relayLines({ runs: [runStatus(STATE, PROGRESS, 'd'.repeat(40))] }, THEME_COLORS))
   expect(other.at(-1)).toBe('verdict V1 fail · ccccccc ≠ HEAD ddddddd')
-  expect(texts(relayLines({ runs: [runStatus(STATE, PROGRESS, undefined)] }, THEME_COLORS)).at(-1)).toBe('verdict V1 fail · ccccccc · HEAD 미확인')
+  expect(texts(relayLines({ runs: [runStatus(STATE, PROGRESS, undefined)] }, THEME_COLORS)).at(-1)).toBe('verdict V1 fail · ccccccc · HEAD unknown')
 
   const bare = texts(relayLines({ runs: [runStatus({ ...STATE, tasks: [], verdicts: [] }, PROGRESS.replace('| asked |', '| decided |'), undefined)] }, THEME_COLORS))
   expect(bare).toEqual([RUN, '작업 없음', '사용자 답을 기다리는 결정 없음', 'verdict 없음'])
@@ -277,10 +277,10 @@ test('a run under way at session start: its box is drawn from state, with no fil
   // The pane is 56 cells wide, a line 52: the launch time gives way where the title would not fit whole.
   expect(lines?.slice(0, -1)).toEqual([
     RUN,
-    '끝            Add the tool       r2 · sonnet/medium',
-    `띄운 뒤 막힘  Wire the box        opus/high · ${hhmm(AT)}`,
-    '띄우기 전     Write docs                  opus/high',
-    '취소          D-r1                        opus/high',
+    `done       Add the tool  r2 · sonnet/medium · ${hhmm(AT)}`,
+    `blocked!   Wire the box           opus/high · ${hhmm(AT)}`,
+    'ready      Write docs                     opus/high',
+    'cancelled  D-r1                           opus/high',
     '사용자 답을 기다리는 결정 1개',
   ])
   // The stand-in's HEAD is its folder: another commit than the verdict's.
@@ -322,16 +322,16 @@ test('the relay tool’s changes show at the next drawing: the run started, a ta
     runner_kind: 'claude',
   })
   expect(written.deny).toBeUndefined()
-  expect((await boxLines(ui))?.[1]).toBe('띄우기 전  Add the box                    opus/high')
+  expect((await boxLines(ui))?.[1]).toBe('ready  Add the box                        opus/high')
 
   expect((await relay($, { action: 'dispatched', run, task: 'A', runner: 'subagent worker-a' })).deny).toBeUndefined()
   const shown = await boxLines(ui)
-  expect(shown?.[1]).toBe(`도는 중  Add the box              opus/high · ${hhmm(NOW)}`)
+  expect(shown?.[1]).toBe(`running  Add the box              opus/high · ${hhmm(NOW)}`)
   await ui.unmount()
 
   // The same run as text: the line whole, with the model's version and the runner.
   expect(await relayStatus($)).toBe(
-    ['진행 중인 relay run 1개:', [run, `도는 중  Add the box · opus-5-5/high · subagent · ${hhmm(NOW)}`, '사용자 답을 기다리는 결정 없음', 'verdict 없음'].join('\n')].join('\n\n'),
+    ['진행 중인 relay run 1개:', [run, `running  Add the box · opus-5-5/high · subagent · ${hhmm(NOW)}`, '사용자 답을 기다리는 결정 없음', 'verdict 없음'].join('\n')].join('\n\n'),
   )
 })
 

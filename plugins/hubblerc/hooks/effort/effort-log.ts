@@ -1,7 +1,7 @@
 import type { AutoPick, EffortSample, EffortSource, TurnRecord, UsageSnapshot } from '../../types'
 import { TASK_LABELS } from './effort-table'
 
-const SOURCE_LABELS: Record<EffortSource, string> = { engine: '엔진', manual: '직접', auto: 'auto', fallback: '대체' }
+const SOURCE_LABELS: Record<EffortSource, string> = { engine: 'engine', manual: 'manual', auto: 'auto', fallback: 'fallback' }
 
 /**
  * The `/effort-log` table: the last main-loop requests with the effort each went out with and its

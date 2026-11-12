@@ -19,16 +19,18 @@ const relayStatus = atom({ plugin: 'hubblerc', key: 'relayStatus' } as const, nu
 
 /** A task's status as a person reads it. */
 const STATUS_WORDS: Record<string, string> = {
-  ready: '띄우기 전',
-  launching: '띄우는 중',
-  running: '도는 중',
-  done: '끝',
-  done_with_concerns: '걱정과 함께 끝',
-  needs_context: '답 필요',
-  blocked: '막힘',
-  cancelled: '취소',
+  ready: 'ready',
+  launching: 'launching',
+  running: 'running',
+  done: 'done',
+  done_with_concerns: 'done (concerns)',
+  needs_context: 'needs context',
+  blocked: 'blocked',
+  cancelled: 'cancelled',
 }
-const LIVE_BLOCKED_WORD = '띄운 뒤 막힘'
+const LIVE_BLOCKED_WORD = 'blocked (live)'
+/** In the box: the long ones short, so the status column stays within nine cells (2026-11-12: the person's worry about English running long). */
+const LIVE_BLOCKED_SHORT = 'blocked!'
 
 /** A status as a person reads it; a word not in the table (a status of a newer tool) as it is. */
 export const statusWord = (status: string): string => STATUS_WORDS[status] ?? status
@@ -153,7 +155,7 @@ function statusColor(task: RelayTaskLine, palette: Palette): string | undefined 
 }
 
 /** The status as the box's first column says it: the long one short, so the column stays narrow. */
-const BOX_STATUS_WORDS: Record<string, string> = { done_with_concerns: '끝(걱정)' }
+const BOX_STATUS_WORDS: Record<string, string> = { done_with_concerns: 'concerns', needs_context: 'needs ctx' }
 
 /** A title longer than this is not cut below this many cells: parts of the tail go first, the launch time before the model. */
 const MIN_TITLE_CELLS = 20
@@ -161,7 +163,7 @@ const MIN_TITLE_CELLS = 20
 const GAP = '  '
 
 const statusOf = (task: RelayTaskLine, isShort: boolean): string =>
-  task.isLiveBlocked === true ? LIVE_BLOCKED_WORD : ((isShort ? BOX_STATUS_WORDS[task.status] : undefined) ?? statusWord(task.status))
+  task.isLiveBlocked === true ? (isShort ? LIVE_BLOCKED_SHORT : LIVE_BLOCKED_WORD) : ((isShort ? BOX_STATUS_WORDS[task.status] : undefined) ?? statusWord(task.status))
 
 /** The widest status among the tasks, in cells: the column every task line pads its status to. */
 const statusColumn = (tasks: readonly RelayTaskLine[], isShort: boolean): number => Math.max(0, ...tasks.map(task => cellWidth(statusOf(task, isShort))))
@@ -238,7 +240,7 @@ function verdictSegments(verdict: RelayRunStatus['verdict'], palette: Palette): 
   const commit = verdict.commit.slice(0, 7)
   const head =
     verdict.head === undefined
-      ? { text: ` · ${commit} · HEAD 미확인`, dim: true }
+      ? { text: ` · ${commit} · HEAD unknown`, dim: true }
       : sameCommit(verdict.commit, verdict.head)
         ? { text: ` · ${commit} = HEAD`, dim: true }
         : { text: ` · ${commit} ≠ HEAD ${verdict.head.slice(0, 7)}`, color: palette.warn }

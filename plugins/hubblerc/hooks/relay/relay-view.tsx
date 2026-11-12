@@ -220,10 +220,10 @@ function told(lines: readonly string[]): string | undefined {
     const tree = parts.find(part => part.startsWith('트리 ')) ?? ''
     const time = parts.find(part => /^\d+ ms$|^\d+(\.\d+)?초$/.test(part)) ?? ''
 
-    return [`pass ${count('pass')}`, `fail ${count('fail')}`, `미확인 ${count('미확인')}`, time, tree].filter(part => part !== '').join(' · ')
+    return [`pass ${count('pass')}`, `fail ${count('fail')}`, `unverified ${count('unverified')}`, time, tree].filter(part => part !== '').join(' · ')
   }
 
-  if ((match = /^run을 버렸습니다: \S+ · 남은 커밋 (\d+개|미확인)/.exec(head))) {
+  if ((match = /^run을 버렸습니다: \S+ · 남은 커밋 (\d+개|unknown)/.exec(head))) {
     const pending = /^사용자 답을 기다리던 결정 (\d+)개:/.exec(lines.find(line => line.startsWith('사용자 답을 기다리던 결정')) ?? '')?.[1]
 
     return `버림 · 남은 커밋 ${(match[1] ?? '').replace(/개$/, '')}${pending === undefined ? '' : ` · 기다리던 결정 ${pending}`}`

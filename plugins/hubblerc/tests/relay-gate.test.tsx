@@ -424,7 +424,7 @@ test('V1-07: a receipt with no dispatch id still marks the task running, as unco
   sim.receipt = 'started, nothing else printed'
   expect((await bash($, launch(spec))).deny).toBeUndefined()
   expect(state(sim).tasks[0]?.status).toBe('running')
-  expect(state(sim).tasks[0]?.runner).toBe('orca (dispatch id 미확인)')
+  expect(state(sim).tasks[0]?.runner).toBe('orca (dispatch id unknown)')
 })
 
 test('a relative brief path and orca-dev are read the same', async ($, on) => {

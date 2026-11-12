@@ -417,8 +417,8 @@ test('the effort a worker ran at is read from its commits’ Effort trailer, els
   expect(effortRan(['medium', 'auto · xhigh', ''], '')).toBe('xhigh')
   expect(effortRan([], 'claude-opus-5-5 / high')).toBe('high')
   // A worker that does not know, or copies the brief's value with a note: not known.
-  expect(effortRan([], 'claude-opus-5-5 / 미확인 (brief는 high)')).toBeUndefined()
-  expect(effortRan([], 'claude-sonnet-5-5 / high (brief 값; 실제 값 미확인)')).toBeUndefined()
+  expect(effortRan([], 'claude-opus-5-5 / unverified (brief는 high)')).toBeUndefined()
+  expect(effortRan([], 'claude-sonnet-5-5 / high (brief 값; 실제 값 unknown)')).toBeUndefined()
   expect(effortRan([], 'claude-sonnet-5-5 / unverified')).toBeUndefined()
   expect(effortRan([], 'high')).toBeUndefined()
   expect(effortRan([], '')).toBeUndefined()
@@ -431,7 +431,7 @@ test('a report records the effort its commits were signed with, and says so wher
   await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent worker-a' })
   // The brief says high; the report cannot tell; the commit is signed xhigh.
   sim.commits[SHA_A] = { task: 'A-r1', subject: 'Add the relay tool', files: ['hooks/relay/relay.ts'], effort: 'auto · xhigh' }
-  sim.files[`${DIR}/tasks/A-r1-report.md`] = report().replace('claude-opus-5-5 / high', 'claude-opus-5-5 / 미확인 (brief는 high)')
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report().replace('claude-opus-5-5 / high', 'claude-opus-5-5 / unverified (brief는 high)')
   const told = await relay($, { action: 'report', run: RUN, task: 'A' })
   expect(told.result).toContain('effort: brief high · 실제 xhigh(커밋 trailer)')
   expect(state(sim).tasks[0]).toMatchObject({ effort: 'high', actualEffort: 'xhigh' })
@@ -477,7 +477,7 @@ test('check runs each command itself and judges by its exit code; a criterion wi
   expect(sim.ran).toEqual(['make test', 'make lint'])
   expect(checked.result).toContain(`${DIR}/tasks/A-r1-checks.md`)
   // A pass and a criterion with no command are counted on the first line; only the fail has a line of its own.
-  expect(checked.result?.split('\n')[0]).toBe('A-r1 검사 결과(HEAD aaaaaaa): pass 1 (C1) · fail 1 (C2) · 미확인 1 (C3 명령 없음) · 트리 깨끗함 · 0 ms')
+  expect(checked.result?.split('\n')[0]).toBe('A-r1 검사 결과(HEAD aaaaaaa): pass 1 (C1) · fail 1 (C2) · unverified 1 (C3 명령 없음) · 트리 깨끗함 · 0 ms')
   expect(checked.result).toContain('- C2: fail · exit 2(기대 0)')
   expect(checked.result).not.toContain('- C1:')
   expect(checked.result).not.toContain('- C3:')
@@ -595,7 +595,7 @@ test('V1-05b dispatched by hand on a brief changed after task wrote it leaves th
   await relay($, { ...TASK_A, id: 'B', edit_scope: ['other/**'], reads: [] })
   sim.files[`${DIR}/tasks/A-r1.md`] += '\nedited by hand\n'
   const sent = await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
-  expect(sent.deny).toContain('A-r1를 blocked로 두었습니다(띄운 뒤 막힘: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)): A-r1의 brief가 task로 쓴 뒤에 바뀌었습니다')
+  expect(sent.deny).toContain('A-r1를 blocked로 두었습니다(live: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)): A-r1의 brief가 task로 쓴 뒤에 바뀌었습니다')
   expect(state(sim).tasks[0]).toMatchObject({ status: 'blocked', runner: 'subagent a' })
   expect(state(sim).tasks[0]?.blockReason).toContain('task로 쓴 뒤에 바뀌었습니다')
   expect(sim.files[`${DIR}/tasks/A-r1.dispatched.md`]).toBeUndefined()
@@ -983,7 +983,7 @@ test('V1-05b the brief is fixed when a launch is reserved; one changed during th
 
   sim.files[brief] = sent.replace('tests pass', 'WEAKENED criterion')
   const committed = await held.commit('orca dispatch:ctx_1')
-  expect('deny' in committed && committed.deny).toContain('A-r1를 blocked로 두었습니다(띄운 뒤 막힘: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)): 띄우는 동안 brief가 바뀌었습니다')
+  expect('deny' in committed && committed.deny).toContain('A-r1를 blocked로 두었습니다(live: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)): 띄우는 동안 brief가 바뀌었습니다')
   expect(state(sim).tasks[0]).toMatchObject({ status: 'blocked', runner: 'orca dispatch:ctx_1' })
   expect(sim.files[`${DIR}/tasks/A-r1.dispatched.md`]).toBe(sent)
 
@@ -1078,8 +1078,8 @@ test('V3-01 a launch blocked after it went out keeps its files: an overlapping l
   // Later too, and through the tool's own overlap check; the Tasks table says what to do.
   expect('deny' in (await reserveDispatch(engine, ROOT, RUN, 'B'))).toBe(true)
   expect((await relay($, { ...TASK_A, id: 'C', reads: [] })).deny).toContain('돌고 있는 A-r1와 겹칩니다')
-  expect(sim.files[`${DIR}/progress.md`]).toContain('| A-r1 | Add the tool | orca dispatch:ctx_live_A | blocked (띄운 뒤 막힘: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) |')
-  expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('A-r1(blocked (띄운 뒤 막힘')
+  expect(sim.files[`${DIR}/progress.md`]).toContain('| A-r1 | Add the tool | orca dispatch:ctx_live_A | blocked (live: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) |')
+  expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('A-r1(blocked (live: brief가 바뀜')
 })
 
 test('V3-01 a task blocked after its launch takes no new revision until its worker is confirmed stopped and cancelled', async ($, on) => {
@@ -1087,7 +1087,7 @@ test('V3-01 a task blocked after its launch takes no new revision until its work
   const { held } = await liveBlockedA($, sim, false)
   await held.commit('orca dispatch:ctx_still_alive')
   const revision = await relay($, TASK_A)
-  expect(revision.deny).toContain('같은 작업의 A-r1(blocked (띄운 뒤 막힘: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) · orca dispatch:ctx_still_alive)가 돌고 있습니다')
+  expect(revision.deny).toContain('같은 작업의 A-r1(blocked (live: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) · orca dispatch:ctx_still_alive)가 돌고 있습니다')
   expect(state(sim).tasks.map(task => [taskKeyOf(task), task.status])).toEqual([['A-r1', 'blocked']])
 
   await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'replace worker', confirmed_stopped: true })
@@ -1099,7 +1099,7 @@ test('V3-01 a task blocked after its launch is cancelled only with confirmed_sto
   const { held } = await liveBlockedA($, sim, false)
   await held.commit('orca dispatch:ctx_still_alive')
   const refused = await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'replace worker' })
-  expect(refused.deny).toContain('A-r1는 blocked (띄운 뒤 막힘: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) 상태입니다(orca dispatch:ctx_still_alive): 워커가 멈춘 것을 확인한 뒤 confirmed_stopped: true를 주세요')
+  expect(refused.deny).toContain('A-r1는 blocked (live: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) 상태입니다(orca dispatch:ctx_still_alive): 워커가 멈춘 것을 확인한 뒤 confirmed_stopped: true를 주세요')
   expect(state(sim).tasks[0]?.status).toBe('blocked')
 
   // The worker reports after all: its report is checked as any other, and the task holds nothing more.
@@ -1179,13 +1179,13 @@ test('all twelve actions are said as the table says, read from the real tool’s
     ['relay 기다리는 결정', '없음'],
     ['relay brief 미리보기 A', `미리보기 ${previewLines}줄`],
     ['relay brief Add the tool · opus-5-5/high · 기준 2', '씀'],
-    ['relay 띄움 기록 A → subagent worker-a-with-a…', '도는 중'],
+    ['relay 띄움 기록 A → subagent worker-a-with-a…', 'running'],
     ['relay brief Docs · opus-5-5/high · 기준 2', '씀'],
-    ['relay 취소 B · not needed after all, the docs…', '띄우기 전 → 취소'],
+    ['relay 취소 B · not needed after all, the docs…', 'ready → cancelled'],
     ['relay 보고 확인 A', 'DONE · 범위 밖 0 · 테스트 변경 0 · 경고 0'],
-    ['relay 완료 검사 A', 'pass 1 · fail 0 · 미확인 1 · 0 ms · 트리 깨끗함'],
+    ['relay 완료 검사 A', 'pass 1 · fail 0 · unverified 1 · 0 ms · 트리 깨끗함'],
     ['relay brief Next · opus-5-5/high · 기준 2', expect.stringMatching(/^씀 · 경고 1: 같은 범위를 고친 A-r1가 끝났습니다/)],
-    ['relay 취소 C · later', '띄우기 전 → 취소'],
+    ['relay 취소 C · later', 'ready → cancelled'],
     ['relay 검증 package · 전체', 'V1 · 검토 파일 1'],
     ['relay verdict V1', 'pass · 기준 2/2 · 지적 high 0, medium 1 · 커밋 aaaaaaa'],
     ['relay 기다리는 결정', '2개: D2, D3'],
@@ -1206,7 +1206,7 @@ test('a package names its tasks; a report with scope or test trouble and a dirty
   sim.status = ' M hooks/relay/relay.ts\n?? new.ts'
   sim.commands['make test'] = { exitCode: 1, stdout: 'red' }
   const checked = await said($, { action: 'check', run: RUN, task: 'A' })
-  expect(checked.result).toBe('pass 0 · fail 0 · 미확인 2 · 0 ms · 트리 변경 2개')
+  expect(checked.result).toBe('pass 0 · fail 0 · unverified 2 · 0 ms · 트리 변경 2개')
 
   sim.status = ''
   const packed = await said($, { action: 'package', run: RUN, tasks: ['A', 'A-r1'] })
@@ -1235,7 +1235,7 @@ test('a refusal says its first reason, a failure of the tool says so, and a text
 
 test('a gate warning in a result is kept whole as a notice', () => {
   const view = resultView('A-r1: running · subagent x\n⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침', false)
-  expect(view).toEqual({ line: '도는 중', isProblem: false, notices: ['⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침'] })
+  expect(view).toEqual({ line: 'running', isProblem: false, notices: ['⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침'] })
 })
 
 // ── Registered in the list only while a run is not finished ──────────────────────────────────────
@@ -1375,19 +1375,19 @@ test('a clean check is one line; a fail, an unverified one for another reason th
   await doneA($, sim)
   sim.commands['make test'] = { exitCode: 0 }
   const clean = await relay($, { action: 'check', run: RUN, task: 'A' })
-  expect(clean.result).toBe('A-r1 검사 결과(HEAD aaaaaaa): pass 1 (C1) · 미확인 1 (C2 명령 없음) · 트리 깨끗함 · 0 ms')
+  expect(clean.result).toBe('A-r1 검사 결과(HEAD aaaaaaa): pass 1 (C1) · unverified 1 (C2 명령 없음) · 트리 깨끗함 · 0 ms')
   expect(clean.result).not.toContain('증거가 아닙니다')
 
   // git status failing: the tree's line says so, and the command's result is unverified.
   sim.status = null
   const unread = await relay($, { action: 'check', run: RUN, task: 'A' })
   expect(unread.result?.split('\n')).toEqual([
-    'A-r1 검사 결과(HEAD aaaaaaa): pass 0 · 미확인 2 (C1, C2 명령 없음) · 트리 확인 실패 · 0 ms',
+    'A-r1 검사 결과(HEAD aaaaaaa): pass 0 · unverified 2 (C1, C2 명령 없음) · 트리 확인 실패 · 0 ms',
     '작업 트리: git status 실패',
     '- C1: unverified · exit 0(기대 0) · 0 ms · git status를 읽지 못해 작업 트리를 확인하지 못함 · tries 1',
     `검사 결과 파일: ${DIR}/tasks/A-r1-checks.md`,
   ])
-  expect(resultView(unread.result, false)?.line).toBe('pass 0 · fail 0 · 미확인 2 · 0 ms · 트리 확인 실패')
+  expect(resultView(unread.result, false)?.line).toBe('pass 0 · fail 0 · unverified 2 · 0 ms · 트리 확인 실패')
 
   // The worker's pass against the command's fail is still warned.
   sim.status = ''
@@ -1398,7 +1398,7 @@ test('a clean check is one line; a fail, an unverified one for another reason th
   expect(failed.result).toContain('- C1: 워커는 pass, 명령은 fail')
 
   // The row reads a time in seconds as the first line says it, and the call still names the revision the answer reached.
-  expect(resultView('A-r2 검사 결과(HEAD b457a7d): pass 4 (C1 C2 C3 C9) · 미확인 1 (C10 명령 없음) · 트리 깨끗함 · 16.2초', false)?.line).toBe('pass 4 · fail 0 · 미확인 1 · 16.2초 · 트리 깨끗함')
+  expect(resultView('A-r2 검사 결과(HEAD b457a7d): pass 4 (C1 C2 C3 C9) · unverified 1 (C10 명령 없음) · 트리 깨끗함 · 16.2초', false)?.line).toBe('pass 4 · fail 0 · unverified 1 · 16.2초 · 트리 깨끗함')
   const later: RelayStatus = {
     runs: [
       {
@@ -1535,7 +1535,7 @@ test('V1 a criterion reported as a pass with tries 3 shows its tries in the repo
   const body = (await relay($, { action: 'check', run: RUN, task: 'A' })).result ?? ''
   expect(body).toContain('- C1: fail · exit 1(기대 0) · 0 ms · tries 3')
   expect(body).toContain('- C1: 워커는 pass, 명령은 fail')
-  expect(checked.result).toBe('pass 0 · fail 1 · 미확인 1 · 0 ms · 트리 깨끗함')
+  expect(checked.result).toBe('pass 0 · fail 1 · unverified 1 · 0 ms · 트리 깨끗함')
 })
 
 // ── Verdict V2's findings, each reproduced ──────────────────────────────────────────────

@@ -129,7 +129,7 @@ export const isBusy = (task: { status: TaskStatus; workerLive?: true }): boolean
   task.status === 'running' || task.status === 'launching' || (task.status === 'blocked' && task.workerLive === true)
 
 /** Blocked after launch, its worker perhaps still out: what the lead does next. */
-export const LIVE_BLOCKED = '띄운 뒤 막힘: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)'
+export const LIVE_BLOCKED = 'live: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)'
 
 /** A task's status as a person reads it: a blocked task whose worker may be at work says so. */
 export const statusLabel = (task: { status: TaskStatus; workerLive?: true }): string => (task.status === 'blocked' && task.workerLive === true ? `blocked (${LIVE_BLOCKED})` : task.status)
@@ -965,7 +965,7 @@ export function finishProblems(state: RelayState, head: string | undefined, trac
 
     return reasons
   }
-  if (head === undefined || !sameCommit(last.commit, head)) reasons.push(`검증한 커밋과 지금 커밋이 다름: 다시 검증하세요(verdict ${last.id}는 ${last.commit.slice(0, 7)}, 지금 HEAD ${head?.slice(0, 7) ?? '미확인'}).`)
+  if (head === undefined || !sameCommit(last.commit, head)) reasons.push(`검증한 커밋과 지금 커밋이 다름: 다시 검증하세요(verdict ${last.id}는 ${last.commit.slice(0, 7)}, 지금 HEAD ${head?.slice(0, 7) ?? 'unknown'}).`)
   if (last.result === 'fail') reasons.push(`마지막 verdict ${last.id}가 fail입니다${last.reasons === undefined || last.reasons.length === 0 ? '' : `(${last.reasons.join('; ')})`}.`)
   const pack = state.packages?.find(other => other.id === last.id)
   if (pack === undefined) {

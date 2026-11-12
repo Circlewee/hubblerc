@@ -159,7 +159,7 @@ test('hard is xhigh on Sonnet 5.5 and Haiku 5.5 and high on Opus 5.5; a failed p
   expect(sent).toEqual(['xhigh', 'xhigh', 'high', 'xhigh', 'xhigh'])
 
   const log = (await $.command.run({ command: 'effort-log', ...COMMAND })).text ?? ''
-  expect(log).toContain('#5        0  대체 xhigh')
+  expect(log).toContain('#5        0  fallback xhigh')
   expect(log).toContain('마지막 auto 판정: 제때 오지 않아 xhigh로 보냄')
 })
 
@@ -181,7 +181,7 @@ test('a model without a row: the request goes out at the engine effort without w
   const log = (await $.command.run({ command: 'effort-log', ...COMMAND })).text ?? ''
   // The table's last line; the command adds the limits after a blank line.
   expect(log.split('\n\n').at(-2)?.split('\n').at(-1)).toBe('마지막 auto 판정: claude-opus-5은 기준표에 없어 엔진 설정으로 보냄')
-  expect(log).toContain('#1        0  엔진 xhigh')
+  expect(log).toContain('#1        0  engine xhigh')
   await band.unmount()
 })
 
@@ -218,7 +218,7 @@ test("the autoEffort option turns auto on for a new session; a failed pick sends
   expect(standIn.completions).toHaveLength(3)
 
   const log = (await $.command.run({ command: 'effort-log', ...COMMAND })).text ?? ''
-  expect(log).toContain('#3        1  대체 high')
+  expect(log).toContain('#3        1  fallback high')
   expect(log).toContain('마지막 auto 판정: 제때 오지 않아 high로 보냄')
 })
 

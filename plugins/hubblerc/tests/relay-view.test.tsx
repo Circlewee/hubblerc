@@ -94,7 +94,7 @@ test('a gate warning stays beneath the result line', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
   const ui = await $.ui.mount({ ...RESULT, props: result('A-r1: running · subagent x\n보낸 brief 사본: /x\n⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침') })
-  expect((await ui.find({ type: 'Text', text: /도는 중/ }))?.text).toBe('도는 중')
+  expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('running')
   expect((await ui.find({ type: 'Text', text: /⚠ relay/ }))?.text).toBe('⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침')
   await ui.unmount()
 })
@@ -164,18 +164,17 @@ test('abandon is drawn as one call line and one result line; short report and ch
   expect((await reported.find({ type: 'Text', text: /DONE/ }))?.text).toBe('DONE · 범위 밖 0 · 테스트 변경 0 · 경고 0')
   await reported.unmount()
 
-  const checked = await $.ui.mount({ ...RESULT, requestId: 'toolu_3', props: result('A-r2 검사 결과(HEAD b457a7d): pass 4 (C1 C2 C3 C9) · 미확인 1 (C10 명령 없음) · 트리 깨끗함 · 16.2초') })
-  expect((await checked.find({ type: 'Text', text: /pass/ }))?.text).toBe('pass 4 · fail 0 · 미확인 1 · 16.2초 · 트리 깨끗함')
+  const checked = await $.ui.mount({ ...RESULT, requestId: 'toolu_3', props: result('A-r2 검사 결과(HEAD b457a7d): pass 4 (C1 C2 C3 C9) · unverified 1 (C10 명령 없음) · 트리 깨끗함 · 16.2초') })
+  expect((await checked.find({ type: 'Text', text: /pass/ }))?.text).toBe('pass 4 · fail 0 · unverified 1 · 16.2초 · 트리 깨끗함')
   await checked.unmount()
 })
 
-test('a result row begins with an arrow, not the engine’s hook, and states are in Korean', async ($, on) => {
+test('a result row begins with an arrow, not the engine’s hook, and states are said as the run holds them', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
   const ui = await $.ui.mount({ ...RESULT, props: result('A-r1: running → cancelled · gave up\n보낸 brief 사본: /x') })
-  expect((await ui.find({ type: 'Text', text: /도는 중/ }))?.text).toBe('도는 중 → 취소')
+  expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('running → cancelled')
   expect((await ui.find({ type: 'Text', text: /↳/ }))?.text).toBe('  ↳ ')
   expect(await ui.find({ type: 'Text', text: /⎿/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /running|cancelled/ })).toBeUndefined()
   await ui.unmount()
 })

@@ -660,7 +660,7 @@ async function specTextAction($: EngineInterface, input: Record<string, unknown>
   const checked = checkTask(empty, brief)
   if (checked.denials.length > 0) return { deny: checked.denials.join('\n') }
   const root = await repoRoot($)
-  const base = (root === undefined ? undefined : await headSha($, root)) ?? '미확인'
+  const base = (root === undefined ? undefined : await headSha($, root)) ?? 'unknown'
   const lead = await $.session.id().catch(() => '')
 
   return { result: briefText(brief, { kind: 'light', base, lead }) }
@@ -933,7 +933,7 @@ function snapshotProblems(before: Snapshot, after: Snapshot): string[] {
     const appeared = uncommittedOf(after.changes).filter(path => !was.includes(path))
     if (appeared.length > 0) problems.push(`실행 중 생기거나 바뀐 파일: ${appeared.join(', ')}`)
   }
-  if (before.head === undefined || after.head === undefined || before.head !== after.head) problems.push(`실행 중 HEAD가 바뀜(${before.head?.slice(0, 7) ?? '미확인'} → ${after.head?.slice(0, 7) ?? '미확인'})`)
+  if (before.head === undefined || after.head === undefined || before.head !== after.head) problems.push(`실행 중 HEAD가 바뀜(${before.head?.slice(0, 7) ?? 'unknown'} → ${after.head?.slice(0, 7) ?? 'unknown'})`)
 
   return problems
 }
@@ -986,7 +986,7 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
       outcomes.push({ ...base, command: criterion.command, result: 'unverified', ms: (await $.clock.now()) - at, reason: `${limit / 1000}초 안에 끝나지 않았거나 시작하지 못함: ${String(error)}` })
     }
   }
-  const head = before.head ?? '미확인'
+  const head = before.head ?? 'unknown'
   const tree =
     before.changes === undefined
       ? '작업 트리: git status 실패'
@@ -1018,7 +1018,7 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
   const counts = [
     `pass ${of('pass').length}${of('pass').length === 0 ? '' : ` (${of('pass').map(outcome => outcome.id).join(' ')})`}`,
     ...(of('fail').length === 0 ? [] : [`fail ${of('fail').length} (${of('fail').map(outcome => outcome.id).join(' ')})`]),
-    ...(unverified.length === 0 ? [] : [`미확인 ${unverified.length} (${unverified.map(outcome => (isNoCommand(outcome) ? `${outcome.id} 명령 없음` : outcome.id)).join(', ')})`]),
+    ...(unverified.length === 0 ? [] : [`unverified ${unverified.length} (${unverified.map(outcome => (isNoCommand(outcome) ? `${outcome.id} 명령 없음` : outcome.id)).join(', ')})`]),
   ]
   const lines = [
     `${key} 검사 결과(HEAD ${head.slice(0, 7)}): ${[...counts, treeShort, duration(totalMs)].join(' · ')}`,
@@ -1091,7 +1091,7 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
   if (signed === undefined) return { deny: `git log가 실패해 이 run(Run: ${state.run})의 커밋을 모으지 못했습니다: package를 만들지 않았습니다. 다시 package하세요.` }
 
   const dir = runDir(root, state.run)
-  const head = (await headSha($, root)) ?? '미확인'
+  const head = (await headSha($, root)) ?? 'unknown'
   const entries = await $.fs.list(`${dir}/reviews`).catch(() => [])
   const taken = [
     ...entries.map(entry => /^V(\d+)-package\.md$/.exec(entry.name)?.[1]),
@@ -1274,7 +1274,7 @@ async function verdictAction($: EngineInterface, root: string, state: RelayState
     `verdict 파일: ${path}`,
   ]
   const warnings = [
-    head === undefined || !sameCommit(verdict.commit, head) ? `검증한 커밋과 지금 커밋이 다름: verdict는 ${verdict.commit.slice(0, 7)}, 지금 HEAD는 ${head?.slice(0, 7) ?? '미확인'}` : undefined,
+    head === undefined || !sameCommit(verdict.commit, head) ? `검증한 커밋과 지금 커밋이 다름: verdict는 ${verdict.commit.slice(0, 7)}, 지금 HEAD는 ${head?.slice(0, 7) ?? 'unknown'}` : undefined,
     sameCommit(verdict.commit, pack.head) ? undefined : `verdict의 commit(${verdict.commit.slice(0, 7)})이 package ${id}의 HEAD(${pack.head.slice(0, 7)})와 다릅니다.`,
   ]
 
@@ -1377,7 +1377,7 @@ async function abandonAction($: EngineInterface, root: string, state: RelayState
   const pending = ((await decisions($, root, state)) ?? []).filter(isPending)
 
   const lines = [
-    `run을 버렸습니다: ${state.run} · 남은 커밋 ${left === undefined ? '미확인' : `${left.length}개`}`,
+    `run을 버렸습니다: ${state.run} · 남은 커밋 ${left === undefined ? 'unknown' : `${left.length}개`}`,
     `이유: ${reason}`,
     ...(left === undefined
       ? [`git log가 실패해 이 run(Run: ${state.run})의 커밋을 세지 못했습니다.`]
