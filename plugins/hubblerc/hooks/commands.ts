@@ -55,7 +55,7 @@ export async function registerCommand($: EngineInterface): Promise<void> {
   })
   await $.command.register({
     name: 'relay-status',
-    description: '이 저장소의 안 끝난 relay 묶음: 작업별 상태·모델·실행 환경, 사용자 답을 기다리는 결정, 마지막 판정 (hubblerc)',
+    description: '이 저장소의 안 끝난 relay run: 작업별 상태·모델·실행 환경, 사용자 답을 기다리는 결정, 마지막 verdict (hubblerc)',
     immediate: true,
   })
 }
@@ -68,7 +68,7 @@ export function answerCommands(on: On, layout: Layout): void {
   on('command.run', { command: 'setup' }, async $ => ({ text: await runSetup($).catch((error: unknown) => `hubblerc 설정 점검 실패: ${String(error)}`) }))
   on('command.run', { command: 'relaunch' }, async $ => ({ text: await requestRestart($) }))
   on('command.run', { command: 'todo' }, async ($, e) => ({ text: await runTodoCommand($, e.args).catch((error: unknown) => `할 일을 다루지 못했습니다: ${String(error)}`) }))
-  on('command.run', { command: 'relay-status' }, async $ => ({ text: await relayStatusText($).catch((error: unknown) => `relay 묶음을 읽지 못했습니다: ${String(error)}`) }))
+  on('command.run', { command: 'relay-status' }, async $ => ({ text: await relayStatusText($).catch((error: unknown) => `relay run을 읽지 못했습니다: ${String(error)}`) }))
   on('command.run', { command: 'panel' }, async ($, e) => {
     const text = await toggleSidebar($, layout, e.presentation)
 

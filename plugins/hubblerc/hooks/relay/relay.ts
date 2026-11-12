@@ -157,7 +157,7 @@ async function summarize($: EngineInterface, root: string | undefined, active: r
  */
 export async function relayStatusText($: EngineInterface): Promise<string> {
   const root = await repoRoot($)
-  if (root === undefined) return '세션의 작업 폴더가 git 저장소가 아니어서 relay 묶음이 없습니다(relay 기록은 저장소 루트의 .relay/runs/에 둡니다).'
+  if (root === undefined) return '세션의 작업 폴더가 git 저장소가 아니어서 relay run이 없습니다(relay 기록은 저장소 루트의 .relay/runs/에 둡니다).'
   const runs = await findRuns($, root)
   const shown = await summarize($, root, runs.filter(found => found.state.status === 'active'))
   await setRuns($, shown).catch(() => undefined)
@@ -440,7 +440,7 @@ function criteriaFrom(value: unknown): Criterion[] | string {
 /** A brief's fields from the call, or why they are wrong. */
 function briefFrom(input: Record<string, unknown>): BriefInput | string {
   const id = text(input.id)
-  if (!TASK_ID.test(id)) return 'id는 영문자로 시작하고 영문자·숫자·_·.만 쓴 20자 이하여야 합니다(예: T3). -는 판 번호(-r2)와 헷갈려 쓰지 않습니다.'
+  if (!TASK_ID.test(id)) return 'id는 영문자로 시작하고 영문자·숫자·_·.만 쓴 20자 이하여야 합니다(예: T3). -는 revision 번호(-r2)와 헷갈려 쓰지 않습니다.'
   const lists = { editScope: stringList(input.edit_scope), reads: stringList(input.reads), targets: stringList(input.targets), readFirst: stringList(input.read_first) }
   for (const [name, list] of Object.entries(lists)) if (list === null) return `${name}은 문자열 배열이어야 합니다.`
   const criteria = criteriaFrom(input.done_when)
@@ -471,12 +471,12 @@ const withWarnings = (lines: readonly string[], warnings: readonly (string | und
   return [...lines, ...(shown.length === 0 ? [] : ['', '경고:', ...shown.map(warning => `- ${warning}`)])].join('\n')
 }
 
-const STATE_GONE = (root: string, run: string) => `묶음이 없거나 state.json을 읽지 못했습니다: ${runDir(root, run)}`
-const ABANDONED = (run: string) => `이미 버린 묶음입니다: ${run}`
+const STATE_GONE = (root: string, run: string) => `run이 없거나 state.json을 읽지 못했습니다: ${runDir(root, run)}`
+const ABANDONED = (run: string) => `이미 버린 run입니다: ${run}`
 
 /** Why a run takes no launch: finished or abandoned; undefined while it is active. */
 const closedRun = (state: RelayState): string | undefined =>
-  state.status === 'finished' ? `이미 끝난 묶음입니다: ${state.run}` : state.status === 'abandoned' ? ABANDONED(state.run) : undefined
+  state.status === 'finished' ? `이미 끝난 run입니다: ${state.run}` : state.status === 'abandoned' ? ABANDONED(state.run) : undefined
 
 // ── Actions ──────────────────────────────────────────────
 
@@ -512,7 +512,7 @@ export async function answerRelayTool($: EngineInterface, input: Record<string, 
     const state = await readState($, root, run)
     if (state === undefined) return { deny: STATE_GONE(root, run) }
     const isClosing = action === 'task' || action === 'cancel' || action === 'report' || action === 'finish' || action === 'abandon'
-    if (isClosing && state.status === 'finished') return { deny: `이미 끝난 묶음입니다: ${run}` }
+    if (isClosing && state.status === 'finished') return { deny: `이미 끝난 run입니다: ${run}` }
     // An abandoned run takes nothing that writes to it or runs a command (check, above, neither); pending only reads it.
     if (action !== 'pending' && state.status === 'abandoned') return { deny: ABANDONED(run) }
     switch (action) {
@@ -545,13 +545,13 @@ async function startAction($: EngineInterface, root: string, input: Record<strin
     .map(item => (typeof item === 'string' ? item : text((item as Record<string, unknown> | null)?.text)))
     .map(item => item.trim())
     .filter(item => item !== '')
-  if (doneWhen.length === 0) return { deny: 'done_when이 비었습니다: 묶음의 완료 기준을 하나 이상 적으세요.' }
+  if (doneWhen.length === 0) return { deny: 'done_when이 비었습니다: run의 완료 기준을 하나 이상 적으세요.' }
   const now = await $.clock.now()
   const run = `${localDate(now)}-${name}`
 
   return withRunLock(root, run, async () => {
     const dir = runDir(root, run)
-    if (await $.fs.exists(dir).catch(() => false)) return { deny: `같은 묶음이 이미 있습니다: ${dir}. 이어받으려면 그 run을 쓰고, 새로 시작하려면 다른 name을 고르세요.` }
+    if (await $.fs.exists(dir).catch(() => false)) return { deny: `같은 run이 이미 있습니다: ${dir}. 이어받으려면 그 run을 쓰고, 새로 시작하려면 다른 name을 고르세요.` }
     const base = await headSha($, root)
     if (base === undefined) return { deny: 'git rev-parse HEAD가 실패했습니다: 커밋이 하나도 없는 저장소인지 보세요.' }
     const lead = await $.session.id().catch(() => '')
@@ -563,13 +563,13 @@ async function startAction($: EngineInterface, root: string, input: Record<strin
     await $.fs.write(`${dir}/reviews/verdict.schema.json`, `${JSON.stringify(VERDICT_SCHEMA, null, 2)}\n`)
     await writeState($, root, state, progress)
 
-    return { result: [`묶음을 시작했습니다: ${run}`, `폴더: ${dir}`, `진행 기록: ${dir}/progress.md`, `Base: ${base}`].join('\n') }
+    return { result: [`run을 시작했습니다: ${run}`, `폴더: ${dir}`, `진행 기록: ${dir}/progress.md`, `Base: ${base}`].join('\n') }
   })
 }
 
 async function listAction($: EngineInterface, root: string): Promise<Answer> {
   const runs = await findActiveRuns($, root)
-  if (runs.length === 0) return { result: `이 저장소에 진행 중인 묶음이 없습니다(${root}/${RUN_PREFIX}).` }
+  if (runs.length === 0) return { result: `이 저장소에 진행 중인 run이 없습니다(${root}/${RUN_PREFIX}).` }
   const lines = runs.map(({ run, dir, state }) => {
     const counts = TASK_STATUSES.map(status => [status, state.tasks.filter(task => task.status === status).length] as const)
       .filter(([, count]) => count > 0)
@@ -577,9 +577,9 @@ async function listAction($: EngineInterface, root: string): Promise<Answer> {
 
     return `- ${run} · 목표: ${state.goal.replace(/\s+/g, ' ')} · 작업 ${state.tasks.length}개${counts.length === 0 ? '' : `(${counts.join(', ')})`} · ${dir}`
   })
-  const note = runs.length > 1 ? ['', '여럿입니다: 어느 묶음을 이어받을지 사용자에게 물으세요.'] : []
+  const note = runs.length > 1 ? ['', '여럿입니다: 어느 run을 이어받을지 사용자에게 물으세요.'] : []
 
-  return { result: [`진행 중인 묶음 ${runs.length}개:`, ...lines, ...note].join('\n') }
+  return { result: [`진행 중인 run ${runs.length}개:`, ...lines, ...note].join('\n') }
 }
 
 async function taskAction($: EngineInterface, root: string, state: RelayState, input: Record<string, unknown>): Promise<Answer> {
@@ -613,7 +613,7 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
   for (const task of earlier) {
     if (!isBusy(task) && (task.status === 'ready' || task.status === 'needs_context' || task.status === 'blocked')) {
       task.status = 'cancelled'
-      task.cancelReason = `새 판 ${key}가 이어받음`
+      task.cancelReason = `새 revision ${key}가 이어받음`
       superseded.push(taskKey(task))
     }
   }
@@ -641,11 +641,11 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
   return {
     result: withWarnings(
       [
-        `지시서: ${specPath}`,
+        `brief: ${specPath}`,
         `보고서 자리: ${reportTo}`,
-        '띄울 때 이 파일을 지시서로 주세요(Orca: --spec-file, 서브에이전트: 프롬프트에 경로와 함께 내용).',
-        'Orca worker-start·send, 서브에이전트 생성·SendMessage로 띄우면 hubblerc 관문이 검사·기록합니다. 관문이 기록하지 못했다고 하면 dispatched를 부르세요.',
-        ...(superseded.length === 0 ? [] : [`앞 판을 취소로 바꿨습니다: ${superseded.join(', ')}(새 판을 워커에게 알리세요).`]),
+        '띄울 때 이 파일을 brief로 주세요(Orca: --spec-file, 서브에이전트: 프롬프트에 경로와 함께 내용).',
+        'Orca worker-start·send, 서브에이전트 생성·SendMessage로 띄우면 hubblerc gate가 검사·기록합니다. gate가 기록하지 못했다고 하면 dispatched를 부르세요.',
+        ...(superseded.length === 0 ? [] : [`앞 revision을 취소로 바꿨습니다: ${superseded.join(', ')}(새 revision을 워커에게 알리세요).`]),
         ...(previous === undefined ? [] : [`tries 이어 받음: ${carried.carried.join(', ') || '없음'} · 0부터 셈: ${carried.fresh.join(', ') || '없음'}`]),
       ],
       [...checked.warnings, redrawn],
@@ -686,9 +686,9 @@ async function writeSentCopy($: EngineInterface, root: string, state: RelayState
 /** The brief as it stands, and why it is not the one `task` wrote (undefined when it is). */
 async function briefNow($: EngineInterface, task: RelayTask): Promise<{ text: string; hash: string } | { problem: string }> {
   const text = await readText($, task.specPath)
-  if (text === undefined) return { problem: `지시서 파일이 없습니다: ${task.specPath}` }
+  if (text === undefined) return { problem: `brief 파일이 없습니다: ${task.specPath}` }
   const hash = await sha256($, text)
-  if (hash !== task.specHash) return { problem: `${taskKey(task)}의 지시서가 task로 쓴 뒤에 바뀌었습니다. 보낸 지시서는 고치지 말고 task로 새 판을 만드세요.` }
+  if (hash !== task.specHash) return { problem: `${taskKey(task)}의 brief가 task로 쓴 뒤에 바뀌었습니다. 보낸 brief는 고치지 말고 task로 새 revision을 만드세요.` }
 
   return { text, hash }
 }
@@ -717,7 +717,7 @@ async function setBlocked($: EngineInterface, root: string, state: RelayState, t
   await save($, root, state)
 
   return {
-    deny: `${taskKey(task)}를 blocked로 두었습니다(${LIVE_BLOCKED}): ${reason} 워커(${runner})는 떠 있을 수 있어 이 작업이 파일을 계속 점유합니다. 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주고, 그다음 task로 새 판을 만드세요.`,
+    deny: `${taskKey(task)}를 blocked로 두었습니다(${LIVE_BLOCKED}): ${reason} 워커(${runner})는 떠 있을 수 있어 이 작업이 파일을 계속 점유합니다. 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주고, 그다음 task로 새 revision을 만드세요.`,
   }
 }
 
@@ -735,7 +735,7 @@ export async function markDispatched($: EngineInterface, root: string, run: stri
     if (closed !== undefined) return { deny: closed }
     const task = findTask(state, name)
     if (task === undefined) return { deny: `작업이 없습니다: ${name}(${run})` }
-    if (task.status !== 'ready') return { deny: `${taskKey(task)}는 ${task.status} 상태라 running으로 바꾸지 않습니다(ready인 판만). 새로 보낼 것이면 task로 새 판을 만드세요.` }
+    if (task.status !== 'ready') return { deny: `${taskKey(task)}는 ${task.status} 상태라 running으로 바꾸지 않습니다(ready인 revision만). 새로 보낼 것이면 task로 새 revision을 만드세요.` }
     const brief = await briefNow($, task)
     if ('problem' in brief) return setBlocked($, root, state, task, runner, brief.problem)
     const overlaps = overlapWarnings(state, task)
@@ -743,7 +743,7 @@ export async function markDispatched($: EngineInterface, root: string, run: stri
     task.dispatchedHash = brief.hash
     const redrawn = await setRunning($, root, state, task, runner)
 
-    return { result: withWarnings([`${taskKey(task)}: running · ${runner}`, `보낸 지시서 사본: ${copy}`], [...overlaps, redrawn]) }
+    return { result: withWarnings([`${taskKey(task)}: running · ${runner}`, `보낸 brief 사본: ${copy}`], [...overlaps, redrawn]) }
   })
 }
 
@@ -773,7 +773,7 @@ export async function reserveDispatch($: EngineInterface, root: string, run: str
     const task = findTask(state, name)
     if (task === undefined) return { deny: `작업이 없습니다: ${name}(${run})` }
     const key = taskKey(task)
-    if (task.status !== 'ready') return { deny: `${key}는 ${task.status} 상태라 띄우지 않습니다(ready인 판만).` }
+    if (task.status !== 'ready') return { deny: `${key}는 ${task.status} 상태라 띄우지 않습니다(ready인 revision만).` }
     const overlaps = overlapWarnings(state, task)
     if (overlaps.length > 0) return { deny: overlaps.join('\n') }
     const brief = await briefNow($, task)
@@ -800,7 +800,7 @@ export async function reserveDispatch($: EngineInterface, root: string, run: str
           // The brief as fixed at the reservation is what went out; one changed since is not to be trusted.
           const text = await readText($, held.found.specPath)
           const hash = text === undefined ? undefined : await sha256($, text)
-          if (hash !== brief.hash) return setBlocked($, root, held.now, held.found, runner, `띄우는 동안 지시서가 바뀌었습니다(예약 때와 해시가 다름: ${held.found.specPath}).`)
+          if (hash !== brief.hash) return setBlocked($, root, held.now, held.found, runner, `띄우는 동안 brief가 바뀌었습니다(예약 때와 해시가 다름: ${held.found.specPath}).`)
 
           return { result: withWarnings([`${key}: running · ${runner}`], [await setRunning($, root, held.now, held.found, runner)]) }
         }),
@@ -824,7 +824,7 @@ async function cancelAction($: EngineInterface, root: string, state: RelayState,
   const reason = text(input.reason)
   if (reason === '') return { deny: 'reason이 비었습니다: 왜 띄우지 않는지 적으세요.' }
   if (task.status === 'cancelled') return { deny: `${key}는 이미 취소됐습니다.` }
-  if (isDone(task)) return { deny: `${key}는 끝난 작업(${task.status})이라 취소하지 않습니다: 그 커밋은 검증 꾸러미에 들어갑니다.` }
+  if (isDone(task)) return { deny: `${key}는 끝난 작업(${task.status})이라 취소하지 않습니다: 그 커밋은 검증 package에 들어갑니다.` }
   if (isBusy(task) && input.confirmed_stopped !== true) {
     return { deny: `${key}는 ${statusLabel(task)} 상태입니다${task.runner === null ? '' : `(${task.runner})`}: 워커가 멈춘 것을 확인한 뒤 confirmed_stopped: true를 주세요.` }
   }
@@ -854,16 +854,16 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
   const warnings: (string | undefined)[] = []
   const short = report.commits.filter(sha => !/^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(sha))
   if (short.length > 0) warnings.push(`전체 SHA가 아닌 커밋: ${short.join(', ')}`)
-  if (look.unsigned.length > 0) warnings.push(`꼬리말 Task: ${key}가 없는 커밋: ${look.unsigned.join(', ')}`)
+  if (look.unsigned.length > 0) warnings.push(`trailer Task: ${key}가 없는 커밋: ${look.unsigned.join(', ')}`)
   for (const criterion of report.criteria) {
     if (criterion.tries === null) continue
     const before = task.tries[criterion.id]
-    if (before !== undefined && criterion.tries < before) warnings.push(`${criterion.id}의 tries가 ${before}에서 ${criterion.tries}로 줄었습니다(판을 넘어 누적해야 함).`)
+    if (before !== undefined && criterion.tries < before) warnings.push(`${criterion.id}의 tries가 ${before}에서 ${criterion.tries}로 줄었습니다(revision을 넘어 누적해야 함).`)
     task.tries[criterion.id] = Math.max(before ?? 0, criterion.tries)
     if (criterion.tries > 3) warnings.push(`${criterion.id}의 tries가 ${criterion.tries}입니다(누적 3번까지).`)
   }
   const spec = await readText($, task.specPath)
-  if (spec === undefined || (await sha256($, spec)) !== (task.dispatchedHash ?? task.specHash)) warnings.push('지시서가 보낸 뒤에 바뀌었거나 없습니다: 워커가 본 지시서와 다를 수 있습니다.')
+  if (spec === undefined || (await sha256($, spec)) !== (task.dispatchedHash ?? task.specHash)) warnings.push('brief가 보낸 뒤에 바뀌었거나 없습니다: 워커가 본 brief와 다를 수 있습니다.')
 
   // The effort it ran at: what hubblerc signed its commits with, else what the report itself says.
   const signed: string[] = []
@@ -899,7 +899,7 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
     ...(tried.length === 0 ? [] : [`tries: ${tried.join(', ')}`]),
     ...(look.outside.length === 0 ? [] : [`범위 밖 파일: ${look.outside.join(', ')}`]),
     ...(look.tests.length === 0 ? [] : [`테스트·검사 파일 변경: ${look.tests.join(', ')}`]),
-    ...(ran === undefined || ran === task.effort.trim().toLowerCase() ? [] : [`effort: 지시서 ${task.effort} · 실제 ${ran}(${signed.length > 0 ? '커밋 꼬리말' : '보고서'})`]),
+    ...(ran === undefined || ran === task.effort.trim().toLowerCase() ? [] : [`effort: brief ${task.effort} · 실제 ${ran}(${signed.length > 0 ? '커밋 trailer' : '보고서'})`]),
     // The report is to be read when it is not a plain DONE (concerns, a question), or when it disagrees.
     ...(report.status !== 'DONE' || mismatches.length > 0 ? [`보고서: ${path}`] : []),
     ...(mismatches.length === 0 ? [] : ['', '보고서 불일치(워커에게 고쳐 달라고 하세요):', ...mismatches.map(problem => `- ${problem}`)]),
@@ -949,7 +949,7 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
   // the result file it reads the state again and stops there. A command already running ends first.
   let commandsRun = 0
   const stopped = async (): Promise<{ deny: string } | undefined> =>
-    (await readState($, root, state.run))?.status === 'abandoned' ? { deny: `검사 도중 묶음이 버려져 멈췄습니다: ${state.run}(기준 명령 ${commandsRun}개를 돌린 뒤, 결과 파일은 쓰지 않음)` } : undefined
+    (await readState($, root, state.run))?.status === 'abandoned' ? { deny: `검사 도중 run이 버려져 멈췄습니다: ${state.run}(기준 명령 ${commandsRun}개를 돌린 뒤, 결과 파일은 쓰지 않음)` } : undefined
   for (const criterion of task.criteria) {
     const expectExit = criterion.expectExit ?? 0
     const base = { id: criterion.id, text: criterion.text, expectExit }
@@ -1039,19 +1039,19 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
 async function sentBrief($: EngineInterface, root: string, state: RelayState, task: RelayTask): Promise<{ text: string; note?: string } | { problem: string }> {
   const key = taskKey(task)
   const spec = await readText($, task.specPath)
-  if (spec === undefined) return { problem: `${key}: 지시서 파일이 없습니다(${task.specPath})` }
+  if (spec === undefined) return { problem: `${key}: brief 파일이 없습니다(${task.specPath})` }
   const hash = await sha256($, spec)
   if (task.dispatchedHash === undefined) {
-    if (hash !== task.specHash) return { problem: `${key}: 지시서가 쓴 뒤에 바뀌었습니다(보낸 기록 없음). 새 판으로 다시 보내세요.` }
+    if (hash !== task.specHash) return { problem: `${key}: brief가 쓴 뒤에 바뀌었습니다(보낸 기록 없음). 새 revision으로 다시 보내세요.` }
 
-    return { text: spec, note: '보낸 기록(dispatched)이 없어 쓴 때의 지시서를 담음' }
+    return { text: spec, note: '보낸 기록(dispatched)이 없어 쓴 때의 brief를 담음' }
   }
-  if (hash !== task.dispatchedHash) return { problem: `${key}: 지시서가 보낸 뒤에 바뀌었습니다(dispatched 때와 해시가 다름). 보낸 지시서는 고치지 말고 새 판으로.` }
+  if (hash !== task.dispatchedHash) return { problem: `${key}: brief가 보낸 뒤에 바뀌었습니다(dispatched 때와 해시가 다름). 보낸 brief는 고치지 말고 새 revision으로.` }
   const copyPath = dispatchedFile(runDir(root, state.run), key)
   const copy = await readText($, copyPath)
-  if (copy === undefined || (await sha256($, copy)) !== task.dispatchedHash) return { problem: `${key}: 보낸 지시서 사본이 없거나 바뀌었습니다(${copyPath}).` }
+  if (copy === undefined || (await sha256($, copy)) !== task.dispatchedHash) return { problem: `${key}: 보낸 brief 사본이 없거나 바뀌었습니다(${copyPath}).` }
 
-  if (task.dispatchedHash !== task.specHash) return { problem: `${key}: 보낸 지시서 사본이 task로 쓴 원본과 다릅니다(보내기 전에 고친 지시서). 새 판으로 다시 보내세요.` }
+  if (task.dispatchedHash !== task.specHash) return { problem: `${key}: 보낸 brief 사본이 task로 쓴 원본과 다릅니다(보내기 전에 고친 brief). 새 revision으로 다시 보내세요.` }
 
   return { text: copy }
 }
@@ -1073,10 +1073,10 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     // Every task done as it stands: finish asks the last verdict's package to hold them all.
     chosen = effectiveTasks(state.tasks).filter(isDone)
   }
-  if (chosen.length === 0) return { deny: '꾸러미에 넣을 작업이 없습니다: done인 작업이 없습니다. tasks로 직접 고르세요.' }
+  if (chosen.length === 0) return { deny: 'package에 넣을 작업이 없습니다: done인 작업이 없습니다. tasks로 직접 고르세요.' }
 
   const changes = await treeChanges($, root)
-  if (changes === undefined) return { deny: 'git status를 읽지 못해 작업 트리를 확인하지 못했습니다: 꾸러미를 만들지 않았습니다.' }
+  if (changes === undefined) return { deny: 'git status를 읽지 못해 작업 트리를 확인하지 못했습니다: package를 만들지 않았습니다.' }
   const uncommitted = uncommittedOf(changes)
   if (uncommitted.length > 0) return { deny: `작업 트리에 커밋하지 않은 변경·git이 모르는 파일이 있습니다: ${uncommitted.join(', ')}. 검증자는 커밋만 봅니다: 커밋하거나 치운 뒤 package하세요.` }
   const briefs = new Map<RelayTask, { text: string; note?: string }>()
@@ -1086,9 +1086,9 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     if ('problem' in brief) problems.push(brief.problem)
     else briefs.set(task, brief)
   }
-  if (problems.length > 0) return { deny: ['꾸러미를 만들지 않았습니다:', ...problems.map(problem => `- ${problem}`)].join('\n') }
+  if (problems.length > 0) return { deny: ['package를 만들지 않았습니다:', ...problems.map(problem => `- ${problem}`)].join('\n') }
   const signed = await runCommits($, root, state)
-  if (signed === undefined) return { deny: `git log가 실패해 이 묶음(Run: ${state.run})의 커밋을 모으지 못했습니다: 꾸러미를 만들지 않았습니다. 다시 package하세요.` }
+  if (signed === undefined) return { deny: `git log가 실패해 이 run(Run: ${state.run})의 커밋을 모으지 못했습니다: package를 만들지 않았습니다. 다시 package하세요.` }
 
   const dir = runDir(root, state.run)
   const head = (await headSha($, root)) ?? '미확인'
@@ -1140,9 +1140,9 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     const lines = [
       `#### ${key} (${rev.status}${rev.cancelReason === undefined ? '' : `: ${rev.cancelReason}`}${rev.blockReason === undefined ? '' : `: ${rev.blockReason}`})${reportText === undefined ? ' — 보고서 없음' : ''}`,
       ...(listed.length === 0 ? ['- 커밋 없음'] : listed),
-      ...(unreported.length === 0 ? [] : [`- 보고에 없고 꼬리말(Task: ${key}, Run: ${state.run})로 찾은 커밋: ${unreported.join(', ')}`]),
+      ...(unreported.length === 0 ? [] : [`- 보고에 없고 trailer(Task: ${key}, Run: ${state.run})로 찾은 커밋: ${unreported.join(', ')}`]),
       ...(look.missing.length === 0 ? [] : [`- 없는 커밋: ${look.missing.join(', ')}`]),
-      ...(look.unsigned.length === 0 ? [] : [`- 꼬리말 Task: ${key}가 없는 커밋: ${look.unsigned.join(', ')}`]),
+      ...(look.unsigned.length === 0 ? [] : [`- trailer Task: ${key}가 없는 커밋: ${look.unsigned.join(', ')}`]),
       ...(look.offBase.length === 0 ? [] : [`- Base(${state.base.slice(0, 7)})의 자손이 아닌 커밋: ${look.offBase.join(', ')}`]),
     ]
 
@@ -1219,7 +1219,7 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
   }
   if (other.length > 0) parts.push('', '## Other commits of this run', 'Commits of this run outside the tasks of this package. A cancel reverts no code: review these files too.', ...other)
 
-  if (listFailures.length > 0) return { deny: ['커밋이 바꾼 파일 목록을 확실히 읽지 못해 꾸러미를 만들지 않았습니다(검토할 파일이 빠질 수 있음). 다시 package하세요:', ...listFailures.map(failure => `- ${failure}`)].join('\n') }
+  if (listFailures.length > 0) return { deny: ['커밋이 바꾼 파일 목록을 확실히 읽지 못해 package를 만들지 않았습니다(검토할 파일이 빠질 수 있음). 다시 package하세요:', ...listFailures.map(failure => `- ${failure}`)].join('\n') }
 
   const at = await $.clock.now()
   const files = [...new Set(fileChanges.map(change => change.path))].sort()
@@ -1240,7 +1240,7 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
 
   return {
     result: withWarnings(
-      [`검증 꾸러미 ${id}: ${packagePath}`, `판정 파일: ${verdictPath}`, `판정 형식: ${schemaPath}`, `담은 작업: ${chosen.map(taskKey).join(', ')} · HEAD ${head.slice(0, 7)} · 검토할 파일 ${files.length}개`],
+      [`검증 package ${id}: ${packagePath}`, `verdict 파일: ${verdictPath}`, `verdict 형식: ${schemaPath}`, `담은 작업: ${chosen.map(taskKey).join(', ')} · HEAD ${head.slice(0, 7)} · 검토할 파일 ${files.length}개`],
       warnings,
     ),
   }
@@ -1249,15 +1249,15 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
 async function verdictAction($: EngineInterface, root: string, state: RelayState, id: string): Promise<Answer> {
   if (!/^V\d+$/.test(id)) return { deny: 'id는 V1처럼 package가 돌려준 번호여야 합니다.' }
   const pack = state.packages?.find(other => other.id === id)
-  if (pack === undefined) return { deny: `꾸러미 ${id}의 기록이 없습니다: package가 만든 꾸러미의 판정만 받습니다.` }
+  if (pack === undefined) return { deny: `package ${id}의 기록이 없습니다: package가 만든 package의 verdict만 받습니다.` }
   const path = `${runDir(root, state.run)}/reviews/${id}-verdict.json`
   const raw = await readText($, path)
-  if (raw === undefined) return { deny: `판정 파일이 없습니다: ${path}` }
+  if (raw === undefined) return { deny: `verdict 파일이 없습니다: ${path}` }
   const parsed = parseVerdict(raw)
-  if ('problems' in parsed) return { deny: [`판정 형식이 틀렸습니다(${path}):`, ...parsed.problems.map(problem => `- ${problem}`)].join('\n') }
+  if ('problems' in parsed) return { deny: [`verdict 형식이 틀렸습니다(${path}):`, ...parsed.problems.map(problem => `- ${problem}`)].join('\n') }
   const { verdict } = parsed
   const judged = judgeVerdict(verdict, pack)
-  if (judged.problems.length > 0) return { deny: [`판정이 꾸러미 ${id}의 기준과 맞지 않습니다(${path}):`, ...judged.problems.map(problem => `- ${problem}`)].join('\n') }
+  if (judged.problems.length > 0) return { deny: [`verdict가 package ${id}의 기준과 맞지 않습니다(${path}):`, ...judged.problems.map(problem => `- ${problem}`)].join('\n') }
   const at = await $.clock.now()
   state.verdicts = [...state.verdicts.filter(other => other.id !== id), { id, at, commit: verdict.commit, path, result: judged.result, ...(judged.reasons.length === 0 ? {} : { reasons: judged.reasons }) }]
   await writeState($, root, state)
@@ -1267,15 +1267,15 @@ async function verdictAction($: EngineInterface, root: string, state: RelayState
   const severity = (level: string) => verdict.findings.filter(finding => finding.severity === level).length
   const notPassed = verdict.criteria.filter(criterion => criterion.result !== 'pass').map(criterion => `${criterion.id}(${criterion.result})`)
   const lines = [
-    `판정 ${id}: 기록 ${judged.result} (판정 파일의 result ${verdict.result}) · 검증 모델 ${verdict.model} · 본 커밋 ${verdict.commit.slice(0, 7)}`,
+    `verdict ${id}: 기록 ${judged.result} (verdict 파일의 result ${verdict.result}) · 검증 모델 ${verdict.model} · 본 커밋 ${verdict.commit.slice(0, 7)}`,
     ...(judged.reasons.length === 0 ? [] : [`fail로 기록한 이유: ${judged.reasons.join('; ')}`]),
     `기준: pass ${count('pass')} · fail ${count('fail')} · unverified ${count('unverified')}${notPassed.length === 0 ? '' : ` (${notPassed.join(', ')})`}`,
     `지적: high ${severity('high')} · medium ${severity('medium')} · low ${severity('low')}`,
-    `판정 파일: ${path}`,
+    `verdict 파일: ${path}`,
   ]
   const warnings = [
-    head === undefined || !sameCommit(verdict.commit, head) ? `검증한 판과 지금 판이 다름: 판정은 ${verdict.commit.slice(0, 7)}, 지금 HEAD는 ${head?.slice(0, 7) ?? '미확인'}` : undefined,
-    sameCommit(verdict.commit, pack.head) ? undefined : `판정의 commit(${verdict.commit.slice(0, 7)})이 꾸러미 ${id}의 HEAD(${pack.head.slice(0, 7)})와 다릅니다.`,
+    head === undefined || !sameCommit(verdict.commit, head) ? `검증한 커밋과 지금 커밋이 다름: verdict는 ${verdict.commit.slice(0, 7)}, 지금 HEAD는 ${head?.slice(0, 7) ?? '미확인'}` : undefined,
+    sameCommit(verdict.commit, pack.head) ? undefined : `verdict의 commit(${verdict.commit.slice(0, 7)})이 package ${id}의 HEAD(${pack.head.slice(0, 7)})와 다릅니다.`,
   ]
 
   return { result: withWarnings(lines, warnings) }
@@ -1302,7 +1302,7 @@ async function finishAction($: EngineInterface, root: string, state: RelayState)
   const head = await headSha($, root)
   const changes = await treeChanges($, root)
   const reasons = finishProblems(state, head, changes === undefined ? undefined : uncommittedOf(changes))
-  if (reasons.length > 0) return { deny: ['묶음을 끝내지 않았습니다:', ...reasons.map(reason => `- ${reason}`)].join('\n') }
+  if (reasons.length > 0) return { deny: ['run을 끝내지 않았습니다:', ...reasons.map(reason => `- ${reason}`)].join('\n') }
 
   const last = state.verdicts.at(-1)
   state.status = 'finished'
@@ -1311,7 +1311,7 @@ async function finishAction($: EngineInterface, root: string, state: RelayState)
   const pending = rows.filter(isPending)
   const byLead = rows.filter(isByLead)
   const lines = [
-    `묶음을 끝냈습니다: ${state.run} · 판정 ${last?.id ?? ''} · HEAD ${head?.slice(0, 7) ?? ''}`,
+    `run을 끝냈습니다: ${state.run} · verdict ${last?.id ?? ''} · HEAD ${head?.slice(0, 7) ?? ''}`,
     '',
     `사용자 답을 기다리는 결정(asked·on hold): ${pending.length === 0 ? '없음' : ''}`,
     ...pending.map(decisionLine),
@@ -1356,7 +1356,7 @@ async function commitsLeft($: EngineInterface, root: string, state: RelayState):
  * it. It reverts no code and verifies nothing: the answer lists the commits it leaves in HEAD.
  */
 async function abandonAction($: EngineInterface, root: string, state: RelayState, reason: string): Promise<Answer> {
-  if (reason === '') return { deny: 'reason이 비었습니다: 왜 이 묶음을 버리는지 적으세요.' }
+  if (reason === '') return { deny: 'reason이 비었습니다: 왜 이 run을 버리는지 적으세요.' }
   const holding = state.tasks.filter(isBusy)
   if (holding.length > 0) {
     const named = holding.map(task => `${taskKey(task)}(${statusLabel(task)}${task.runner === null ? '' : ` · ${task.runner}`})`).join(', ')
@@ -1371,16 +1371,16 @@ async function abandonAction($: EngineInterface, root: string, state: RelayState
   const warnings = [await save($, root, state)]
   const path = progressPath(root, state.run)
   const progress = await readText($, path)
-  const logged = progress === undefined ? null : withLogRow(progress, at, `묶음을 버림: ${reason}`)
+  const logged = progress === undefined ? null : withLogRow(progress, at, `run을 버림: ${reason}`)
   if (logged === null) warnings.push(`progress.md의 Log 표가 없어 버린 기록을 적지 못했습니다: ${path}`)
   else await $.fs.write(path, logged)
   const pending = ((await decisions($, root, state)) ?? []).filter(isPending)
 
   const lines = [
-    `묶음을 버렸습니다: ${state.run} · 남은 커밋 ${left === undefined ? '미확인' : `${left.length}개`}`,
+    `run을 버렸습니다: ${state.run} · 남은 커밋 ${left === undefined ? '미확인' : `${left.length}개`}`,
     `이유: ${reason}`,
     ...(left === undefined
-      ? [`git log가 실패해 이 묶음(Run: ${state.run})의 커밋을 세지 못했습니다.`]
+      ? [`git log가 실패해 이 run(Run: ${state.run})의 커밋을 세지 못했습니다.`]
       : left.length === 0
         ? []
         : ['버리기는 코드를 되돌리지 않고, 이 커밋들은 검증된 것도 아닙니다(사용자에게 알리세요):', ...left.map(line => `- ${line}`)]),

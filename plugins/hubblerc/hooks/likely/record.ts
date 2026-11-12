@@ -290,7 +290,7 @@ export function robustnessLines(bins: ReturnType<typeof spreadBins>, variants: R
 
     return `${rounded < 0 ? '−' : '+'}${Math.abs(rounded).toFixed(3)}`
   }
-  const lines = ['퍼짐(호출 값의 최대−최소)별, 정답 붙은 판정', '  퍼짐       건수   정확도    Brier']
+  const lines = ['spread(호출 값의 최대−최소)별, 정답 붙은 판정', '  spread       건수   정확도    Brier']
   for (const bin of bins) lines.push(`  ${bin.label.padEnd(8)}  ${String(bin.count).padStart(5)}   ${bin.count === 0 ? '    -' : `${(bin.accuracy * 100).toFixed(1)}%`.padStart(6)}   ${bin.count === 0 ? '    -' : bin.brier.toFixed(3)}`)
   lines.push('변주별(강건성)')
   lines.push(

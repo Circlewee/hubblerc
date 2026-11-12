@@ -129,7 +129,7 @@ export const isBusy = (task: { status: TaskStatus; workerLive?: true }): boolean
   task.status === 'running' || task.status === 'launching' || (task.status === 'blocked' && task.workerLive === true)
 
 /** Blocked after launch, its worker perhaps still out: what the lead does next. */
-export const LIVE_BLOCKED = '띄운 뒤 막힘: 지시서가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)'
+export const LIVE_BLOCKED = '띄운 뒤 막힘: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)'
 
 /** A task's status as a person reads it: a blocked task whose worker may be at work says so. */
 export const statusLabel = (task: { status: TaskStatus; workerLive?: true }): string => (task.status === 'blocked' && task.workerLive === true ? `blocked (${LIVE_BLOCKED})` : task.status)
@@ -309,7 +309,7 @@ export function checkTask(state: RelayState, input: Omit<BriefInput, 'title' | '
     const report = reportFile(dirOfSpec(done.specPath), taskKey(done))
     const tail = `tasks/${taskKey(done)}-report.md`
     if (!input.readFirst.some(path => path === report || normalPath(path).endsWith(tail))) {
-      warnings.push(`같은 범위를 고친 ${taskKey(done)}가 끝났습니다: 후임 지시서의 read_first에 앞 보고서 ${report}를 넣으세요.`)
+      warnings.push(`같은 범위를 고친 ${taskKey(done)}가 끝났습니다: 후임 brief의 read_first에 앞 보고서 ${report}를 넣으세요.`)
     }
   }
 
@@ -693,7 +693,7 @@ export function reportMismatches(report: ParsedReport, criteria: readonly Criter
   const unknown = [...new Set(seen.filter(id => !wanted.includes(id)))]
   if (missing.length > 0) problems.push(`Criteria에 없는 기준: ${missing.join(', ')}`)
   if (repeated.length > 0) problems.push(`Criteria에 두 번 이상 나온 기준: ${repeated.join(', ')}`)
-  if (unknown.length > 0) problems.push(`지시서에 없는 기준: ${unknown.join(', ')}`)
+  if (unknown.length > 0) problems.push(`brief에 없는 기준: ${unknown.join(', ')}`)
   if (report.status === 'DONE' || report.status === 'DONE_WITH_CONCERNS') {
     const notPassed = report.criteria.filter(criterion => criterion.result !== 'pass').map(criterion => `${criterion.id}(${criterion.result})`)
     if (notPassed.length > 0) problems.push(`${report.status}인데 통과하지 않은 기준: ${notPassed.join(', ')}`)
@@ -931,8 +931,8 @@ export function judgeVerdict(verdict: Verdict, pack: RelayPackage): { problems: 
   const reasons: string[] = []
   const missing = required.filter(id => !verdict.criteria.some(criterion => criterion.id === id))
   const repeated = required.filter(id => verdict.criteria.filter(criterion => criterion.id === id).length > 1)
-  if (missing.length > 0) problems.push(`꾸러미 ${pack.id}가 묻는 기준이 판정에 없음: ${missing.join(', ')}`)
-  if (repeated.length > 0) problems.push(`판정에 두 번 이상 나온 기준: ${repeated.join(', ')}`)
+  if (missing.length > 0) problems.push(`package ${pack.id}가 묻는 기준이 verdict에 없음: ${missing.join(', ')}`)
+  if (repeated.length > 0) problems.push(`verdict에 두 번 이상 나온 기준: ${repeated.join(', ')}`)
   const reviewed = new Set((verdict.reviewed_files ?? []).map(normalReviewed))
   const unread = (pack.files ?? []).filter(path => !reviewed.has(normalReviewed(path)))
   if (unread.length > 0) problems.push(`검토하지 않은 파일(reviewed_files에 없음): ${unread.join(', ')}`)
@@ -940,8 +940,8 @@ export function judgeVerdict(verdict: Verdict, pack: RelayPackage): { problems: 
     const found = verdict.criteria.find(criterion => criterion.id === id)
     if (found !== undefined && found.result !== 'pass') reasons.push(`${id}: ${found.result}`)
   }
-  if (verdict.result === 'fail') reasons.unshift('판정 자체가 fail')
-  else if (reasons.length > 0) reasons.unshift('판정은 pass라고 했지만 통과하지 않은 기준이 있음')
+  if (verdict.result === 'fail') reasons.unshift('verdict 자체가 fail')
+  else if (reasons.length > 0) reasons.unshift('verdict는 pass라고 했지만 통과하지 않은 기준이 있음')
 
   return { problems, result: reasons.length === 0 ? 'pass' : 'fail', reasons }
 }
@@ -961,23 +961,23 @@ export function finishProblems(state: RelayState, head: string | undefined, trac
   else if (tracked.length > 0) reasons.push(`작업 트리에 커밋하지 않은 변경: ${tracked.join(', ')}`)
   const last = state.verdicts.at(-1)
   if (last === undefined) {
-    reasons.push('판정이 없습니다: package → 다른 모델 검증 → verdict 뒤에 끝내세요.')
+    reasons.push('verdict가 없습니다: package → 다른 모델 검증 → verdict 뒤에 끝내세요.')
 
     return reasons
   }
-  if (head === undefined || !sameCommit(last.commit, head)) reasons.push(`검증한 판과 지금 판이 다름: 다시 검증하세요(판정 ${last.id}는 ${last.commit.slice(0, 7)}, 지금 HEAD ${head?.slice(0, 7) ?? '미확인'}).`)
-  if (last.result === 'fail') reasons.push(`마지막 판정 ${last.id}가 fail입니다${last.reasons === undefined || last.reasons.length === 0 ? '' : `(${last.reasons.join('; ')})`}.`)
+  if (head === undefined || !sameCommit(last.commit, head)) reasons.push(`검증한 커밋과 지금 커밋이 다름: 다시 검증하세요(verdict ${last.id}는 ${last.commit.slice(0, 7)}, 지금 HEAD ${head?.slice(0, 7) ?? '미확인'}).`)
+  if (last.result === 'fail') reasons.push(`마지막 verdict ${last.id}가 fail입니다${last.reasons === undefined || last.reasons.length === 0 ? '' : `(${last.reasons.join('; ')})`}.`)
   const pack = state.packages?.find(other => other.id === last.id)
   if (pack === undefined) {
-    reasons.push(`판정 ${last.id}의 꾸러미 기록이 없습니다: 다시 package하세요.`)
+    reasons.push(`verdict ${last.id}의 package 기록이 없습니다: 다시 package하세요.`)
 
     return reasons
   }
-  if (head === undefined || !sameCommit(pack.head, head)) reasons.push(`꾸러미 ${pack.id}은 HEAD ${pack.head.slice(0, 7)}에서 만들었습니다: 지금 판으로 다시 package → 검증 → verdict 하세요.`)
+  if (head === undefined || !sameCommit(pack.head, head)) reasons.push(`package ${pack.id}은 HEAD ${pack.head.slice(0, 7)}에서 만들었습니다: 지금 커밋으로 다시 package → 검증 → verdict 하세요.`)
   const uncovered = effectiveTasks(state.tasks)
     .filter(isDone)
     .filter(task => !pack.tasks.some(held => held.key === taskKey(task)) || (task.reportedAt ?? 0) > pack.at)
-  if (uncovered.length > 0) reasons.push(`꾸러미 ${pack.id}에 없거나 그 뒤에 끝난 작업: ${uncovered.map(taskKey).join(', ')}. 다시 package → 검증 → verdict 하세요.`)
+  if (uncovered.length > 0) reasons.push(`package ${pack.id}에 없거나 그 뒤에 끝난 작업: ${uncovered.map(taskKey).join(', ')}. 다시 package → 검증 → verdict 하세요.`)
 
   return reasons
 }

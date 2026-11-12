@@ -45,7 +45,7 @@ async function usageText($: EngineInterface): Promise<string> {
 
   return [
     '/likely <질문이나 글>  예일(참일) 확률을 판정 하나로. 키 확인용, 크레딧이 듭니다. 예) /likely 이 명령은 실패할까: ls /없는경로',
-    '/likely stats [task]   판정 기록 통계: task별 건수·정답 수, 비용, bash-fail의 보정(Brier·ECE·정확도)',
+    '/likely stats [task]   판정 기록 통계: task별 건수·정답 수, 비용, bash-fail의 calibration(Brier·ECE·정확도)',
     '/likely export         기록 폴더를 zip으로 묶기',
     `API 키: ${keyStateText()} · 기록 폴더: ${folder}`,
     keyHowto(await hasKeyCommand($).catch(() => false)),
@@ -85,14 +85,14 @@ async function statsText($: EngineInterface, task: string | undefined): Promise<
   const options = currentOptions()
   const spend = await currentSpend($)
   lines.push(
-    `비용(이 기기): 오늘 ${spend.dayCount}건 $${spend.dayUsd.toFixed(2)} / 폭주 방지 상한 ${dollars(options.dailyCapUsd)} · 이번 주기(${spend.period}부터) ${spend.periodCount}건 $${spend.periodUsd.toFixed(2)} / 예산 ${dollars(options.budgetUsd)}`,
+    `비용(이 기기): 오늘 ${spend.dayCount}건 $${spend.dayUsd.toFixed(2)} / runaway cap ${dollars(options.dailyCapUsd)} · 이번 주기(${spend.period}부터) ${spend.periodCount}건 $${spend.periodUsd.toFixed(2)} / 예산 ${dollars(options.budgetUsd)}`,
   )
 
   const target = task ?? BASH_TASK
   const current = (decision: LoggedDecision) => decision.methodVersion === METHOD_VERSION
   const pairs = predicatePairs(all, target, current)
   const older = predicatePairs(all, target, decision => !current(decision)).length
-  lines.push('', `${target} 보정 (판정 방식 v${METHOD_VERSION}${older > 0 ? `, 다른 버전 ${older}건 제외` : ''})`)
+  lines.push('', `${target} calibration (판정 방식 v${METHOD_VERSION}${older > 0 ? `, 다른 버전 ${older}건 제외` : ''})`)
   lines.push(...calibrationLines('  전체', calibrationOf(pairs)))
   for (const [label, thinking] of [
     ['thinking 끔', false],
@@ -146,7 +146,7 @@ async function askOnce($: EngineInterface, text: string): Promise<string> {
   return [
     `likely: ${head} · 호출 ${result.samples}/${result.raw.length} · ${seconds}초 · ${result.model}`,
     `호출별 예일 확률: ${calls.join(' · ')}`,
-    ...result.spread.slice(0, 1).map(spread => `퍼짐(호출 ${result.samples}개): 최대−최소 ${spread.range.toFixed(2)} · 표준편차 ${spread.sd.toFixed(2)}`),
+    ...result.spread.slice(0, 1).map(spread => `spread(호출 ${result.samples}개): 최대−최소 ${spread.range.toFixed(2)} · 표준편차 ${spread.sd.toFixed(2)}`),
     `토큰: 입력 ${result.tokens.input} · 출력 ${result.tokens.output} · 캐시 읽기 ${result.tokens.cacheRead} · 비용 $${result.costUsd.toFixed(5)}`,
     result.logPath !== undefined ? `기록: ${result.logPath} (${result.id})` : `기록하지 못했습니다: ${result.logError ?? ''}`,
     'Console의 Billing에서 크레딧이 줄었는지 확인해 보세요.',

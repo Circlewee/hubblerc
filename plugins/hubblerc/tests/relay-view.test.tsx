@@ -40,9 +40,9 @@ function result(output: unknown, extra: { isExpanded?: boolean; isErrored?: bool
 test('a call is one line, however long its input', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
-  const ui = await $.ui.mount({ ...USE, props: use(INPUT, { output: '지시서: /repo/.relay/runs/2026-11-10-demo/tasks/A-r3.md\n보고서 자리: x' }) })
+  const ui = await $.ui.mount({ ...USE, props: use(INPUT, { output: 'brief: /repo/.relay/runs/2026-11-10-demo/tasks/A-r3.md\n보고서 자리: x' }) })
   expect(await ui.find({ type: 'Text', text: /engine row/ })).toBeUndefined()
-  expect((await ui.find({ type: 'Text', text: /relay 지시서/ }))?.text).toBe('relay 지시서 Add the tool (3번째 지시서) · opus-5-5/high · 기준 2')
+  expect((await ui.find({ type: 'Text', text: /relay brief/ }))?.text).toBe('relay brief Add the tool (r3) · opus-5-5/high · 기준 2')
   expect(await ui.find({ type: 'Text', text: /long goal body/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -54,7 +54,7 @@ test('the full view (ctrl+o) and another tool keep the engine’s rows', async (
   expect((await full.find({ type: 'Text', text: /engine row/ }))?.text).toBe('engine row')
   await full.unmount()
 
-  const fullResult = await $.ui.mount({ ...RESULT, props: result('지시서: x', { isExpanded: true }) })
+  const fullResult = await $.ui.mount({ ...RESULT, props: result('brief: x', { isExpanded: true }) })
   expect((await fullResult.find({ type: 'Text', text: /engine row/ }))?.text).toBe('engine row')
   await fullResult.unmount()
 
@@ -71,7 +71,7 @@ test('the full view (ctrl+o) and another tool keep the engine’s rows', async (
 test('a result is one line beneath the call', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
-  const ui = await $.ui.mount({ ...RESULT, props: result('묶음을 시작했습니다: 2026-11-10-demo\n폴더: /repo/.relay/runs/2026-11-10-demo\nBase: abc') })
+  const ui = await $.ui.mount({ ...RESULT, props: result('run을 시작했습니다: 2026-11-10-demo\n폴더: /repo/.relay/runs/2026-11-10-demo\nBase: abc') })
   expect(await ui.find({ type: 'Text', text: /engine row/ })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /폴더 만듦/ }))?.text).toBe('폴더 만듦')
   expect(await ui.find({ type: 'Text', text: /Base/ })).toBeUndefined()
@@ -81,8 +81,8 @@ test('a result is one line beneath the call', async ($, on) => {
 test('a refusal and a failure say so, in red', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
-  const refused = await $.ui.mount({ ...RESULT, props: result('묶음을 끝내지 않았습니다:\n- 판정이 없습니다: package로 꾸러미를 만드세요', { isErrored: true }) })
-  expect((await refused.find({ type: 'Text', text: /거절/ }))?.text).toBe('거절: 판정이 없습니다: package로 꾸러미를 만드세요')
+  const refused = await $.ui.mount({ ...RESULT, props: result('run을 끝내지 않았습니다:\n- verdict가 없습니다: package로 package를 만드세요', { isErrored: true }) })
+  expect((await refused.find({ type: 'Text', text: /거절/ }))?.text).toBe('거절: verdict가 없습니다: package로 package를 만드세요')
   await refused.unmount()
 
   const failed = await $.ui.mount({ ...RESULT, requestId: 'toolu_2', props: result('relay 도구가 실패했습니다: Error: boom', { isErrored: true }) })
@@ -93,7 +93,7 @@ test('a refusal and a failure say so, in red', async ($, on) => {
 test('a gate warning stays beneath the result line', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
-  const ui = await $.ui.mount({ ...RESULT, props: result('A-r1: running · subagent x\n보낸 지시서 사본: /x\n⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침') })
+  const ui = await $.ui.mount({ ...RESULT, props: result('A-r1: running · subagent x\n보낸 brief 사본: /x\n⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침') })
   expect((await ui.find({ type: 'Text', text: /도는 중/ }))?.text).toBe('도는 중')
   expect((await ui.find({ type: 'Text', text: /⚠ relay/ }))?.text).toBe('⚠ relay: A-r1 기록에 경고가 있습니다 — 겹침')
   await ui.unmount()
@@ -115,13 +115,13 @@ const SUMMARY: RelayStatus = {
   runs: [{ run: '2026-11-10-demo', tasks: [line('A-r1', 'A', 1, 'Add the tool'), line('B-r2', 'B', 2, 'Wire the sidebar box')], pending: 0, verdict: null }],
 }
 
-test('a task is named by its title, "n번째 지시서" from the second brief; the key where the summary does not hold it', () => {
-  expect(callLine({ action: 'cancel', run: '2026-11-10-demo', task: 'B-r2', reason: 'x' }, undefined, SUMMARY)).toBe('relay 취소 Wire the sidebar box (2번째 지시서) · x')
+test('a task is named by its title, "n번째 brief" from the second brief; the key where the summary does not hold it', () => {
+  expect(callLine({ action: 'cancel', run: '2026-11-10-demo', task: 'B-r2', reason: 'x' }, undefined, SUMMARY)).toBe('relay 취소 Wire the sidebar box (r2) · x')
   // The id alone names its latest revision, the same way.
-  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'B' }, undefined, SUMMARY)).toBe('relay 보고 확인 Wire the sidebar box (2번째 지시서)')
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'B' }, undefined, SUMMARY)).toBe('relay 보고 확인 Wire the sidebar box (r2)')
   expect(callLine({ action: 'check', task: 'A' }, undefined, SUMMARY)).toBe('relay 완료 검사 Add the tool')
   expect(callLine({ action: 'dispatched', task: 'A-r1', runner: 'orca dispatch:x' }, undefined, SUMMARY)).toBe('relay 띄움 기록 Add the tool → orca dispatch:x')
-  expect(callLine({ action: 'spec_text', id: 'B' }, undefined, SUMMARY)).toBe('relay 지시서 미리보기 Wire the sidebar box (2번째 지시서)')
+  expect(callLine({ action: 'spec_text', id: 'B' }, undefined, SUMMARY)).toBe('relay brief 미리보기 Wire the sidebar box (r2)')
   // Not held (another run, a finished run, no summary): the key as it was said.
   expect(callLine({ action: 'report', run: '2026-11-01-old', task: 'B-r2' }, undefined, SUMMARY)).toBe('relay 보고 확인 B-r2')
   expect(callLine({ action: 'report', task: 'Z-r1' }, undefined, SUMMARY)).toBe('relay 보고 확인 Z-r1')
@@ -135,17 +135,17 @@ test('a task is named by its title, "n번째 지시서" from the second brief; t
   expect(callLine({ action: 'check', run: '2026-11-10-demo', task: 'T' }, 'T-r1 검사 결과(HEAD abc1234): /x', later)).toBe('relay 완료 검사 Write one line')
   expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T-r1' }, undefined, later)).toBe('relay 보고 확인 Write one line')
   // Still running (no answer), or refused (no key in the answer): the id's latest, as before.
-  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, undefined, later)).toBe('relay 보고 확인 Write the second line (2번째 지시서)')
-  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, '보고서가 없습니다: /x', later)).toBe('relay 보고 확인 Write the second line (2번째 지시서)')
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, undefined, later)).toBe('relay 보고 확인 Write the second line (r2)')
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, '보고서가 없습니다: /x', later)).toBe('relay 보고 확인 Write the second line (r2)')
   // An answer about another task than the one named changes nothing.
-  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, 'B-r2: 보고 DONE → 상태 done', later)).toBe('relay 보고 확인 Write the second line (2번째 지시서)')
+  expect(callLine({ action: 'report', run: '2026-11-10-demo', task: 'T' }, 'B-r2: 보고 DONE → 상태 done', later)).toBe('relay 보고 확인 Write the second line (r2)')
   // A package names each of its tasks the same way: the title where known, the key where not, the rest counted.
-  expect(callLine({ action: 'package', run: '2026-11-10-demo', tasks: ['A-r1', 'B-r2', 'Z-r1'] }, undefined, SUMMARY)).toBe('relay 검증 꾸러미 · Add the tool, Wire the sidebar box (2번째 지시서), Z-r1')
-  expect(callLine({ action: 'package', run: '2026-11-10-demo', tasks: ['A', 'B', 'A-r1', 'B-r2', 'Z'] }, undefined, SUMMARY)).toBe('relay 검증 꾸러미 · Add the tool, Wire the sidebar box (2번째 지시서), Add the tool 외 2')
-  expect(callLine({ action: 'package', tasks: ['B-r2'] }, undefined, null)).toBe('relay 검증 꾸러미 · B-r2')
-  expect(callLine({ action: 'package', run: '2026-11-10-demo' }, undefined, SUMMARY)).toBe('relay 검증 꾸러미 · 전체')
+  expect(callLine({ action: 'package', run: '2026-11-10-demo', tasks: ['A-r1', 'B-r2', 'Z-r1'] }, undefined, SUMMARY)).toBe('relay 검증 package · Add the tool, Wire the sidebar box (r2), Z-r1')
+  expect(callLine({ action: 'package', run: '2026-11-10-demo', tasks: ['A', 'B', 'A-r1', 'B-r2', 'Z'] }, undefined, SUMMARY)).toBe('relay 검증 package · Add the tool, Wire the sidebar box (r2), Add the tool 외 2')
+  expect(callLine({ action: 'package', tasks: ['B-r2'] }, undefined, null)).toBe('relay 검증 package · B-r2')
+  expect(callLine({ action: 'package', run: '2026-11-10-demo' }, undefined, SUMMARY)).toBe('relay 검증 package · 전체')
   // A brief written is named by the title it carries; the revision is told from the answer.
-  expect(callLine({ action: 'task', id: 'A', title: 'Add the tool', model: 'claude-opus-5-5', effort: 'high', done_when: [] }, '지시서: /r/tasks/A-r1.md')).toBe('relay 지시서 Add the tool · opus-5-5/high · 기준 0')
+  expect(callLine({ action: 'task', id: 'A', title: 'Add the tool', model: 'claude-opus-5-5', effort: 'high', done_when: [] }, 'brief: /r/tasks/A-r1.md')).toBe('relay brief Add the tool · opus-5-5/high · 기준 0')
 })
 
 test('abandon is drawn as one call line and one result line; short report and check texts keep their rows', async ($, on) => {
@@ -153,10 +153,10 @@ test('abandon is drawn as one call line and one result line; short report and ch
   showRelayLines(on)
   const reason = 'the person gave up on this run after all'
   const call = await $.ui.mount({ ...USE, props: use({ action: 'abandon', run: '2026-11-10-demo', reason }) })
-  expect((await call.find({ type: 'Text', text: /relay 묶음 버리기/ }))?.text).toBe('relay 묶음 버리기 · the person gave up on this run…')
+  expect((await call.find({ type: 'Text', text: /relay run 버리기/ }))?.text).toBe('relay run 버리기 · the person gave up on this run…')
   await call.unmount()
 
-  const dropped = await $.ui.mount({ ...RESULT, props: result('묶음을 버렸습니다: 2026-11-10-demo · 남은 커밋 3개\n이유: x\n버리기는 코드를 되돌리지 않고, 이 커밋들은 검증된 것도 아닙니다(사용자에게 알리세요):\n- a b\n- c d\n- e f') })
+  const dropped = await $.ui.mount({ ...RESULT, props: result('run을 버렸습니다: 2026-11-10-demo · 남은 커밋 3개\n이유: x\n버리기는 코드를 되돌리지 않고, 이 커밋들은 검증된 것도 아닙니다(사용자에게 알리세요):\n- a b\n- c d\n- e f') })
   expect((await dropped.find({ type: 'Text', text: /버림/ }))?.text).toBe('버림 · 남은 커밋 3')
   await dropped.unmount()
 
@@ -172,7 +172,7 @@ test('abandon is drawn as one call line and one result line; short report and ch
 test('a result row begins with an arrow, not the engine’s hook, and states are in Korean', async ($, on) => {
   engineDraws(on)
   showRelayLines(on)
-  const ui = await $.ui.mount({ ...RESULT, props: result('A-r1: running → cancelled · gave up\n보낸 지시서 사본: /x') })
+  const ui = await $.ui.mount({ ...RESULT, props: result('A-r1: running → cancelled · gave up\n보낸 brief 사본: /x') })
   expect((await ui.find({ type: 'Text', text: /도는 중/ }))?.text).toBe('도는 중 → 취소')
   expect((await ui.find({ type: 'Text', text: /↳/ }))?.text).toBe('  ↳ ')
   expect(await ui.find({ type: 'Text', text: /⎿/ })).toBeUndefined()

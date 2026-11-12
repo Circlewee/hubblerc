@@ -247,7 +247,7 @@ export async function likely($: EngineInterface, request: LikelyRequest): Promis
     const reason =
       blocked.limit === 'budget'
         ? `판정이 이번 예산 주기(${blocked.spend.period}부터) 예산 ${dollars(options.budgetUsd)}에 닿아, 다음 주기(매달 ${options.periodStartDay}일 시작)까지 판정하지 않습니다.`
-        : `판정이 폭주 방지 상한(하루 ${dollars(options.dailyCapUsd)})에 닿아 오늘은 판정하지 않습니다. 오늘 ${blocked.spend.dayCount}건 $${blocked.spend.dayUsd.toFixed(2)}.`
+        : `판정이 runaway cap(하루 ${dollars(options.dailyCapUsd)})에 닿아 오늘은 판정하지 않습니다. 오늘 ${blocked.spend.dayCount}건 $${blocked.spend.dayUsd.toFixed(2)}.`
     if (!blocked.isWarned) $.ui.toast(reason)
 
     return { skipped: blocked.limit, reason }

@@ -239,20 +239,20 @@ function pickBrief(named: readonly Named[]): Named | { deny: string } | undefine
   if (named.length === 0) return undefined
   const ready = named.filter(({ task }) => task.status === 'ready')
   if (ready.length === 1) return ready[0]
-  if (ready.length > 1) return { deny: `지시서가 둘 이상입니다(${ready.map(({ task }) => taskKey(task)).join(', ')}). ${ONE_AT_A_TIME}` }
+  if (ready.length > 1) return { deny: `brief가 둘 이상입니다(${ready.map(({ task }) => taskKey(task)).join(', ')}). ${ONE_AT_A_TIME}` }
   if (named.length === 1) return named[0]
 
-  return { deny: `ready인 지시서가 없습니다(${named.map(({ task }) => `${taskKey(task)} ${task.status}`).join(', ')}): 새로 보낼 것이면 relay task로 새 판을 만드세요.` }
+  return { deny: `ready인 brief가 없습니다(${named.map(({ task }) => `${taskKey(task)} ${task.status}`).join(', ')}): 새로 보낼 것이면 relay task로 새 revision을 만드세요.` }
 }
 
-const refused = (key: string, problems: readonly string[]): { deny: string } => ({ deny: [`relay 지시서 ${key}로는 띄우거나 보낼 수 없습니다:`, ...problems.map(problem => `- ${problem}`)].join('\n') })
+const refused = (key: string, problems: readonly string[]): { deny: string } => ({ deny: [`relay brief ${key}로는 띄우거나 보낼 수 없습니다:`, ...problems.map(problem => `- ${problem}`)].join('\n') })
 
 /** Why a brief may not go out as it is: changed since it was written, or gone. */
 async function briefProblems($: EngineInterface, task: RelayTask): Promise<string[]> {
   const spec = await $.fs.read(task.specPath).catch(() => undefined)
-  if (typeof spec !== 'string') return [`지시서 파일을 읽지 못했습니다: ${task.specPath}`]
+  if (typeof spec !== 'string') return [`brief 파일을 읽지 못했습니다: ${task.specPath}`]
 
-  return (await sha256($, spec)) === task.specHash ? [] : [`보낸 뒤 고친 지시서입니다(${taskKey(task)}): relay task로 새 판을 만드세요.`]
+  return (await sha256($, spec)) === task.specHash ? [] : [`보낸 뒤 고친 brief입니다(${taskKey(task)}): relay task로 새 revision을 만드세요.`]
 }
 
 // ── The claim on a task ──────────────────────────────────────────────
@@ -410,12 +410,12 @@ export async function planOrca($: EngineInterface, command: string): Promise<Pla
     const file = optionOf(call, '--spec-file')
     const relative = call.sub === 'worker-start' ? (file !== undefined && file !== '-' && file !== '' && !file.startsWith('/') ? [file] : []) : relativeBriefPaths(call.words)
     if (call.shifts && relative.length > 0) {
-      return { deny: `지시서는 절대 경로로 주세요: 명령에 cd·pushd·괄호·$( ) 같은 위치를 바꿀 수 있는 구문이 있어 상대 경로(${relative[0]})가 어느 지시서인지 알 수 없습니다.` }
+      return { deny: `brief는 절대 경로로 주세요: 명령에 cd·pushd·괄호·$( ) 같은 위치를 바꿀 수 있는 구문이 있어 상대 경로(${relative[0]})가 어느 brief인지 알 수 없습니다.` }
     }
   }
   const relevant = calls.filter(call => !isOther(call) && (call.sub === 'worker-start' || sendsBrief(call)))
   if (relevant.length === 0) return { pass: true }
-  if (relevant.length > 1) return { deny: `한 명령에 워커를 띄우거나 지시서를 보내는 호출이 ${relevant.length}개 있습니다. ${ONE_AT_A_TIME}` }
+  if (relevant.length > 1) return { deny: `한 명령에 워커를 띄우거나 brief를 보내는 호출이 ${relevant.length}개 있습니다. ${ONE_AT_A_TIME}` }
   const call = relevant[0]
   if (call === undefined) return { pass: true }
 
@@ -432,7 +432,7 @@ export async function planOrca($: EngineInterface, command: string): Promise<Pla
 
   const file = optionOf(call, '--spec-file')
   if (file === undefined || file === '-' || file === '') {
-    return { deny: `relay 묶음 ${runs.map(run => run.run).join(', ')}이 진행 중입니다. 워커는 relay task가 쓴 지시서 파일(--spec-file)로 띄우세요. 이 묶음과 상관없는 워커면 명령에 --comment no-relay를 붙이세요.` }
+    return { deny: `relay run ${runs.map(run => run.run).join(', ')}이 진행 중입니다. 워커는 relay task가 쓴 brief 파일(--spec-file)로 띄우세요. 이 run과 상관없는 워커면 명령에 --comment no-relay를 붙이세요.` }
   }
   // A file that is none of an active run's briefs is other work.
   const picked = briefsByPath(runs).get(resolvePath(file, cwd))
@@ -440,11 +440,11 @@ export async function planOrca($: EngineInterface, command: string): Promise<Pla
   const task = picked.task
   const problems = await briefProblems($, task)
   const model = optionOf(call, '--model')
-  if (model === undefined) problems.push(`--model이 없습니다: 지시서의 모델 ${task.model}을 적으세요(안 적으면 워커가 물려받은 모델로 돌아 비용이 커집니다).`)
-  else if (model.trim() !== task.model.trim()) problems.push(`--model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
+  if (model === undefined) problems.push(`--model이 없습니다: brief의 모델 ${task.model}을 적으세요(안 적으면 워커가 물려받은 모델로 돌아 비용이 커집니다).`)
+  else if (model.trim() !== task.model.trim()) problems.push(`--model ${model}이 brief의 모델 ${task.model}과 다릅니다.`)
   const effort = optionOf(call, '--effort')
-  if (effort === undefined) problems.push(`--effort가 없습니다: 지시서의 effort ${task.effort}를 적으세요.`)
-  else if (effort.trim() !== task.effort.trim()) problems.push(`--effort ${effort}가 지시서의 effort ${task.effort}와 다릅니다.`)
+  if (effort === undefined) problems.push(`--effort가 없습니다: brief의 effort ${task.effort}를 적으세요.`)
+  else if (effort.trim() !== task.effort.trim()) problems.push(`--effort ${effort}가 brief의 effort ${task.effort}와 다릅니다.`)
   if (problems.length > 0) return refused(taskKey(task), problems)
 
   return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), brief: task.specPath, act: 'launch', runnerOf: receipt => orcaRunner(dispatchIdIn(receipt)) } }
@@ -463,8 +463,8 @@ export async function planSpawn($: EngineInterface, prompt: string, model: strin
   if ('deny' in picked) return picked
   const task = picked.task
   const problems = await briefProblems($, task)
-  if (model === undefined || model.trim() === '') problems.push(`모델이 지정되지 않았습니다: Agent의 model에 지시서의 모델 ${task.model}을 적으세요(안 적으면 물려받은 모델로 돌아 비용이 커집니다).`)
-  else if (!sameModel(model, task.model)) problems.push(`model ${model}이 지시서의 모델 ${task.model}과 다릅니다.`)
+  if (model === undefined || model.trim() === '') problems.push(`모델이 지정되지 않았습니다: Agent의 model에 brief의 모델 ${task.model}을 적으세요(안 적으면 물려받은 모델로 돌아 비용이 커집니다).`)
+  else if (!sameModel(model, task.model)) problems.push(`model ${model}이 brief의 모델 ${task.model}과 다릅니다.`)
   if (problems.length > 0) return refused(taskKey(task), problems)
 
   return { pass: true, hold: { root, run: picked.run.run, task: taskKey(task), brief: task.specPath, act: 'launch', runnerOf: id => `subagent ${id === '' ? '(agent id 미확인)' : id}` } }
@@ -513,7 +513,7 @@ export async function unverifiedLine($: EngineInterface): Promise<string | undef
   for (const { run, state } of candidates) {
     const last = state.verdicts.at(-1)
     if (head !== '' && last !== undefined && sameCommit(last.commit, head)) continue
-    lines.push(`⚠ relay ${run}: 검증되지 않은 판입니다(HEAD ${head === '' ? '미확인' : head.slice(0, 7)}, 마지막 판정 ${last === undefined ? '없음' : last.commit.slice(0, 7)}). 끝내기 전에 package → 다른 모델 검증 → finish.`)
+    lines.push(`⚠ relay ${run}: 검증되지 않은 커밋입니다(HEAD ${head === '' ? '미확인' : head.slice(0, 7)}, 마지막 verdict ${last === undefined ? '없음' : last.commit.slice(0, 7)}). 끝내기 전에 package → 다른 모델 검증 → finish.`)
   }
 
   return lines.length === 0 ? undefined : lines.join('\n')

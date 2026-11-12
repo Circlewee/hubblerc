@@ -96,10 +96,10 @@ export function callLine(input: unknown, answer?: string, status: RelayStatus | 
       const model = field(call, 'model')
       const name = taskName({ key: field(call, 'id'), rev, title: field(call, 'title') }, NAME_CHARS)
 
-      return `relay 지시서 ${name} · ${shortModel(model)}/${field(call, 'effort')} · 기준 ${criteria}`
+      return `relay brief ${name} · ${shortModel(model)}/${field(call, 'effort')} · 기준 ${criteria}`
     }
     case 'spec_text':
-      return `relay 지시서 미리보기 ${named('id')}`
+      return `relay brief 미리보기 ${named('id')}`
     case 'dispatched':
       return `relay 띄움 기록 ${named('task')} → ${clip(field(call, 'runner'), RUNNER_CHARS)}`
     case 'cancel':
@@ -118,18 +118,18 @@ export function callLine(input: unknown, answer?: string, status: RelayStatus | 
       })
       const more = tasks.length - shown.length
 
-      return `relay 검증 꾸러미 · ${tasks.length === 0 ? '전체' : `${shown.join(', ')}${more > 0 ? ` 외 ${more}` : ''}`}`
+      return `relay 검증 package · ${tasks.length === 0 ? '전체' : `${shown.join(', ')}${more > 0 ? ` 외 ${more}` : ''}`}`
     }
     case 'verdict':
-      return `relay 판정 ${field(call, 'id')}`
+      return `relay verdict ${field(call, 'id')}`
     case 'pending':
       return 'relay 기다리는 결정'
     case 'list':
-      return 'relay 묶음 목록'
+      return 'relay run 목록'
     case 'finish':
-      return 'relay 묶음 끝내기'
+      return 'relay run 끝내기'
     case 'abandon':
-      return `relay 묶음 버리기 · ${clip(field(call, 'reason'), REASON_CHARS)}`
+      return `relay run 버리기 · ${clip(field(call, 'reason'), REASON_CHARS)}`
     default:
       return `relay ${clip(action, GOAL_CHARS)}`.trim()
   }
@@ -189,9 +189,9 @@ function told(lines: readonly string[]): string | undefined {
   const head = lines[0] ?? ''
   let match: RegExpExecArray | null
 
-  if (head.startsWith('묶음을 시작했습니다: ')) return '폴더 만듦'
+  if (head.startsWith('run을 시작했습니다: ')) return '폴더 만듦'
 
-  if (head.startsWith('지시서: ')) {
+  if (head.startsWith('brief: ')) {
     const warnings = warningsIn(lines)
     const first = warnings[0]
 
@@ -223,19 +223,19 @@ function told(lines: readonly string[]): string | undefined {
     return [`pass ${count('pass')}`, `fail ${count('fail')}`, `미확인 ${count('미확인')}`, time, tree].filter(part => part !== '').join(' · ')
   }
 
-  if ((match = /^묶음을 버렸습니다: \S+ · 남은 커밋 (\d+개|미확인)/.exec(head))) {
+  if ((match = /^run을 버렸습니다: \S+ · 남은 커밋 (\d+개|미확인)/.exec(head))) {
     const pending = /^사용자 답을 기다리던 결정 (\d+)개:/.exec(lines.find(line => line.startsWith('사용자 답을 기다리던 결정')) ?? '')?.[1]
 
     return `버림 · 남은 커밋 ${(match[1] ?? '').replace(/개$/, '')}${pending === undefined ? '' : ` · 기다리던 결정 ${pending}`}`
   }
 
-  if ((match = /^검증 꾸러미 (V\d+): /.exec(head))) {
+  if ((match = /^검증 package (V\d+): /.exec(head))) {
     const files = /검토할 파일 (\d+)개/.exec(lines.join('\n'))?.[1]
 
     return files === undefined ? (match[1] ?? '') : `${match[1]} · 검토 파일 ${files}`
   }
 
-  if ((match = /^판정 V\d+: 기록 (pass|fail) /.exec(head))) {
+  if ((match = /^verdict V\d+: 기록 (pass|fail) /.exec(head))) {
     const criteria = /^기준: pass (\d+) · fail (\d+) · unverified (\d+)/.exec(lines.find(line => line.startsWith('기준: ')) ?? '')
     const findings = /^지적: high (\d+) · medium (\d+)/.exec(lines.find(line => line.startsWith('지적: ')) ?? '')
     const commit = /본 커밋 (\S+)/.exec(head)?.[1]
@@ -254,14 +254,14 @@ function told(lines: readonly string[]): string | undefined {
   }
   if (head.startsWith('사용자 답을 기다리는 결정(asked·on hold)이 없습니다')) return '없음'
 
-  if ((match = /^진행 중인 묶음 (\d+)개:/.exec(head))) return `진행 중 ${match[1]}`
-  if (head.startsWith('이 저장소에 진행 중인 묶음이 없습니다')) return '진행 중 0'
+  if ((match = /^진행 중인 run (\d+)개:/.exec(head))) return `진행 중 ${match[1]}`
+  if (head.startsWith('이 저장소에 진행 중인 run이 없습니다')) return '진행 중 0'
 
-  if ((match = /^묶음을 끝냈습니다: \S+ · 판정 (\S*) · HEAD/.exec(head))) {
+  if ((match = /^run을 끝냈습니다: \S+ · verdict (\S*) · HEAD/.exec(head))) {
     const pending = after(lines, '사용자 답을 기다리는 결정(asked·on hold):')
     const held = pending === undefined ? undefined : pending === '없음' ? 0 : bulletsAfter(lines, line => line.startsWith('사용자 답을 기다리는 결정(asked·on hold):')).length
 
-    return `끝냄 · ${match[1] === '' ? '판정 없음' : `판정 ${match[1]}`}${held === undefined ? '' : ` · 보류 결정 ${held}`}`
+    return `끝냄 · ${match[1] === '' ? 'verdict 없음' : `verdict ${match[1]}`}${held === undefined ? '' : ` · 보류 결정 ${held}`}`
   }
 
   return undefined

@@ -345,7 +345,7 @@ test('inside a run, a launch with no brief file is refused unless it says no-rel
   await newRun($)
 
   const none = await bash($, 'orca orchestration worker-start --spec "do it" --worktree current --agent claude')
-  expect(none.deny).toContain(`relay 묶음 ${RUN}이 진행 중입니다.`)
+  expect(none.deny).toContain(`relay run ${RUN}이 진행 중입니다.`)
   expect(none.deny).toContain('--spec-file')
   expect(none.deny).toContain('--comment no-relay')
   expect(sim.commands).toEqual([])
@@ -381,9 +381,9 @@ test('inside a run, a worker-start or send asking for --help or -h passes with n
 
   // An option's value that reads -h, and a worker-start with no brief and no help, are refused as before.
   const valued = await bash($, 'orca orchestration worker-start --spec -h --agent claude')
-  expect(valued.deny).toContain(`relay 묶음 ${RUN}이 진행 중입니다.`)
+  expect(valued.deny).toContain(`relay run ${RUN}이 진행 중입니다.`)
   const none = await bash($, 'orca orchestration worker-start --spec "do it" --agent claude')
-  expect(none.deny).toContain(`relay 묶음 ${RUN}이 진행 중입니다.`)
+  expect(none.deny).toContain(`relay run ${RUN}이 진행 중입니다.`)
   expect(sim.commands).toEqual(asks)
 })
 
@@ -460,8 +460,8 @@ test('a brief edited after it was written is refused: a new revision is made ins
   sim.files[spec] = `${sim.files[spec]}\n- one more rule`
 
   const edited = await bash($, launch(spec))
-  expect(edited.deny).toContain('보낸 뒤 고친 지시서')
-  expect(edited.deny).toContain('relay task로 새 판을 만드세요')
+  expect(edited.deny).toContain('보낸 뒤 고친 brief')
+  expect(edited.deny).toContain('relay task로 새 revision을 만드세요')
   expect(sim.commands).toEqual([])
 })
 
@@ -470,9 +470,9 @@ test('a model or effort other than the brief names, or none, is refused', async 
   await newRun($)
   const spec = await newTask($, 'A')
 
-  expect((await bash($, launch(spec, '--model claude-opus-5-5 --effort high'))).deny).toContain('--model claude-opus-5-5이 지시서의 모델 claude-sonnet-5-5과 다릅니다')
+  expect((await bash($, launch(spec, '--model claude-opus-5-5 --effort high'))).deny).toContain('--model claude-opus-5-5이 brief의 모델 claude-sonnet-5-5과 다릅니다')
   expect((await bash($, launch(spec, '--effort high'))).deny).toContain('--model이 없습니다')
-  expect((await bash($, launch(spec, '--model claude-sonnet-5-5 --effort xhigh'))).deny).toContain('--effort xhigh가 지시서의 effort high와 다릅니다')
+  expect((await bash($, launch(spec, '--model claude-sonnet-5-5 --effort xhigh'))).deny).toContain('--effort xhigh가 brief의 effort high와 다릅니다')
   expect((await bash($, launch(spec, '--model claude-sonnet-5-5'))).deny).toContain('--effort가 없습니다')
   expect(sim.commands).toEqual([])
   expect(state(sim).tasks[0]?.status).toBe('ready')
@@ -529,7 +529,7 @@ test('a subagent with the brief and no model, or another one, is refused', async
   const none = await spawn($, `Follow ${a}.`, 'A')
   expect((none.deny ?? '')).toContain('모델이 지정되지 않았습니다')
   const other = await spawn($, `Follow ${a}.`, 'A', 'opus')
-  expect((other.deny ?? '')).toContain('model opus이 지시서의 모델 claude-sonnet-5-5과 다릅니다')
+  expect((other.deny ?? '')).toContain('model opus이 brief의 모델 claude-sonnet-5-5과 다릅니다')
   expect(sim.spawned).toEqual([])
   expect(state(sim).tasks[0]?.status).toBe('ready')
 })
@@ -546,7 +546,7 @@ test('a subagent on a brief that overlaps a running task, or was edited, is refu
   expect((clash.deny ?? '')).toContain('돌고 있는 A-r1와 겹칩니다')
   sim.files[c] = `${sim.files[c]}\nchanged`
   const edited = await spawn($, `Follow ${c}.`, 'C', 'sonnet')
-  expect((edited.deny ?? '')).toContain('보낸 뒤 고친 지시서')
+  expect((edited.deny ?? '')).toContain('보낸 뒤 고친 brief')
   expect(sim.spawned).toHaveLength(1)
 })
 
@@ -687,7 +687,7 @@ test('V1-09b: where the command may have moved the working folder (a subshell\'s
 
   for (const command of [`(cd /tmp); ${start(relative)}`, `cd /tmp && ${start(relative)}`, `pushd /tmp >/dev/null; ${start(relative)}`, `cd ${DIR}/tasks && ${start('A-r1.md')}`, start(`$(pwd)/${relative}`), `(cd /tmp && true); ${start(relative)}`, `${start(relative)}; cd /tmp`]) {
     const refused = await bash($, command)
-    expect(refused.deny).toContain('지시서는 절대 경로로 주세요')
+    expect(refused.deny).toContain('brief는 절대 경로로 주세요')
   }
   expect(sim.commands).toEqual([])
   expect(state(sim).tasks[0]?.status).toBe('ready')
@@ -710,8 +710,8 @@ test('V1-09b: a relative brief in an orca send beside a cd or a subshell is refu
   const a = await newTask($, 'A')
   const send = (body: string) => `orca orchestration send --to dispatch:ctx_1 --body "${body}"`
 
-  expect((await bash($, `(cd /tmp); ${send(`Read .relay/runs/${RUN}/tasks/A-r1.md`)}`)).deny).toContain('지시서는 절대 경로로 주세요')
-  expect((await bash($, `cd /tmp && ${send(`Read .relay/runs/${RUN}/tasks/A-r1.md`)}`)).deny).toContain('지시서는 절대 경로로 주세요')
+  expect((await bash($, `(cd /tmp); ${send(`Read .relay/runs/${RUN}/tasks/A-r1.md`)}`)).deny).toContain('brief는 절대 경로로 주세요')
+  expect((await bash($, `cd /tmp && ${send(`Read .relay/runs/${RUN}/tasks/A-r1.md`)}`)).deny).toContain('brief는 절대 경로로 주세요')
   expect(sim.commands).toEqual([])
   expect((await bash($, `cd /tmp && ${send(`See .relay/runs/${RUN}/tasks/A-r1-report.md`)}`)).deny).toBeUndefined()
   expect((await bash($, `(cd /tmp); ${send(`Read ${a}`)}`)).deny).toBeUndefined()
@@ -731,7 +731,7 @@ test('V1-07b: a brief changed while the worker was being started leaves the task
   expect(ran.text).toContain('dispatchId=ctx_abc123')
   expect(ran.context).toHaveLength(1)
   expect(ran.context?.[0]).toContain('⚠ relay: A-r1를 blocked로 두었습니다')
-  expect(ran.context?.[0]).toContain('띄우는 동안 지시서가 바뀌었습니다')
+  expect(ran.context?.[0]).toContain('띄우는 동안 brief가 바뀌었습니다')
   expect(ran.context?.[0]).toContain('orca dispatch:ctx_abc123')
   const task = state(sim).tasks[0]
   expect(task?.status).toBe('blocked')
@@ -822,7 +822,7 @@ test('V1-11: a brief sent to a worker already out with orca send is checked and 
   expect(sim.commands.filter(command => command.includes('orchestration send'))).toHaveLength(2)
 
   sim.files[b] = `${sim.files[b]}\nedited`
-  expect((await bash($, send(b))).deny).toContain('보낸 뒤 고친 지시서')
+  expect((await bash($, send(b))).deny).toContain('보낸 뒤 고친 brief')
 })
 
 test('V1-11: an orca send that names no brief of the run, or only a report, goes out untouched', async ($, on) => {
@@ -903,7 +903,7 @@ test('D: a new revision sent to a finished subagent is checked once; the resume 
   sim.engine = $
   sim.finished = { 'ag-worker-a': 'ag-worker-a', 'worker-b': 'ag-worker-b' }
 
-  // As A-r2 went out: the new brief beside the cancelled one, to the worker by its id (once refused: "ready인 지시서가 없습니다(A-r2 launching, A-r1 cancelled)").
+  // As A-r2 went out: the new brief beside the cancelled one, to the worker by its id (once refused: "ready인 brief가 없습니다(A-r2 launching, A-r1 cancelled)").
   const a = await sendMessage($, 'ag-worker-a', `New revision: read ${second}. It replaces ${first}.`)
   expect(a.deny).toBeUndefined()
   expect(a.result?.success).toBe(true)
@@ -1042,12 +1042,12 @@ test('an answer that ends with finished work and no verdict at HEAD gets the war
     s.tasks[0]!.status = 'done'
   })
 
-  expect(await answer($)).toBe(`⚠ relay ${RUN}: 검증되지 않은 판입니다(HEAD ${HEAD_1.slice(0, 7)}, 마지막 판정 없음). 끝내기 전에 package → 다른 모델 검증 → finish.`)
+  expect(await answer($)).toBe(`⚠ relay ${RUN}: 검증되지 않은 커밋입니다(HEAD ${HEAD_1.slice(0, 7)}, 마지막 verdict 없음). 끝내기 전에 package → 다른 모델 검증 → finish.`)
 
   setState(sim, s => {
     s.verdicts = [{ id: 'V1', at: NOON, commit: HEAD_2, path: `${DIR}/reviews/V1-verdict.json`, result: 'pass' }]
   })
-  expect(await answer($)).toBe(`⚠ relay ${RUN}: 검증되지 않은 판입니다(HEAD ${HEAD_1.slice(0, 7)}, 마지막 판정 ${HEAD_2.slice(0, 7)}). 끝내기 전에 package → 다른 모델 검증 → finish.`)
+  expect(await answer($)).toBe(`⚠ relay ${RUN}: 검증되지 않은 커밋입니다(HEAD ${HEAD_1.slice(0, 7)}, 마지막 verdict ${HEAD_2.slice(0, 7)}). 끝내기 전에 package → 다른 모델 검증 → finish.`)
 })
 
 test('no warning while a task runs, is blocked or waits for context; none when the last verdict is of HEAD; none without finished work', async ($, on) => {

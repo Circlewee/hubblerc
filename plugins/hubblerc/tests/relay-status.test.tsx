@@ -43,7 +43,7 @@ const STATE: RelayState = {
   status: 'active',
   createdAt: AT,
   tasks: [
-    task({ id: 'A', rev: 1, title: 'Add the tool', status: 'cancelled', cancelReason: '새 판 A-r2가 이어받음' }),
+    task({ id: 'A', rev: 1, title: 'Add the tool', status: 'cancelled', cancelReason: '새 revision A-r2가 이어받음' }),
     task({ id: 'A', rev: 2, title: 'Add the tool', status: 'done', runner: 'orca dispatch:ctx_1', model: 'claude-sonnet-5-5', effort: 'medium', dispatchedAt: AT }),
     task({ id: 'B', rev: 1, title: 'Wire the box', status: 'blocked', workerLive: true, runner: 'subagent ag-1', dispatchedAt: AT }),
     task({ id: 'C', rev: 1, title: 'Write docs', status: 'ready' }),
@@ -83,12 +83,12 @@ test('a run in small: each task’s latest revision with its status first, then 
   const lines = relayLines({ runs: [status] }, THEME_COLORS)
   expect(texts(lines)).toEqual([
     RUN,
-    `끝            Add the tool · 2판 · sonnet-5-5/medium · orca · ${hhmm(AT)}`,
+    `끝            Add the tool · r2 · sonnet-5-5/medium · orca · ${hhmm(AT)}`,
     `띄운 뒤 막힘  Wire the box · opus-5-5/high · subagent · ${hhmm(AT)}`,
     '띄우기 전     Write docs · opus-5-5/high',
     '취소          D-r1 · opus-5-5/high',
     '사용자 답을 기다리는 결정 1개',
-    '판정 V1 fail · ccccccc = HEAD',
+    'verdict V1 fail · ccccccc = HEAD',
   ])
   // Done green, blocked red, a cancelled task dim; a failed verdict red.
   expect(lines[1]?.[0]).toMatchObject({ color: THEME_COLORS.ok })
@@ -107,8 +107,8 @@ test('in the box a task’s line fits the width: the tail at the right edge, the
   const at = (width?: number): string[] => texts(relayLines(status, THEME_COLORS, width)).slice(1, 4)
   // The statuses pad to one column (the long one said short), the tails end at the same cell.
   expect(at(76)).toEqual([
-    `도는 중   relay 한 줄 그리기 다듬기: 약어 대신 …  4판 · sonnet/high · ${hhmm(AT)}`,
-    `끝(걱정)  사이드바 relay 상자와 /relay 명령   3판 · opus/high→xhigh · ${hhmm(AT)}`,
+    `도는 중   relay 한 줄 그리기 다듬기: 약어 대신 …   r4 · sonnet/high · ${hhmm(AT)}`,
+    `끝(걱정)  사이드바 relay 상자와 /relay 명령    r3 · opus/high→xhigh · ${hhmm(AT)}`,
     `끝        Write docs                                      opus/high · ${hhmm(AT)}`,
   ])
   // A cell stays free at the right edge.
@@ -119,26 +119,26 @@ test('in the box a task’s line fits the width: the tail at the right edge, the
   expect(at(76)[2]).not.toContain('→')
 
   // Narrower, a title under twenty cells takes the tail's room: the launch time first, then the model, then the brief's number.
-  expect(at(52)).toEqual(['도는 중   relay 한 줄 그리기 다…  4판 · sonnet/high', '끝(걱정)  사이드바 relay 상자와 /relay 명령     3판', `끝        Write docs              opus/high · ${hhmm(AT)}`])
+  expect(at(52)).toEqual(['도는 중   relay 한 줄 그리기 다…   r4 · sonnet/high', '끝(걱정)  사이드바 relay 상자와 /relay 명령      r3', `끝        Write docs              opus/high · ${hhmm(AT)}`])
   // A short title needs no more than its own cells, so its tail stays.
-  expect(at(40)).toEqual(['도는 중   relay 한 줄 그리기 다듬…  4판', '끝(걱정)  사이드바 relay 상자와 /…  3판', `끝        Write docs  opus/high · ${hhmm(AT)}`])
+  expect(at(40)).toEqual(['도는 중   relay 한 줄 그리기 다듬…   r4', '끝(걱정)  사이드바 relay 상자와 /r…  r3', `끝        Write docs  opus/high · ${hhmm(AT)}`])
   expect(at(30)).toEqual(['도는 중   relay 한 줄 그리기…', '끝(걱정)  사이드바 relay 상…', '끝        Write docs'])
   // `/relay-status` cuts nothing, says the status in full, the model with its version and the runner.
   expect(at()).toEqual([
-    `도는 중         relay 한 줄 그리기 다듬기: 약어 대신 이름, 줄 사이 빈 줄 · 4판 · sonnet-5-5/high · subagent · ${hhmm(AT)}`,
-    `걱정과 함께 끝  사이드바 relay 상자와 /relay 명령 · 3판 · opus-5-5/high→xhigh · subagent · ${hhmm(AT)}`,
+    `도는 중         relay 한 줄 그리기 다듬기: 약어 대신 이름, 줄 사이 빈 줄 · r4 · sonnet-5-5/high · subagent · ${hhmm(AT)}`,
+    `걱정과 함께 끝  사이드바 relay 상자와 /relay 명령 · r3 · opus-5-5/high→xhigh · subagent · ${hhmm(AT)}`,
     `끝              Write docs · opus-5-5/high · orca · ${hhmm(AT)}`,
   ])
 })
 
-test('a task is named by its title, "n번째 지시서" from the second brief, its key where the title is not known', () => {
+test('a task is named by its title, "(rN)" from the second brief, its key where the title is not known', () => {
   const status = runStatus(STATE, PROGRESS, undefined)
   const [a, , , d] = status.tasks
-  expect(taskName(a!, 40)).toBe('Add the tool (2번째 지시서)')
+  expect(taskName(a!, 40)).toBe('Add the tool (r2)')
   expect(taskName({ key: 'B-r1', rev: 1, title: 'Wire the box' }, 40)).toBe('Wire the box')
   expect(taskName(d!, 40)).toBe('D-r1')
   // Cut to the width given, the suffix after it; whitespace folded.
-  expect(taskName({ key: 'A-r3', rev: 3, title: 'A very long\ntitle that goes on' }, 10)).toBe('A very lon… (3번째 지시서)')
+  expect(taskName({ key: 'A-r3', rev: 3, title: 'A very long\ntitle that goes on' }, 10)).toBe('A very lon… (r3)')
   // The state holds the title cut short.
   const long = runStatus({ ...STATE, tasks: [task({ id: 'L', rev: 1, status: 'ready', title: 'x'.repeat(100) })] }, PROGRESS, undefined)
   expect(long.tasks[0]?.title).toBe(`${'x'.repeat(40)}…`)
@@ -157,11 +157,11 @@ test('a task is named by its title, "n번째 지시서" from the second brief, i
 
 test('a verdict of another commit than HEAD, HEAD not read, no verdict, no decisions, progress.md unread, no task yet: each says so', () => {
   const other = texts(relayLines({ runs: [runStatus(STATE, PROGRESS, 'd'.repeat(40))] }, THEME_COLORS))
-  expect(other.at(-1)).toBe('판정 V1 fail · ccccccc ≠ HEAD ddddddd')
-  expect(texts(relayLines({ runs: [runStatus(STATE, PROGRESS, undefined)] }, THEME_COLORS)).at(-1)).toBe('판정 V1 fail · ccccccc · HEAD 미확인')
+  expect(other.at(-1)).toBe('verdict V1 fail · ccccccc ≠ HEAD ddddddd')
+  expect(texts(relayLines({ runs: [runStatus(STATE, PROGRESS, undefined)] }, THEME_COLORS)).at(-1)).toBe('verdict V1 fail · ccccccc · HEAD 미확인')
 
   const bare = texts(relayLines({ runs: [runStatus({ ...STATE, tasks: [], verdicts: [] }, PROGRESS.replace('| asked |', '| decided |'), undefined)] }, THEME_COLORS))
-  expect(bare).toEqual([RUN, '작업 없음', '사용자 답을 기다리는 결정 없음', '판정 없음'])
+  expect(bare).toEqual([RUN, '작업 없음', '사용자 답을 기다리는 결정 없음', 'verdict 없음'])
   expect(texts(relayLines({ runs: [runStatus(STATE, undefined, undefined)] }, THEME_COLORS)).at(-2)).toBe('기다리는 결정: progress.md를 읽지 못함')
   // Nothing to show: no lines, so no box.
   expect(relayLines(null, THEME_COLORS)).toEqual([])
@@ -182,8 +182,8 @@ test('a run is put in the list by name, replaced on its next save, and taken out
 })
 
 test('/relay-status’s text with no run under way names the run finished last, or says there is none', () => {
-  expect(statusText({ runs: [] }, THEME_COLORS, '2026-11-08-old')).toBe('진행 중인 relay 묶음이 없습니다. 가장 최근에 끝난 묶음: 2026-11-08-old')
-  expect(statusText({ runs: [] }, THEME_COLORS)).toBe('진행 중인 relay 묶음이 없습니다. 이 저장소에 끝난 묶음도 없습니다.')
+  expect(statusText({ runs: [] }, THEME_COLORS, '2026-11-08-old')).toBe('진행 중인 relay run이 없습니다. 가장 최근에 끝난 run: 2026-11-08-old')
+  expect(statusText({ runs: [] }, THEME_COLORS)).toBe('진행 중인 relay run이 없습니다. 이 저장소에 끝난 run도 없습니다.')
 })
 
 // ── In the session ──────────────────────────────────────────────
@@ -252,12 +252,12 @@ test('with no run under way there is no relay box, and /relay-status says so, na
   expect(await boxLines(ui)).toBeUndefined()
   expect(await ui.find({ key: 'fold-relay' })).toBeUndefined()
   await ui.unmount()
-  expect(await relayStatus($)).toBe('진행 중인 relay 묶음이 없습니다. 이 저장소에 끝난 묶음도 없습니다.')
+  expect(await relayStatus($)).toBe('진행 중인 relay run이 없습니다. 이 저장소에 끝난 run도 없습니다.')
 
   // Two finished runs: the one whose last verdict came later is named, whatever the names' order.
   putRun(standIn, { ...STATE, run: '2026-11-07-later', status: 'finished', verdicts: [{ ...STATE.verdicts[0]!, at: AT + 60_000, result: 'pass' }] })
   putRun(standIn, { ...STATE, run: '2026-11-08-sooner', status: 'finished', verdicts: [{ ...STATE.verdicts[0]!, at: AT, result: 'pass' }] })
-  expect(await relayStatus($)).toBe('진행 중인 relay 묶음이 없습니다. 가장 최근에 끝난 묶음: 2026-11-07-later')
+  expect(await relayStatus($)).toBe('진행 중인 relay run이 없습니다. 가장 최근에 끝난 run: 2026-11-07-later')
   const again = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   expect(await boxLines(again)).toBeUndefined()
   await again.unmount()
@@ -277,14 +277,14 @@ test('a run under way at session start: its box is drawn from state, with no fil
   // The pane is 56 cells wide, a line 52: the launch time gives way where the title would not fit whole.
   expect(lines?.slice(0, -1)).toEqual([
     RUN,
-    '끝            Add the tool      2판 · sonnet/medium',
+    '끝            Add the tool       r2 · sonnet/medium',
     `띄운 뒤 막힘  Wire the box        opus/high · ${hhmm(AT)}`,
     '띄우기 전     Write docs                  opus/high',
     '취소          D-r1                        opus/high',
     '사용자 답을 기다리는 결정 1개',
   ])
   // The stand-in's HEAD is its folder: another commit than the verdict's.
-  expect(lines?.at(-1)).toMatch(/^판정 V1 fail · ccccccc ≠ HEAD /)
+  expect(lines?.at(-1)).toMatch(/^verdict V1 fail · ccccccc ≠ HEAD /)
   expect((await ui.find({ key: 'fold-relay' }))?.text).toBe(' ▾ relay ')
   expect(seen.reads).toEqual([])
   expect(seen.lists).toEqual([])
@@ -307,7 +307,7 @@ test('the relay tool’s changes show at the next drawing: the run started, a ta
   expect(await boxLines(ui)).toBeUndefined()
 
   expect((await relay($, { action: 'start', name: 'demo', goal: 'Ship relay.', done_when: ['all checks pass'] })).deny).toBeUndefined()
-  expect(await boxLines(ui)).toEqual([run, '작업 없음', '사용자 답을 기다리는 결정 없음', '판정 없음'])
+  expect(await boxLines(ui)).toEqual([run, '작업 없음', '사용자 답을 기다리는 결정 없음', 'verdict 없음'])
 
   const written = await relay($, {
     action: 'task',
@@ -331,7 +331,7 @@ test('the relay tool’s changes show at the next drawing: the run started, a ta
 
   // The same run as text: the line whole, with the model's version and the runner.
   expect(await relayStatus($)).toBe(
-    ['진행 중인 relay 묶음 1개:', [run, `도는 중  Add the box · opus-5-5/high · subagent · ${hhmm(NOW)}`, '사용자 답을 기다리는 결정 없음', '판정 없음'].join('\n')].join('\n\n'),
+    ['진행 중인 relay run 1개:', [run, `도는 중  Add the box · opus-5-5/high · subagent · ${hhmm(NOW)}`, '사용자 답을 기다리는 결정 없음', 'verdict 없음'].join('\n')].join('\n\n'),
   )
 })
 
@@ -351,7 +351,7 @@ test('a relay call in the conversation names its task by the title held in state
     props: { tool_use_id: requestId, tool: TOOL, input, isRunning: false, isErrored: false, isInterrupted: false },
   })
   const cancel = await $.ui.mount(use('toolu_1', { action: 'cancel', run: RUN, task: 'A-r2', reason: 'x' }))
-  expect((await cancel.find({ type: 'Text', text: /relay 취소/ }))?.text).toBe('relay 취소 Add the tool (2번째 지시서) · x')
+  expect((await cancel.find({ type: 'Text', text: /relay 취소/ }))?.text).toBe('relay 취소 Add the tool (r2) · x')
   expect(JSON.stringify(await cancel.drawn())).toContain('"marginTop":1')
   await cancel.unmount()
 
@@ -379,7 +379,7 @@ test('/relay-status reads the runs again and puts the box to them: a run another
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   expect((await boxLines(ui))?.[0]).toBe(RUN)
   putRun(standIn, { ...STATE, status: 'finished' })
-  expect(await relayStatus($)).toBe(`진행 중인 relay 묶음이 없습니다. 가장 최근에 끝난 묶음: ${RUN}`)
+  expect(await relayStatus($)).toBe(`진행 중인 relay run이 없습니다. 가장 최근에 끝난 run: ${RUN}`)
   expect(await boxLines(ui)).toBeUndefined()
   await ui.unmount()
 })
@@ -394,16 +394,16 @@ test('an abandoned run is not under way: no box at session start, gone from the 
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   expect(await boxLines(ui)).toBeUndefined()
-  expect(await relayStatus($)).toBe('진행 중인 relay 묶음이 없습니다. 가장 최근에 끝난 묶음: 2026-11-07-done')
+  expect(await relayStatus($)).toBe('진행 중인 relay run이 없습니다. 가장 최근에 끝난 run: 2026-11-07-done')
 
   // Through the tool: the run is in the box, then abandoned and out of it at the next drawing.
   const run = `${localDate(NOW)}-demo`
   expect((await relay($, { action: 'start', name: 'demo', goal: 'Try relay.', done_when: ['nothing'] })).deny).toBeUndefined()
   expect((await boxLines(ui))?.[0]).toBe(run)
-  expect((await relay($, { action: 'abandon', run, reason: 'trial run' })).result).toMatch(/^묶음을 버렸습니다: /)
+  expect((await relay($, { action: 'abandon', run, reason: 'trial run' })).result).toMatch(/^run을 버렸습니다: /)
   expect(await boxLines(ui)).toBeUndefined()
   await ui.unmount()
-  expect(await relayStatus($)).toBe('진행 중인 relay 묶음이 없습니다. 가장 최근에 끝난 묶음: 2026-11-07-done')
+  expect(await relayStatus($)).toBe('진행 중인 relay run이 없습니다. 가장 최근에 끝난 run: 2026-11-07-done')
 })
 
 test('idle with a run under way, nothing under .relay is read: the box waits for a save, not a timer', async ($, on) => {

@@ -43,7 +43,7 @@ function cut(value: string, max: number): string {
 }
 
 /**
- * What a task is called in a relay call's line: its title (cut to `max`), with ` (n번째 지시서)` when
+ * What a task is called in a relay call's line: its title (cut to `max`), with ` (n번째 brief)` when
  * it is a brief sent again (n > 1); the key when the title is not known. Never made up. (The box
  * and `/relay-status` say the brief's number short, `n판`: `taskSegments`.)
  */
@@ -51,7 +51,7 @@ export function taskName(task: { key: string; rev: number; title: string }, max:
   const title = cut(task.title, max)
   if (title === '') return task.key
 
-  return task.rev > 1 ? `${title} (${task.rev}번째 지시서)` : title
+  return task.rev > 1 ? `${title} (r${task.rev})` : title
 }
 
 /**
@@ -205,7 +205,7 @@ export function taskSegments(task: RelayTaskLine, palette: Palette, column: numb
   const title = task.title === '' ? task.key : task.title
   const titleStyle = task.status === 'cancelled' ? { dim: true as const } : { bold: true as const }
   const parts: Segment[][] = [
-    task.rev > 1 ? [{ text: `${task.rev}판`, dim: true }] : [],
+    task.rev > 1 ? [{ text: `r${task.rev}`, dim: true }] : [],
     modelEffort(task, isBox, palette),
     !isBox && task.runner !== '' ? [{ text: task.runner, dim: true }] : [],
     task.dispatchedAt === null ? [] : [{ text: clockTime(task.dispatchedAt), dim: true }],
@@ -234,7 +234,7 @@ function pendingSegments(pending: number | null, palette: Palette): Segment[] {
 
 /** The last verdict: its result, the commit it saw, and whether that is HEAD as read with the summary. */
 function verdictSegments(verdict: RelayRunStatus['verdict'], palette: Palette): Segment[] {
-  if (verdict === null) return [{ text: '판정 없음', dim: true }]
+  if (verdict === null) return [{ text: 'verdict 없음', dim: true }]
   const commit = verdict.commit.slice(0, 7)
   const head =
     verdict.head === undefined
@@ -243,7 +243,7 @@ function verdictSegments(verdict: RelayRunStatus['verdict'], palette: Palette): 
         ? { text: ` · ${commit} = HEAD`, dim: true }
         : { text: ` · ${commit} ≠ HEAD ${verdict.head.slice(0, 7)}`, color: palette.warn }
 
-  return [{ text: `판정 ${verdict.id} `, dim: true }, { text: verdict.result, color: verdict.result === 'pass' ? palette.ok : palette.alert }, head]
+  return [{ text: `verdict ${verdict.id} `, dim: true }, { text: verdict.result, color: verdict.result === 'pass' ? palette.ok : palette.alert }, head]
 }
 
 /**
@@ -271,9 +271,9 @@ const lineText = (line: readonly Segment[]): string => line.map(segment => segme
 /** `/relay-status`'s text: the runs as the box shows them; with none, the run finished last (by its last verdict) if any. */
 export function statusText(status: RelayStatus, palette: Palette, finishedLast?: string): string {
   if (status.runs.length === 0) {
-    return `진행 중인 relay 묶음이 없습니다. ${finishedLast === undefined ? '이 저장소에 끝난 묶음도 없습니다.' : `가장 최근에 끝난 묶음: ${finishedLast}`}`
+    return `진행 중인 relay run이 없습니다. ${finishedLast === undefined ? '이 저장소에 끝난 run도 없습니다.' : `가장 최근에 끝난 run: ${finishedLast}`}`
   }
   const blocks = status.runs.map(run => relayLines({ runs: [run] }, palette).map(lineText).join('\n'))
 
-  return [`진행 중인 relay 묶음 ${status.runs.length}개:`, ...blocks].join('\n\n')
+  return [`진행 중인 relay run ${status.runs.length}개:`, ...blocks].join('\n\n')
 }

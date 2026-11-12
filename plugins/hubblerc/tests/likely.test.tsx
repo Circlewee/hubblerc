@@ -577,11 +577,11 @@ test('at the runaway cap nothing is decided for the day, and a toast says so onc
   await bash($, 'pwd')
   await standIn.clock.settle()
   expect(standIn.anthropicCalls.length).toBe(0)
-  const toasts = standIn.toasts.map(toast => JSON.stringify(toast)).filter(text => text.includes('폭주 방지 상한'))
+  const toasts = standIn.toasts.map(toast => JSON.stringify(toast)).filter(text => text.includes('runaway cap'))
   expect(toasts.length).toBe(1)
   expect(toasts[0]).toContain('하루 $5')
   expect(store.likelySpend).toMatchObject({ warnedDay: today })
-  expect(await likelyCommand($, '하늘은 파랗다')).toContain('폭주 방지 상한')
+  expect(await likelyCommand($, '하늘은 파랗다')).toContain('runaway cap')
 })
 
 test('past the period\'s budget nothing is decided till the next period, with one toast', { options: { anthropicApiKey: KEY, likelyBashFail: true, likelyMonthlyBudgetUsd: 10, likelyPeriodStartDay: 15 } }, async ($, on) => {
@@ -641,7 +641,7 @@ test('/likely stats counts by task, tells the spend, and scores bash-fail\'s cal
   expect(stats).toContain('파일 2개')
   expect(stats).toMatch(/bash-fail\s+3건 \(3\)/)
   expect(stats).toContain('비용(이 기기): 오늘 2건')
-  expect(stats).toContain('/ 폭주 방지 상한 $5')
+  expect(stats).toContain('/ runaway cap $5')
   expect(stats).toContain('/ 예산 $100')
   // 0.8 failed, 0.8 did not, 0.15 did not: Brier (0.04 + 0.64 + 0.0225) / 3.
   expect(stats).toContain('전체: 3건 · Brier 0.234')
@@ -725,7 +725,7 @@ test('/likely shows the spread of its calls; the log keeps it', WITH_KEY, async 
   }
   await start($)
   const shown = await likelyCommand($, '이 명령은 실패할까: ls /없는경로')
-  expect(shown).toContain('퍼짐(호출 5개): 최대−최소 0.20 · 표준편차 0.06')
+  expect(shown).toContain('spread(호출 5개): 최대−최소 0.20 · 표준편차 0.06')
   expect(lines(standIn)[0]?.spread).toEqual([{ name: 'yes', range: 0.2, sd: 0.0632 }])
 })
 
@@ -768,7 +768,7 @@ test('the stats split decisions by spread, and show how the way a call asks move
   expect(variants.symbols.a?.count).toBe(5)
 
   const shown = robustnessLines(bins, variants).join('\n')
-  expect(shown).toContain('퍼짐(호출 값의 최대−최소)별, 정답 붙은 판정')
+  expect(shown).toContain('spread(호출 값의 최대−최소)별, 정답 붙은 판정')
   expect(shown).toContain('  ≥0.3          1     0.0%   ')
   expect(shown).toContain('뒤집어 물은 호출 − 그대로 물은 호출: 평균 +0.200, 절댓값 평균 0.200 (판정 4건)')
   expect(shown).toContain('기호별(그 호출 값 − 판정 평균):')
@@ -782,7 +782,7 @@ test('/likely stats ends with the robustness figures of bash-fail', WITH_KEY, as
   await bash($, 'false')
   await standIn.clock.settle()
   const stats = await likelyCommand($, 'stats')
-  expect(stats).toContain('퍼짐(호출 값의 최대−최소)별, 정답 붙은 판정')
+  expect(stats).toContain('spread(호출 값의 최대−최소)별, 정답 붙은 판정')
   expect(stats).toMatch(/  <0\.1 +1 +100\.0%/)
   expect(stats).toContain('뒤집어 물은 호출 − 그대로 물은 호출: 평균 +0.000')
 })
