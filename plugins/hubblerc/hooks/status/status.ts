@@ -7,6 +7,8 @@ import { bashPurpose } from '../activity/bash-purpose'
 import { addFiveHourPoint } from './forecast'
 import { MODEL_LIMITS_GAP_MS, MODEL_LIMITS_KEY, parseModelLimits, readSharedModelLimits, refusalWaitMs, USAGE_URL } from './model-limits'
 import type { SharedModelLimits } from './model-limits'
+import { hasSameWindows, readSharedUsage, sharedFrom, USAGE_SHARE_GAP_MS, USAGE_SHARED_KEY, withSharedUsage } from './usage-share'
+import type { SharedUsage } from './usage-share'
 import { isSidebarShown } from '../shared/pane'
 import { isRecord } from '../shared/values'
 import { refreshTodos } from '../todo/todo'
@@ -55,6 +57,14 @@ let wakeStatus: (() => void) | null = null
 /** When `refreshStatus` last read everything: the 30-second read is left out soon after one (an answer's end). */
 let lastStatusAt = 0
 /**
+ * The account's windows as the sessions share them (usage-share.ts): when this session's last
+ * response came (0: none yet), the store's record as last read or written here, and when this
+ * session last wrote it.
+ */
+let ownUsageAt = 0
+let sharedUsage: SharedUsage | null = null
+let lastUsageShareAt = 0
+/**
  * The weekly limits of single models as the usage endpoint last gave them (to this session or to
  * another: the store's record), when it may be asked next (the wall clock) and how many times in a
  * row it refused. The module's: `refreshStatus` writes the snapshot whole, so each one carries the
@@ -81,6 +91,9 @@ let isModelLimitsOff = false
 export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
   lastStatusAt = 0
+  ownUsageAt = 0
+  sharedUsage = null
+  lastUsageShareAt = 0
   hasLookedForModelLimits = false
   isModelLimitsOff = false
   modelLimits = []
@@ -210,16 +223,33 @@ export async function refreshStatus($: EngineInterface): Promise<void> {
 
 /**
  * Reads the context's fill and the rate-limit windows again, and logs the 5-hour window. Besides
- * `refreshStatus`, as each request returns (effort.ts): the engine holds what the last response
- * reported, so mid-answer the figures move with the requests and no request is made for them.
+ * `refreshStatus`, as each request returns (effort.ts, `isFromResponse`): the engine holds what the
+ * last response reported, so mid-answer the figures move with the requests and no request is made
+ * for them.
+ *
+ * The windows count the account, and the engine knows only what this session's responses said. So
+ * the sessions share them in the store: a read that follows no response of this session's takes
+ * the store's record and draws its windows when they are newer; a session whose own are the newest
+ * writes them, as its answer ends and mid-answer at most each half minute.
  */
-export async function refreshUsage($: EngineInterface): Promise<void> {
-  const figuresNow = snapshot(await $.session.usage())
+export async function refreshUsage($: EngineInterface, isFromResponse = false): Promise<void> {
+  const now = await $.clock.now()
+  const own = snapshot(await $.session.usage())
+  if (isFromResponse) ownUsageAt = now
+  else sharedUsage = readSharedUsage(await $.store.get(USAGE_SHARED_KEY).catch(() => undefined)) ?? sharedUsage
+  const figuresNow = withSharedUsage(own, ownUsageAt, sharedUsage, now)
   if (JSON.stringify(figuresNow) !== JSON.stringify(await read($, usage))) await update($, usage, () => figuresNow)
   // The 5-hour window's reading joins the log when it moved: the burn-out forecast paces from it.
-  const now = await $.clock.now()
   const log = addFiveHourPoint(await read($, fiveHourLog), figuresNow.fiveHour, now)
   if (log !== null) await update($, fiveHourLog, () => log)
+
+  if (ownUsageAt <= (sharedUsage?.at ?? 0)) return
+  if (isFromResponse && now - lastUsageShareAt < USAGE_SHARE_GAP_MS) return
+  const mine = sharedFrom(own, ownUsageAt)
+  if (mine === null || hasSameWindows(mine, sharedUsage)) return
+  lastUsageShareAt = now
+  sharedUsage = mine
+  await $.store.set(USAGE_SHARED_KEY, mine).catch(() => undefined)
 }
 
 /**
