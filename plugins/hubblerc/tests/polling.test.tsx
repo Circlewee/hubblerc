@@ -169,3 +169,61 @@ test('while the sidebar shows, memory is read every half minute and the disk eve
   expect(count(standIn.ran, '/usr/bin/vm_stat')).toBe(from.vm + 10)
   expect(count(standIn.ran, '/bin/df')).toBe(from.df + 1)
 })
+
+test('idle, the 30-second read writes no status that did not change: only the tick, for the countdowns', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const writes: Record<string, number> = {}
+  on('state.set', ($, e, next) => {
+    writes[e.key] = (writes[e.key] ?? 0) + 1
+
+    return next(e)
+  })
+  await start($)
+  await standIn.clock.advance(5000)
+
+  const before = { ...writes }
+  const from = statusRuns(standIn.ran)
+  await standIn.clock.advance(60_000)
+  expect(statusRuns(standIn.ran) - from).toBe(2)
+  for (const key of ['model', 'project', 'usage', 'git', 'fiveHourLog']) expect((writes[key] ?? 0) - (before[key] ?? 0)).toBe(0)
+  expect((writes.tick ?? 0) - (before.tick ?? 0)).toBe(2)
+
+  // A window that moved is written at the next read.
+  standIn.fiveHourPercent = 60
+  await standIn.clock.advance(30_000)
+  expect((writes.usage ?? 0) - (before.usage ?? 0)).toBe(1)
+})
+
+test('as a request returns, the usage is read again: the band moves mid-answer, not at the next half minute', async ($, on) => {
+  const standIn = standInForEngine(on)
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+  })
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band', surface: 'terminal', props: BAND_PROPS })
+  expect(await ui.find({ type: 'Text', text: '60%' })).toBeUndefined()
+
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  standIn.fiveHourPercent = 60
+  const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 1 })
+  for await (const chunk of stream) void chunk
+  await standIn.clock.advance(1)
+  expect(await ui.find({ type: 'Text', text: '60%' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the 30-second read is left out right after an answer ended and read everything', async ($, on) => {
+  const standIn = standInForEngine(on)
+  await start($)
+  await standIn.clock.advance(20_000)
+
+  await $.turn.start({ text: '질문', turnId: 't1' })
+  await standIn.clock.advance(3000)
+  await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't1', durationMs: 3000 })
+  const from = statusRuns(standIn.ran)
+  // The half minute comes up within seconds of the answer's end: no second read.
+  await standIn.clock.advance(12_000)
+  expect(statusRuns(standIn.ran)).toBe(from)
+  await standIn.clock.advance(30_000)
+  expect(statusRuns(standIn.ran)).toBe(from + 1)
+})

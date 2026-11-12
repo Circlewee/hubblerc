@@ -52,6 +52,8 @@ let isAnswering = false
 let statusTimer: Timer | null = null
 let statusTimerMs = 0
 let wakeStatus: (() => void) | null = null
+/** When `refreshStatus` last read everything: the 30-second read is left out soon after one (an answer's end). */
+let lastStatusAt = 0
 /**
  * The weekly limits of single models as the usage endpoint last gave them (to this session or to
  * another: the store's record), when it may be asked next (the wall clock) and how many times in a
@@ -78,6 +80,7 @@ let isModelLimitsOff = false
  */
 export async function startStatus($: EngineInterface): Promise<void> {
   await update($, running, () => [])
+  lastStatusAt = 0
   hasLookedForModelLimits = false
   isModelLimitsOff = false
   modelLimits = []
@@ -109,7 +112,8 @@ export async function startStatus($: EngineInterface): Promise<void> {
     const hasAgents = await refreshAgents($).catch(() => false)
     if (isSlow) {
       lastSlow = now
-      await refreshStatus($).catch(() => undefined)
+      // Read under half the period ago (an answer just ended): not again.
+      if (now - lastStatusAt >= SLOW_REFRESH_MS / 2) await refreshStatus($).catch(() => undefined)
       if (await isSidebarShown($).catch(() => false)) {
         // Once, when the sidebar first shows: after that only as an answer ends.
         if (!hasLookedForModelLimits) void refreshModelLimits($).catch(() => undefined)
@@ -188,19 +192,34 @@ async function afterCall($: EngineInterface, tool: string, e: CallInput, ran: To
   }
 }
 
-/** Reads the model, folder, usage and git again (after each answer, and every 30 seconds), and logs the 5-hour window. */
+/**
+ * Reads the model, folder, usage and git again (after each answer, and every 30 seconds), and logs
+ * the 5-hour window. Each is written only when it changed, so a read that finds nothing new redraws
+ * nothing.
+ */
 export async function refreshStatus($: EngineInterface): Promise<void> {
-  const [modelId, cwd, figures] = await Promise.all([$.session.model(), $.session.cwd(), $.session.usage()])
-  await update($, model, () => modelId)
-  await update($, project, () => cwd.split('/').filter(Boolean).pop() ?? cwd)
-  const figuresNow = snapshot(figures)
-  await update($, usage, () => figuresNow)
+  const [modelId, cwd] = await Promise.all([$.session.model(), $.session.cwd()])
+  if ((await read($, model)) !== modelId) await update($, model, () => modelId)
+  const name = cwd.split('/').filter(Boolean).pop() ?? cwd
+  if ((await read($, project)) !== name) await update($, project, () => name)
+  await refreshUsage($)
+  lastStatusAt = await $.clock.now()
+  const info = await readGit($, cwd)
+  if (JSON.stringify(info) !== JSON.stringify(await read($, git))) await update($, git, () => info)
+}
+
+/**
+ * Reads the context's fill and the rate-limit windows again, and logs the 5-hour window. Besides
+ * `refreshStatus`, as each request returns (effort.ts): the engine holds what the last response
+ * reported, so mid-answer the figures move with the requests and no request is made for them.
+ */
+export async function refreshUsage($: EngineInterface): Promise<void> {
+  const figuresNow = snapshot(await $.session.usage())
+  if (JSON.stringify(figuresNow) !== JSON.stringify(await read($, usage))) await update($, usage, () => figuresNow)
   // The 5-hour window's reading joins the log when it moved: the burn-out forecast paces from it.
   const now = await $.clock.now()
   const log = addFiveHourPoint(await read($, fiveHourLog), figuresNow.fiveHour, now)
   if (log !== null) await update($, fiveHourLog, () => log)
-  const info = await readGit($, cwd)
-  await update($, git, () => info)
 }
 
 /**

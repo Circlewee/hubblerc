@@ -5,6 +5,7 @@ import type { EffortSample, EffortSource } from '../../types'
 import { autoLevelFor, isAutoOn } from './auto-effort'
 import { noteFirstRequest } from './effort-record'
 import { addTokens } from '../status/forecast'
+import { refreshUsage } from '../status/status'
 import { noteRequest } from '../commit/trailers'
 
 const effortOverride = atom({ plugin: 'hubblerc', key: 'effortOverride' } as const, null)
@@ -40,11 +41,18 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined) {
       noteRequest(e.agentId, e.model, e.effort === undefined ? undefined : String(e.effort), false)
-      return yield* next(e)
+      const answered = yield* next(e)
+      // A subagent's response reports the account's windows too.
+      void refreshUsage($).catch(() => undefined)
+
+      return answered
     }
     if (e.effort === undefined) {
       noteRequest(undefined, e.model, undefined, false)
-      return yield* watchPhase($, next(e))
+      const answered = yield* watchPhase($, next(e))
+      void refreshUsage($).catch(() => undefined)
+
+      return answered
     }
 
     const engine = String(e.effort)
@@ -73,6 +81,8 @@ export function controlEffort(on: On, autoByDefault: boolean): void {
       .now()
       .then(now => update($, lastRequestAt, () => now))
       .catch(() => undefined)
+    // Not awaited: the context's fill and the windows as this response left them, mid-answer too.
+    void refreshUsage($).catch(() => undefined)
 
     return result
   })
