@@ -111,15 +111,15 @@ export type TabsDrawing = {
 }
 
 /**
- * The contents and the to-dos share the last box, its title the tabs: `╭── ▾ 목차 12 │ 할 일 3 ──`.
+ * The contents and the to-dos share the last box, its title the tabs: `╭── ▾ Contents 12 │ Todos 3 ──`.
  * The arrow folds the box; a tab's name shows that tab (and unfolds a folded box), the shown one bold.
  */
 export function tabsHeading(f: Frame, d: TabsDrawing): (isFolded: boolean) => Heading {
   const { Box, Text, Button } = f.parts
   const { shownTab, contents, onFold, onTab } = d
   const { entries, pages, count } = contents
-  const contentsLabel = shownTab === 'contents' && pages > 1 ? `목차 #${entries.at(-1)?.number ?? ''}~${entries[0]?.number ?? ''} / ${count}` : `목차 ${count}`
-  const todoLabel = `할 일 ${d.openTodos}`
+  const contentsLabel = shownTab === 'contents' && pages > 1 ? `Contents #${entries.at(-1)?.number ?? ''}~${entries[0]?.number ?? ''} / ${count}` : `Contents ${count}`
+  const todoLabel = `Todos ${d.openTodos}`
   const tabButton = (tab: SidebarTab, label: string, isFolded: boolean) => (
     <Button
       key={`tab-${tab}`}

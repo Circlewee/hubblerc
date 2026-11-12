@@ -255,15 +255,15 @@ test('the last box has tabs: the contents, or the to-dos, the shown one bold and
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   // Waiting and in progress counted.
-  expect((await ui.find({ key: 'title-contents' }))?.text).toBe('╭── ▾ 목차 1 │ 할 일 2 ')
-  expect((await ui.find({ type: 'Text', text: '목차 1' }))?.props.bold).toBe(true)
-  expect((await ui.find({ type: 'Text', text: '할 일 2' }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ key: 'title-contents' }))?.text).toBe('╭── ▾ Contents 1 │ Todos 2 ')
+  expect((await ui.find({ type: 'Text', text: 'Contents 1' }))?.props.bold).toBe(true)
+  expect((await ui.find({ type: 'Text', text: 'Todos 2' }))?.props.dimColor).toBe(true)
   expect(await ui.find({ key: 'turn-t1' })).toBeDefined()
   expect(await ui.find({ key: 'todo-1' })).toBeUndefined()
 
   await ui.press({ key: 'tab-todo' })
   expect(stored.sidebarTab).toBe('todo')
-  expect((await ui.find({ type: 'Text', text: '할 일 2' }))?.props.bold).toBe(true)
+  expect((await ui.find({ type: 'Text', text: 'Todos 2' }))?.props.bold).toBe(true)
   expect(await ui.find({ key: 'turn-t1' })).toBeUndefined()
   // In progress, waiting, done; the answer number only on what is taken up or done.
   expect(await rowKeys(ui)).toEqual(['todo-2', 'todo-1', 'todo-3'])
@@ -440,10 +440,10 @@ test("another session's change shows as an answer starts; past twelve, or in a s
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 1')
+  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('Todos 1')
   stored[KEY] = { items: Array.from({ length: 15 }, (_, i) => item(i + 1, 'pending')), nextId: 16 }
   await $.turn.start({ text: '질문', turnId: 't1' })
-  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 15')
+  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('Todos 15')
   expect((await rowKeys(ui)).length).toBe(12)
   expect((await ui.find({ type: 'Text', text: /^외 \d+개$/ }))?.text).toBe('외 3개')
   await ui.unmount()
@@ -465,7 +465,7 @@ test('the tab draws on mobile; a folded box unfolds on a press of a tab', async 
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'mobile', props: PANE_PROPS })
-  expect((await ui.find({ key: 'box-contents' }))?.text).toMatch(/^╶── ▸ 목차 0 │ 할 일 1 ─+$/)
+  expect((await ui.find({ key: 'box-contents' }))?.text).toMatch(/^╶── ▸ Contents 0 │ Todos 1 ─+$/)
   await ui.press({ key: 'tab-todo' })
   expect(await ui.find({ key: 'todo-1' })).toBeDefined()
   await ui.unmount()
@@ -725,13 +725,13 @@ test("another session's change to the to-dos shows as the next question starts, 
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 1')
+  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('Todos 1')
   stored[KEY] = { items: [item(1, 'pending'), item(2, 'pending')], nextId: 3 }
   await standIn.clock.settle()
-  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 1')
+  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('Todos 1')
   await $.turn.start({ text: '다음 질문', turnId: 't1' })
   await standIn.clock.settle()
-  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('할 일 2')
+  expect((await ui.find({ key: 'tab-todo' }))?.text).toBe('Todos 2')
   await ui.unmount()
 })
 

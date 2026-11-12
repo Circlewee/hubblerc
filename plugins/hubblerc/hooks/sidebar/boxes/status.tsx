@@ -25,7 +25,7 @@ export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.E
 
   return f.box(
     'status',
-    '상태',
+    'Status',
     <Box flexDirection="column">
       {status.map((part, i) => (
         <Box key={`status-${i}`}>
@@ -84,7 +84,7 @@ export function activityBox(f: Frame, activity: readonly string[]): JSX.Element 
 
   return f.box(
     'activity',
-    '작업',
+    'Task',
     <Box flexDirection="column">
       {activity.map((line, i) => (
         <Text key={`activity-${i}`} wrap="truncate-end" {...(line.startsWith('·') ? { dimColor: true } : { color: THEME_COLORS.running })}>

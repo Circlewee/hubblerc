@@ -77,7 +77,7 @@ export function filesBox(f: Frame, d: FilesDrawing): JSX.Element {
 
   return f.box(
     'files',
-    '파일',
+    'Files',
     <Box flexDirection="column">
       {shownFiles.inside.map(fileRow)}
       {more(shownFiles.insideHidden, 'inside-more')}

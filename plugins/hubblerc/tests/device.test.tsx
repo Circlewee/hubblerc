@@ -42,7 +42,7 @@ test('the sidebar opens with a box of the machine and the engine, beside the cat
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await ui.find({ key: 'title-device' }))?.text).toBe('╭── ▾ 장비 ')
+  expect((await ui.find({ key: 'title-device' }))?.text).toBe('╭── ▾ Device ')
   // A row of air above and below, in this box alone.
   expect((await ui.find({ key: 'device-body' }))?.props.paddingY).toBe(1)
   expect((await ui.find({ key: 'box-status' }))?.props.paddingY).toBeUndefined()

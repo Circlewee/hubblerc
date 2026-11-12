@@ -173,7 +173,7 @@ export function showAnswer(on: On): void {
       </Box>
     )
     const shown = view
-    if (shown === null) return <Box paddingX={1}>{head(<Text dimColor>목차에서 답변을 다시 눌러 주세요.</Text>)}</Box>
+    if (shown === null) return <Box paddingX={1}>{head(<Text dimColor>Contents에서 답변을 다시 눌러 주세요.</Text>)}</Box>
     const current = summary !== null && summary.key === summaryKey(shown) ? summary : null
 
     return (

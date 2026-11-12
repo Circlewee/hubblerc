@@ -31,7 +31,7 @@ export function deviceBox($: EngineInterface, f: Frame, d: DeviceDrawing): JSX.E
 
   return f.box(
     'device',
-    '장비',
+    'Device',
     // A row of air above and below: the cat and its lines sit apart from the borders.
     <Box key="device-body" {...(picture === null ? {} : { columnGap: 2 })} paddingY={1}>
       {picture !== null && Image !== undefined ? (

@@ -189,13 +189,13 @@ test('the sidebar pages through the contents', async ($, on) => {
   }
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
+  expect((await ui.find({ type: 'Text', text: /^Contents/ }))?.text).toBe('Contents #3~12 / 12')
   expect(await ui.find({ key: 'turn-t1' })).toBeUndefined()
   await ui.press({ key: 'toc-older' })
-  expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #1~2 / 12')
+  expect((await ui.find({ type: 'Text', text: /^Contents/ }))?.text).toBe('Contents #1~2 / 12')
   expect((await ui.find({ key: 'turn-t1' }))?.text).toBe('#1 질문 1')
   await ui.press({ key: 'toc-page-0' })
-  expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
+  expect((await ui.find({ type: 'Text', text: /^Contents/ }))?.text).toBe('Contents #3~12 / 12')
   await ui.unmount()
 })
 
@@ -256,12 +256,12 @@ test('a short pane shows fewer files and answers, so the contents are not cut of
 
   const tall = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, scroll: { offset: 0, bodyRows: 60 } } })
   expect((await tall.findAll({ type: 'Link' })).length).toBe(12)
-  expect((await tall.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
+  expect((await tall.find({ type: 'Text', text: /^Contents/ }))?.text).toBe('Contents #3~12 / 12')
   await tall.unmount()
 
   const short = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, scroll: { offset: 0, bodyRows: 36 } } })
   const links = (await short.findAll({ type: 'Link' })).length
-  const title = (await short.find({ type: 'Text', text: /^목차/ }))?.text ?? ''
+  const title = (await short.find({ type: 'Text', text: /^Contents/ }))?.text ?? ''
   const [, from, to] = /#(\d+)~(\d+)/.exec(title) ?? []
   const answers = Number(to) - Number(from) + 1
   expect(links).toBeLessThan(12)
@@ -273,7 +273,7 @@ test('a short pane shows fewer files and answers, so the contents are not cut of
   // Folding the files gives their rows to the contents.
   const roomy = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE_PROPS, scroll: { offset: 0, bodyRows: 36 } } })
   await roomy.press({ key: 'fold-files' })
-  expect((await roomy.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 #3~12 / 12')
+  expect((await roomy.find({ type: 'Text', text: /^Contents/ }))?.text).toBe('Contents #3~12 / 12')
   await roomy.unmount()
 })
 
@@ -317,7 +317,7 @@ test('the sidebar shows the status, the files changed and the contents', async (
     expect(await ui.find({ type: 'Text', text: '45%' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: /대기 중/ }))?.text).toBe('· 대기 중')
     // The stand-in's git has notes.md in the repository and nothing of it left to commit.
-    expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ 파일 ')
+    expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ Files ')
     expect(await ui.find({ key: 'file-/repo/hubblerc/notes.md' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: ' ✓' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: ' +2' }))?.text).toBe(' +2')
@@ -340,12 +340,12 @@ test('each part of the sidebar is a box, its title drawn over the top border aft
   }
   // The title row comes after its box in the tree, so it is painted over the border, not under it.
   expect((await ui.find({ key: 'title-status' }))?.props).toMatchObject({ marginBottom: -1 })
-  expect((await ui.find({ key: 'title-status' }))?.text).toBe('╭── ▾ 상태 ')
-  expect((await ui.find({ key: 'fold-activity' }))?.text).toBe(' ▾ 작업 ')
-  expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ 파일 ')
+  expect((await ui.find({ key: 'title-status' }))?.text).toBe('╭── ▾ Status ')
+  expect((await ui.find({ key: 'fold-activity' }))?.text).toBe(' ▾ Task ')
+  expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ Files ')
   // The last box's title is its tabs: the arrow folds it, each name shows its tab.
   expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▾ ')
-  expect((await ui.find({ key: 'title-contents' }))?.text).toBe('╭── ▾ 목차 2 │ 할 일 0 ')
+  expect((await ui.find({ key: 'title-contents' }))?.text).toBe('╭── ▾ Contents 2 │ Todos 0 ')
   await ui.unmount()
 })
 
@@ -365,7 +365,7 @@ test('a press on a box title folds it to one line and back; the fold is kept for
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   await ui.press({ key: 'fold-files' })
   expect(await ui.find({ key: 'file-/repo/hubblerc/notes.md' })).toBeUndefined()
-  expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▸ 파일 ')
+  expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▸ Files ')
   expect((await ui.find({ key: 'box-files' }))?.props.borderStyle).toBeUndefined()
   expect(stored.sidebarFolded).toEqual(['files'])
 
@@ -434,7 +434,7 @@ test('"외 N개 더 보기" shows every file; "줄이기", where it stood, goes 
   const shrink = texts.indexOf('줄이기')
   expect(shrink).toBeGreaterThan(texts.findIndex(text => text.endsWith('f0.ts')))
   expect(shrink).toBeLessThan(texts.findIndex(text => text.startsWith('┄┄ /tmp/x')))
-  expect((await ui.find({ key: 'title-files' }))?.text).toBe('╭── ▾ 파일 ')
+  expect((await ui.find({ key: 'title-files' }))?.text).toBe('╭── ▾ Files ')
 
   await ui.press({ key: 'files-collapse' })
   expect(await rows()).toBe(12)
@@ -448,7 +448,7 @@ test('a box folded in an earlier session starts folded', async ($, on) => {
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▸ ')
-  expect((await ui.find({ key: 'tab-contents' }))?.text).toBe('목차 0')
+  expect((await ui.find({ key: 'tab-contents' }))?.text).toBe('Contents 0')
   expect(await ui.find({ type: 'Text', text: /아직 기록된 답변/ })).toBeUndefined()
   expect((await ui.find({ key: 'box-status' }))?.props.borderStyle).toBe('round')
   await ui.unmount()

@@ -196,7 +196,7 @@ test('" ✕ 닫기 " at the top right closes the pane as Esc does, on the termin
     expect(standIn.panes.map(paneOpen => paneOpen.id)).not.toContain('hubblerc-answer')
     // The answer let go of, as on Esc: drawn again, the pane holds nothing of it.
     await pane.redraw()
-    expect(await pane.find({ type: 'Text', text: '목차에서 답변을 다시 눌러 주세요.' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'Contents에서 답변을 다시 눌러 주세요.' })).toBeDefined()
     expect(await pane.find({ key: 'answer-close' })).toBeDefined()
     await pane.unmount()
     await sidebar.unmount()

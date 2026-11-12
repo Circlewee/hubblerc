@@ -122,7 +122,7 @@ test('the session opened again by the restart gets its turns back with their tim
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 1')
+  expect((await ui.find({ type: 'Text', text: /^Contents/ }))?.text).toBe('Contents 1')
   expect(await ui.find({ type: 'Text', text: '5s' })).toBeDefined()
   expect((await ui.find({ key: 'effort' }))?.text).toBe('medium')
   await ui.unmount()
@@ -137,7 +137,7 @@ test("another session's snapshot, or an old one, is dropped and not used", async
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await ui.find({ type: 'Text', text: /^목차/ }))?.text).toBe('목차 0')
+  expect((await ui.find({ type: 'Text', text: /^Contents/ }))?.text).toBe('Contents 0')
   await ui.unmount()
   expect(store.restartSnapshot).toBeUndefined()
 })
