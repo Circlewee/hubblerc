@@ -111,7 +111,9 @@ test('a question that starts a waiting to-do in other words is put to the person
   expect(promptOf(standIn, 0)).toMatch(/todo-2 - 문서 정리/)
   expect(promptOf(standIn, 0)).toMatch(/none - none of them: the message asks for other work/)
   expect(promptOf(standIn, 0)).not.toContain('todo-3')
-  expect(logged(standIn)[0]).toMatchObject({ type: 'decision', task: TASK_TAKE, samples: 3, meta: { sessionId: 'session-1' } })
+  // Each call thinks first (adaptive): without it the three calls parted on the same question.
+  expect(standIn.anthropicCalls.every(call => (call.body.thinking as { type: string }).type === 'adaptive')).toBe(true)
+  expect(logged(standIn)[0]).toMatchObject({ type: 'decision', task: TASK_TAKE, samples: 3, thinking: true, meta: { sessionId: 'session-1' } })
   // Nothing moved by itself.
   expect(items(store).find(one => one.id === 1)?.status).toBe('pending')
   expect(toastTexts(standIn).filter(text => text.includes('할 일을 시작한 것 같습니다'))).toHaveLength(1)

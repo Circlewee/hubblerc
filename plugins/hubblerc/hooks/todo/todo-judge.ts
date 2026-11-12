@@ -4,7 +4,7 @@ import { hasApiKey, judgesTodos, likely, recordOutcome } from '../likely/likely'
 import { changeTodos, currentTodos, currentTurn, redrawTodos } from './todo'
 import { setItemStatus } from './todo-format'
 import type { TurnRef, UserTodo } from './todo-format'
-import { awaits, cameTrue, candidatesFor, CARRY_AT, chosenId, DONE_QUIET_ANSWERS, doneInput, doneQuestion, PREVIOUS_CHARS, SAMPLES, SUGGEST_AT, suggestionToast, takeInput, takeQuestion, TASK_DONE, TASK_TAKE, valueOf } from './todo-judge-format'
+import { awaits, cameTrue, candidatesFor, CARRY_AT, chosenId, DONE_QUIET_ANSWERS, doneInput, doneQuestion, PREVIOUS_CHARS, SAMPLES, SUGGEST_AT, THINKING, suggestionToast, takeInput, takeQuestion, TASK_DONE, TASK_TAKE, valueOf } from './todo-judge-format'
 import type { SuggestionKind, TodoSuggestion } from './todo-judge-format'
 
 /*
@@ -59,18 +59,32 @@ function isRejected(kind: SuggestionKind, id: number): boolean {
   return at !== undefined && (kind === 'take' || answers - at < DONE_QUIET_ANSWERS)
 }
 
-/** One judgment: the choice and how sure, or null when none was made (no key, a limit). */
-async function ask($: EngineInterface, kind: SuggestionKind, candidates: readonly UserTodo[], input: string): Promise<{ decisionId: string; id: number | null; probability: number } | null> {
+/**
+ * A judgment read: the choice and how sure, and the item given the largest chance whatever the choice
+ * (`none` may lead while an item holds a good share).
+ */
+type Made = { decisionId: string; id: number | null; probability: number; likeliestItem: { id: number; probability: number } | null }
+
+/** One judgment, or null when none was made (no key, a limit). */
+async function ask($: EngineInterface, kind: SuggestionKind, candidates: readonly UserTodo[], input: string): Promise<Made | null> {
   const meta: Record<string, string> = {}
   const session = await $.session.id().catch(() => '')
   if (session !== '') meta.sessionId = session
-  const result = await likely($, { task: kind === 'take' ? TASK_TAKE : TASK_DONE, input, questions: [kind === 'take' ? takeQuestion(candidates) : doneQuestion(candidates)], samples: SAMPLES, meta })
+  const result = await likely($, { task: kind === 'take' ? TASK_TAKE : TASK_DONE, input, questions: [kind === 'take' ? takeQuestion(candidates) : doneQuestion(candidates)], samples: SAMPLES, thinking: THINKING, meta })
   if ('skipped' in result || result.logPath === undefined) return null
   const answer = result.answers[0]
   if (answer?.type !== 'choice') return null
   open.push({ decisionId: result.id, kind, candidates: candidates.map(item => item.id) })
 
-  return { decisionId: result.id, id: chosenId(answer.choice), probability: answer.confidence }
+  const items = Object.entries(answer.probabilities)
+    .flatMap(([value, probability]) => {
+      const id = chosenId(value)
+
+      return id === null ? [] : [{ id, probability }]
+    })
+    .sort((a, b) => b.probability - a.probability)
+
+  return { decisionId: result.id, id: chosenId(answer.choice), probability: answer.confidence, likeliestItem: items[0] ?? null }
 }
 
 async function note($: EngineInterface, decisionId: string, outcome: string | null, why: string): Promise<void> {
@@ -107,7 +121,7 @@ async function settle($: EngineInterface): Promise<void> {
 }
 
 /** A judgment's choice put to the person when it names an item, is sure enough, and was not refused. */
-async function suggest($: EngineInterface, kind: SuggestionKind, made: { decisionId: string; id: number | null; probability: number }, at: TurnRef): Promise<void> {
+async function suggest($: EngineInterface, kind: SuggestionKind, made: Made, at: TurnRef): Promise<void> {
   if (made.id === null || made.probability < SUGGEST_AT || isRejected(kind, made.id)) return
   const item = (await currentTodos($)).find(other => other.id === made.id)
   if (item === undefined || !awaits(kind, item.status)) return
@@ -138,7 +152,8 @@ export async function judgeTodoStart($: EngineInterface, text: string, isOffered
   const at = await currentTurn($)
   const made = await ask($, 'take', candidates, takeInput(text, previousAnswer))
   if (made === null || mine !== answers) return
-  if (made.id !== null && made.probability >= CARRY_AT) picked = made.id
+  // The item the question most likely works on goes to its answer's judgment even when `none` led.
+  if (made.likeliestItem !== null && made.likeliestItem.probability >= CARRY_AT) picked = made.likeliestItem.id
   await suggest($, 'take', made, at)
 }
 
