@@ -315,7 +315,7 @@ test('the sidebar shows the status, the files changed and the contents', async (
     // A press that opens the slider in the terminal; text in the desktop app.
     expect((await ui.find(surface === 'terminal' ? { key: 'effort' } : { type: 'Text', text: 'xhigh' }))?.text).toBe('xhigh')
     expect(await ui.find({ type: 'Text', text: '45%' })).toBeDefined()
-    expect((await ui.find({ type: 'Text', text: /대기 중/ }))?.text).toBe('· 대기 중')
+    expect(await ui.find({ type: 'Text', text: /대기 중/ })).toBeUndefined()
     // The stand-in's git has notes.md in the repository and nothing of it left to commit.
     expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ Files ')
     expect(await ui.find({ key: 'file-/repo/hubblerc/notes.md' })).toBeDefined()
@@ -335,13 +335,14 @@ test('each part of the sidebar is a box, its title drawn over the top border aft
   await twoAnswers($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  for (const id of ['status', 'activity', 'files', 'contents']) {
+  for (const id of ['status', 'files', 'contents']) {
     expect((await ui.find({ key: `box-${id}` }))?.props).toMatchObject({ borderStyle: 'round', borderDimColor: true })
   }
   // The title row comes after its box in the tree, so it is painted over the border, not under it.
   expect((await ui.find({ key: 'title-status' }))?.props).toMatchObject({ marginBottom: -1 })
   expect((await ui.find({ key: 'title-status' }))?.text).toBe('╭── ▾ Status ')
-  expect((await ui.find({ key: 'fold-activity' }))?.text).toBe(' ▾ Task ')
+  // What runs now has no box of its own: the engine's rows and the cat tell it (2026-11-12).
+  expect(await ui.find({ key: 'box-activity' })).toBeUndefined()
   expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ Files ')
   // The last box's title is its tabs: the arrow folds it, each name shows its tab.
   expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▾ ')

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { CommandPresentation, ElementConstructor, EngineInterface, InputProps, On, RenderViewport } from 'claude-code'
 
 import { THEME_COLORS } from '../shared/style'
-import { activityParts, requestSegments, statusParts } from '../status/band-format'
+import { requestSegments, statusParts } from '../status/band-format'
 import { promptKey } from '../activity/activity'
 import { deviceLines, versionNote } from './device'
 import { burnoutMinutes, requestTime } from '../status/forecast'
@@ -22,7 +22,7 @@ import { deviceBox } from './boxes/device'
 import { filesBox } from './boxes/files'
 import { frame } from './boxes/frame'
 import type { SectionId } from './boxes/frame'
-import { activityBox, statusBox } from './boxes/status'
+import { statusBox } from './boxes/status'
 import { relayBox } from './boxes/relay'
 import { todoBody } from './boxes/todo'
 import { relayLines } from '../relay/relay-status'
@@ -281,7 +281,6 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const isWorking = turnList.at(-1)?.durationMs === null
     // When the last request went out and what it carried, the cache's share of its input; mid-answer too.
     const request = requestSegments(requestTime(lastRequestTime), lastSample, THEME_COLORS)
-    const activity = activityParts(runningList, agentList, isWorking, now)
     const files = sessionFiles(turnList, gitInfo)
     const all = tocEntries(turnList, now)
     // Each box is drawn by its own function (`boxes/`) from what was read here.
@@ -329,7 +328,6 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       // Air above and below; a picture beside the lines, or the lines alone.
       boxRows('device', 2 + (picture === null ? deviceText : Math.max(PICTURE_ROWS, deviceText))) +
       boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1) + (likelyLine === '' ? 0 : 1)) +
-      boxRows('activity', activity.length) +
       (relay.length === 0 ? 0 : boxRows('relay', relay.length)) +
       (files.length === 0 ? 0 : boxRows('files', 0)) +
       boxRows('contents', 0)
@@ -380,7 +378,6 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       <Box flexDirection="column">
         {deviceBox($, f, { info: deviceInfo, lines, note, picture, pictureColumns, Image, mood, mark: catMark(mood), isRestartPending })}
         {statusBox($, f, { status, id, name, request, likelyLine })}
-        {activityBox(f, activity)}
         {relay.length === 0 ? null : relayBox(f, relay)}
         {files.length === 0 ? null : filesBox(f, { shown: shownFiles, isExpanded: isFilesExpanded, isCut, onExpand: expandFiles, onCollapse: () => void update($, filesExpanded, () => false) })}
         {f.box('contents', tabs, lastBody)}

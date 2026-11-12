@@ -43,8 +43,8 @@ test('in the desktop app the sidebar draws no cat and no borders: each box a tit
   const app = await sidebar($, 'desktop')
   expect(app.hasCat).toBe(false)
   expect(app.borders).toBe(0)
-  expect(app.titles).toEqual(['title-device', 'title-status', 'title-activity', 'title-contents'])
-  expect(app.rules).toBe(4)
+  expect(app.titles).toEqual(['title-device', 'title-status', 'title-contents'])
+  expect(app.rules).toBe(3)
   expect(app.effortButton).toBe(false)
   expect(app.effortText).toBe('xhigh')
   expect(app.device).toBe('Claude Code 2.1.310')
@@ -52,7 +52,7 @@ test('in the desktop app the sidebar draws no cat and no borders: each box a tit
   // The terminal as it was.
   const terminal = await sidebar($, 'terminal')
   expect(terminal.hasCat).toBe(true)
-  expect(terminal.borders).toBe(4)
+  expect(terminal.borders).toBe(3)
   expect(terminal.effortButton).toBe(true)
 })
 

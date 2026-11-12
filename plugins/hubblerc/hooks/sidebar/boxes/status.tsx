@@ -1,7 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
 import { EFFORT_KEY_ACTION, togglePicker } from '../../effort/effort-picker'
-import { THEME_COLORS } from '../../shared/style'
 import type { Segment } from '../../shared/style'
 import { clipCells } from '../sidebar-format'
 import type { Frame } from './frame'
@@ -74,23 +73,6 @@ export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.E
           {likelyLine}
         </Text>
       )}
-    </Box>,
-  )
-}
-
-/** What runs now, one item a line; `· 대기 중` dim. */
-export function activityBox(f: Frame, activity: readonly string[]): JSX.Element {
-  const { Box, Text } = f.parts
-
-  return f.box(
-    'activity',
-    'Task',
-    <Box flexDirection="column">
-      {activity.map((line, i) => (
-        <Text key={`activity-${i}`} wrap="truncate-end" {...(line.startsWith('·') ? { dimColor: true } : { color: THEME_COLORS.running })}>
-          {line}
-        </Text>
-      ))}
     </Box>,
   )
 }
