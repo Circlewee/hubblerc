@@ -110,6 +110,24 @@ export function draftInsertText(box: { text: string; cursor: number }, text: str
 }
 
 /**
+ * Where a project root is in the main working tree, from `git rev-parse --path-format=absolute
+ * --show-prefix --git-dir --git-common-dir` run in it: the root itself in the main tree (the two
+ * directories are one) or when the answer is not of that shape; in a linked worktree, the main
+ * tree's root (the common directory's parent; a bare repository's own directory) with the root's
+ * path inside the checkout.
+ */
+export function mainTreePath(root: string, answer: string): string {
+  const lines = answer.split('\n')
+  if (lines.length < 3) return root
+  const [prefix = '', gitDir = '', commonDir = ''] = lines.map(line => line.trim())
+  if (gitDir === '' || commonDir === '' || gitDir === commonDir) return root
+  const main = commonDir.endsWith('/.git') ? commonDir.slice(0, -'/.git'.length) : commonDir
+  const inside = prefix.replace(/\/+$/, '')
+
+  return inside === '' ? main : `${main}/${inside}`
+}
+
+/**
  * The store key of a project's to-dos: a hash of its root and the root's end, so a long path never
  * passes the store's 256 characters and the key still says whose it is.
  */

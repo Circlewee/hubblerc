@@ -20,6 +20,7 @@ import {
   TODO_USAGE,
   todoListText,
   footerRows,
+  mainTreePath,
   todoRows,
   todoLeastRows,
   todosShown,
@@ -828,4 +829,28 @@ test('editing an item again after saving it draws a field new to the engine, fil
   await ui.input({ key: third?.key ?? '', text: '' })
   expect((await ui.findAll({ type: 'Input' })).map(found => found.key)).toEqual(['todo-input'])
   await ui.unmount()
+})
+
+test("a linked worktree's root is the same place in the main working tree; the main tree's, or an answer of another shape, itself", () => {
+  const main = '/repo/hubblerc/.git'
+  expect(mainTreePath('/work/wt', `\n${main}/worktrees/wt\n${main}\n`)).toBe('/repo/hubblerc')
+  expect(mainTreePath('/work/wt/plugins', `plugins/\n${main}/worktrees/wt\n${main}\n`)).toBe('/repo/hubblerc/plugins')
+  expect(mainTreePath('/repo/hubblerc/plugins', `plugins/\n${main}\n${main}\n`)).toBe('/repo/hubblerc/plugins')
+  // A bare repository has no main tree: its own directory stands for it.
+  expect(mainTreePath('/work/wt', '\n/repo/bare.git/worktrees/wt\n/repo/bare.git\n')).toBe('/repo/bare.git')
+  expect(mainTreePath('/work/wt', '/repo/hubblerc\n')).toBe('/work/wt')
+  expect(mainTreePath('/work/wt', '')).toBe('/work/wt')
+})
+
+test("a session in a linked worktree reads and writes the main working tree's to-dos", async ($, on) => {
+  const standIn = standInForEngine(on)
+  const stored = memoryStore(on, { [KEY]: { items: [item(1, 'pending', { text: '본 저장소에서 적은 일' })], nextId: 2 } })
+  standIn.root = '/work/orca/hubblerc-feature'
+  standIn.mainTree = '/repo/hubblerc'
+  await start($)
+
+  expect(await todo($, '')).toContain('본 저장소에서 적은 일')
+  await todo($, '워크트리에서 적은 일')
+  expect(items(stored).map(entry => entry.text)).toEqual(['본 저장소에서 적은 일', '워크트리에서 적은 일'])
+  expect(stored[todoStoreKey('/work/orca/hubblerc-feature')]).toBeUndefined()
 })

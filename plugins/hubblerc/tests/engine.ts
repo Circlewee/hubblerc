@@ -44,6 +44,8 @@ export type StandIn = {
   gitStatusArgs: string[][]
   /** What `git diff --numstat` answers (`added\tremoved\tpath` lines); a test may change it. */
   gitNumstat: string
+  /** The main working tree the session's root is a linked worktree of (null: the root is the main tree). */
+  mainTree: string | null
   /** The session's name its transcript's last `custom-title` row gives (null: none). */
   sessionName: string | null
   /** The transcript's last row of `/effort` turning ultracode on or off ('' none), and whether the `ultracode` setting is on. */
@@ -115,7 +117,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), modelId: 'claude-opus-5-5', panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, signIn: null, usageAnswer: { status: 200, body: {} }, usageCalls: [], gitStatusArgs: [], gitNumstat: '', sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), modelId: 'claude-opus-5-5', panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, signIn: null, usageAnswer: { status: 200, body: {} }, usageCalls: [], gitStatusArgs: [], gitNumstat: '', mainTree: null, sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -255,6 +257,9 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
     if (e.argv[0] === '/usr/bin/sw_vers') return ok('27.0.1\n')
     if (e.argv[0] === 'sh') return ok(`${standIn.installedVersions.join('\n')}\n`)
     if (e.argv.includes('--numstat')) return ok(standIn.gitNumstat)
+    if (e.argv.includes('--git-common-dir')) {
+      return ok(standIn.mainTree === null ? `\n${standIn.root}/.git\n${standIn.root}/.git\n` : `\n${standIn.mainTree}/.git/worktrees/wt\n${standIn.mainTree}/.git\n`)
+    }
     if (e.argv.includes('rev-parse')) {
       return { value: { exitCode: 0, stdout: '/repo/hubblerc\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }

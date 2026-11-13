@@ -17,6 +17,7 @@ import {
   setItemStatus,
   STATUS_MARK,
   todoListText,
+  mainTreePath,
   todoStoreKey,
   todoToolList,
   trashListText,
@@ -44,6 +45,31 @@ const TOOL_DESCRIPTION =
  * reads `userTodoVersion`, bumped on each change, to be drawn again.
  */
 let loaded: { key: string; record: TodoRecord; signature: string } | null = null
+/** Each project root's home, once found: the directory its to-dos are kept for. */
+const homes = new Map<string, string>()
+
+/**
+ * The directory the project's to-dos are kept for: the session's project root, or, in a linked
+ * worktree, the same place in the main working tree, so a worktree's sessions share the list of the
+ * checkout they came from (2026-11-13: they saw an empty list of their own). One `git rev-parse` a
+ * root a session; a root outside a repository, or a git that cannot be run, is the root itself.
+ */
+async function todoHome($: EngineInterface): Promise<string> {
+  const root = await $.session.root()
+  const known = homes.get(root)
+  if (known !== undefined) return known
+  let home = root
+  try {
+    const ran = await $.process.run(['git', 'rev-parse', '--path-format=absolute', '--show-prefix', '--git-dir', '--git-common-dir'], { cwd: root, timeoutMs: 3000 })
+    if (ran.exitCode === 0) home = mainTreePath(root, ran.stdout)
+  } catch {
+    // Not kept: the next read asks git again.
+    return root
+  }
+  homes.set(root, home)
+
+  return home
+}
 
 /**
  * The last item ↗ put in the prompt box, till the next main-loop question, and how. `isInDraft`
@@ -102,7 +128,7 @@ export async function startTodos($: EngineInterface): Promise<void> {
  * main-loop answer starts, on a press of a tab, and on the 30-second tick while the sidebar shows.
  */
 export async function refreshTodos($: EngineInterface): Promise<void> {
-  const key = todoStoreKey(await $.session.root())
+  const key = todoStoreKey(await todoHome($))
   await keep($, key, parseTodoRecord(await $.store.get(key)))
 }
 
@@ -110,7 +136,7 @@ export async function refreshTodos($: EngineInterface): Promise<void> {
 export async function todosForDrawing($: EngineInterface): Promise<UserTodo[]> {
   if (loaded === null) {
     try {
-      const key = todoStoreKey(await $.session.root())
+      const key = todoStoreKey(await todoHome($))
       const record = parseTodoRecord(await $.store.get(key))
       // No state is written while drawing: the module keeps it, the next change bumps the version.
       loaded = { key, record, signature: JSON.stringify(record) }
@@ -152,7 +178,7 @@ async function redraw($: EngineInterface): Promise<void> {
  * the undo away: the one a delete leaves is set after it.
  */
 export async function changeTodos($: EngineInterface, change: (record: TodoRecord) => TodoRecord | null): Promise<TodoRecord | null> {
-  const key = todoStoreKey(await $.session.root())
+  const key = todoStoreKey(await todoHome($))
   const current = parseTodoRecord(await $.store.get(key))
   const next = change(current)
   if (undo !== null) {
@@ -286,7 +312,7 @@ export async function clearDoneTodos($: EngineInterface): Promise<void> {
 }
 
 async function leaveUndo($: EngineInterface, ids: number[]): Promise<void> {
-  undo = { key: todoStoreKey(await $.session.root()), ids }
+  undo = { key: todoStoreKey(await todoHome($)), ids }
   await redraw($)
 }
 
