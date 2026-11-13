@@ -32,8 +32,8 @@ const MAX_CONTEXT_CHARS = 1000
 const MAX_PICKS_KEPT = 20
 /**
  * The reply's room: the kind and a short reason (2026-11-05: the person wants to see what a pick was
- * made on). It was 8, for the word alone; whether the reason keeps the first request within its 2.5 s
- * is measured in a session (spec F3).
+ * made on). It was 8, for the word alone; what the reason costs the first request in waiting was
+ * measured from the pick records (spec F3).
  */
 const MAX_REPLY_TOKENS = 60
 

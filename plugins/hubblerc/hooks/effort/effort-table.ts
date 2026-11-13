@@ -19,7 +19,8 @@ export const TASK_LABELS: Record<TaskKind, string> = { ask: '질문·조회', ro
 /**
  * First values (2026-11-11), from the effort sweeps Anthropic published (system cards, launch posts,
  * Optimizing for cost and intelligence) and two independent ones (Artificial Analysis, ARC Prize);
- * the figures and the rule are in docs/spec.md. The sweeps are of hard coding, agentic and research
+ * the rule is in docs/spec.md (F3), the figures behind each cell in the spec's earlier revision
+ * (`git show 66ef04d:docs/spec.md`). The sweeps are of hard coding, agentic and research
  * tasks, so `ask` and `routine` are read off them, not measured. Rule: `ask` the lowest level before
  * the scores fall off, `routine` the lowest within about 3 points of `high` on everyday coding sets,
  * `hard` the level past which a step buys under about 3 points for twice the cost or more, `long`

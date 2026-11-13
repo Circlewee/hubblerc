@@ -67,7 +67,8 @@ const VARIANTS: Record<string, Variant> = {
   'o1-opus-low': { model: OPUS, flip: false, hint: true, thinking: true, note: 'Opus 5.5, effort low, 1회', samples: 1, request: { max_tokens: 8000 } },
   'o1-opus-high': { model: OPUS, flip: false, hint: true, thinking: true, note: 'Opus 5.5, effort high, 1회', samples: 1, effort: 'high', request: { max_tokens: 16000 } },
   /**
-   * The second comparison (fixed 2026-11-06, spec F10): the decisions logged since the session id,
+   * The second comparison (fixed 2026-11-06; the spec's F10 keeps its conclusion, the design as it
+   * was fixed is in `git show 66ef04d:docs/spec.md`): the decisions logged since the session id,
    * asked once each. (b) is v3 as it was; (c) is v3 shown the three Bash commands before this one in
    * its session and how each ended, as far as that was known when the decision was made.
    */
@@ -545,7 +546,7 @@ function recalibratedSkill(pairs: readonly Pair[]): number {
 }
 
 /**
- * The spec's rule for calibration (F10, 2026-11-05): fitted on the oldest 70% of the decisions,
+ * The spec's rule for calibration (F10): fitted on the oldest 70% of the decisions,
  * judged on the newest 30% alone, against the older part's failure rate as a constant. `pairs` in
  * time order.
  */
@@ -642,7 +643,7 @@ function report(names: string[], referenceName = 'v0-current'): void {
   }
 }
 
-// ---- the second comparison (spec F10, fixed 2026-11-06; the details below fixed 2026-11-11 before any result was read) ----
+// ---- the second comparison (fixed 2026-11-06; the details below fixed 2026-11-11 before any result was read; the spec's F10 keeps the conclusion) ----
 
 /** The weight of the prior in a program's shrunk failure rate, (k + m·π) / (n + m). */
 const SHRINK_M = 20

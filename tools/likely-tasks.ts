@@ -5,7 +5,8 @@
  *
  * A task's question is to hold its criteria in full, as lists of what is a yes and what is a no (or
  * each option's description): the first risk wording, three vague examples long, was read to the
- * letter by both models and called starting a worker a risk (spec F10, 2026-11-11).
+ * letter by both models and called starting a worker a risk (2026-11-11; the three wordings and what each got wrong are in
+ * `git show 66ef04d:docs/spec.md`, F10).
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'

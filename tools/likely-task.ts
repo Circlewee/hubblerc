@@ -12,7 +12,7 @@
  * `<prefix>-haiku.jsonl` and `<prefix>-opus.jsonl` (ids and numbers), and from the report
  * `<prefix>-disagreements.md` (the inputs the two disagree on, for the user to read).
  *
- * The order of work, as it went for the first two tasks (spec F10, 2026-11-11):
+ * The order of work, as it went for the first two tasks (spec F10):
  * 1. Write the question with its criteria listed. 2. Run both models. 3. Read the disagreements:
  * most show a gap in the wording, not in the model. 4. Mend the wording and run it on inputs the
  * mending did not see (`notIn`). 5. Pick the threshold from the report's table.
