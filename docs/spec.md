@@ -22,9 +22,9 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - 3줄: 직전 답변 요약. effort 슬라이더가 열리면 이 자리를 쓴다(F3).
 - 4줄: 마지막 메인 요청 하나의 값(요청이 한 번이라도 있었을 때). 입력 = 캐시 없이 보낸 것 + 캐시 읽기 + 캐시 쓰기, 괄호는 그중 캐시 읽기 비율(80% 미만 노랑, 50% 미만 빨강).
 - 스타일: 배경 없이 터미널 색 이름만 써서 터미널 테마가 색을 정한다. 막대 채운 부분이 단계색(60% 노랑, 85% 빨강). 밴드 아래 빈 줄은 엔진의 알림 자리라 줄일 수 없다 [확인].
-- 사이드바가 놓여 보이면(`isPlaced`·`isShown`) 밴드는 그리지 않는다. 답변 창이 사이드바 앞에 와도 비켜 있다.
-- 접힌 동안(ctrl+x ctrl+a)에는 상태를 읽지 않고 빈 상자만 돌려준다. 엔진은 접혀도 훅을 부르기 때문이다. 펴면 지금 값으로 그린다 [확인: 2026-11-12 화면].
-- 수치 출처: `$.session.usage()`(context·rateLimits·cost) [확인], `$.session.model()`, `$.agent.list()`(시작 시각은 없어 직접 기록). 브랜치는 git으로 읽는다. 다시 읽는 때는 "주기 작업과 자원".
+- 사이드바가 놓여 보이면(`isPlaced`·`isShown`) 밴드는 그리지 않는다(열린 effort 슬라이더만 남는다). 답변 창이 사이드바 앞에 와도 비켜 있다. `layout: band`에서는 `/panel`로 연 사이드바 옆에도 밴드를 그대로 그린다. 엔진의 설문이 떠 있으면(`hasSurvey`) 엔진 것을 그린다.
+- 접힌 동안(ctrl+x ctrl+a)에는 상태(atom)를 읽지 않고 빈 상자만 돌려준다(사이드바를 열지 보는 `$.ui.panes()` 호출은 접혀도 한다). 엔진은 접혀도 훅을 부르기 때문이다. 펴면 지금 값으로 그린다 [확인: 2026-11-12 화면].
+- 수치 출처: `$.session.usage()`의 context·rateLimits [확인] (cost는 읽지 않는다), `$.session.model()`, `$.agent.list()`(시작 시각은 없어 직접 기록). 브랜치는 git으로 읽는다. 다시 읽는 때는 "주기 작업과 자원".
 
 **키**: mod는 키 바인딩을 만들 수 없어 `~/.claude/keybindings.json`에 `/setup`이 등록한다(기기마다).
 - `ctrl+x ctrl+e` effort 슬라이더: effort 버튼에 엔진 동작 이름 `app:cycleDiffBase`를 붙이고 Chat 문맥에서 이 키를 그 동작에 묶었다(diff 패널이 열려 있을 때만 원래 동작).
@@ -34,11 +34,11 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 
 ### F2. 레이아웃과 사이드바
 - 설정 `layout: auto | sidebar | band`(`/config`). 값은 기기별 사용자 설정에 저장돼 기기마다 다르게 쓸 수 있다 [확인: 디버그 로그].
-  - auto: 전체 화면이고 110칸 이상이면 사이드바(패널 id `hubblerc`), 아니면 밴드. 좁아져 사이드바가 입력창 위로 밀리면(`placement: 'inline'`) 닫고 밴드로, 넓어지면 다시 연다. 엔진은 사람이 요청하지 않은 패널을 144칸(사람이 연 적 있으면 110칸) 미만에서 그리지 않는다 [확인: 문서].
+  - auto: 전체 화면이고 110칸 이상이면 사이드바(패널 id `hubblerc`), 아니면 밴드. 좁아져 사이드바가 입력창 위로 밀리면(`placement: 'inline'`) 닫고 밴드로, 넓어지면 다시 연다(터미널에서만. 좁은 화면에서 `/panel`로 연 것은 닫지 않는다). hubblerc는 110칸부터 열기를 청하지만 사람이 연 적 없는 패널은 엔진이 144칸부터 그리므로, `/config`의 항목 설명은 144칸이라고 적는다. 엔진은 사람이 요청하지 않은 패널을 144칸(사람이 연 적 있으면 110칸) 미만에서 그리지 않는다 [확인: 문서].
   - sidebar: 전체 화면이 아니어도 연다(입력창 위). band: 저절로 열지 않는다.
 - 사람이 닫으면 `/panel`을 치거나 한 번 좁아졌다 넓어질 때까지 다시 열지 않는다(모듈 변수라 리로드하면 잊음). `/panel`로 연 패널은 폭과 상관없이 그려진다.
 - 상자 틀과 Status 상자는 F6, Device는 F7, Todos 탭은 F9, relay 상자는 F13.
-- 구조: 데이터 수집은 한 곳(상태 atom), 그리는 쪽만 밴드용·사이드바용 두 벌. 색은 바탕을 칠하는 쪽을 따른다: 밴드는 터미널 색 이름, 사이드바는 Claude Code 테마 키(`success`·`warning`·`error`·`suggestion`·`merged`·`permission`·`inactive`) — 패널 바탕을 엔진이 테마로 칠해서 라이트 테마에서도 읽히게.
+- 구조: 데이터 수집은 한 곳(상태 atom), 그리는 쪽만 밴드용·사이드바용 두 벌. 색은 바탕을 칠하는 쪽을 따른다: 밴드는 터미널 색 이름, 사이드바는 Claude Code 테마 키(`success`·`warning`·`error`·`claude`·`suggestion`·`merged`·`permission`·`inactive`) — 패널 바탕을 엔진이 테마로 칠해서 라이트 테마에서도 읽히게.
 
 **Files 상자**: 이 세션에서 바뀐 파일 전체(서브에이전트 포함), 마지막으로 바뀐 것이 위.
 - `git status --ignored`로 넷을 가른다: 커밋됨(흐림 `✓`), 바뀜(밝게, +초록 −빨강), 추적 안 됨(`?`), 무시됨(흐림 `!`). 폴더째 추적 안 되거나 무시되면 그 아래 파일 전체에 적용.
@@ -51,12 +51,12 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
 - `[요약 보기]`: 누를 때만 `$.model.complete({ model: 'haiku' })`로 3~5줄. store `answerSummaries`에 최근 200개. likely와 섞지 않는다(likely는 판정 전용, 사용자 결정).
 
 ### F3. effort
-**수동**: 슬라이더(`ctrl+x ctrl+e` 또는 effort 값 클릭)가 밴드 3줄 자리에 `effort 1: low 2: med 3: high 4: xhigh 5: max 6: auto 0: 엔진 설정`으로 열린다. 숫자 하나로 고르면 이 세션에 적용되고 닫힌다(다시 누름, 10초, 다음 질문 시작 때도 닫힘).
+**수동**: 슬라이더(`ctrl+x ctrl+e` 또는 effort 값 클릭)가 밴드 3줄 자리에 `effort 1: low 2: med 3: high 4: xhigh 5: max 6: auto 0: 엔진 설정`과 흐린 `숫자로 선택 · ctrl+x ctrl+e 닫기`로 열린다. 사이드바가 떠서 밴드를 안 그릴 때는 슬라이더 한 줄만 프롬프트 위에 열린다. 숫자 하나로 고르면 이 세션에 적용되고 닫힌다(다시 누름, 10초, 다음 질문 시작 때도 닫힘).
 - Esc로는 못 닫는다(Esc는 입력창이 먼저 받는다 [확인: 타입 문서]). 숫자 버튼은 열려 있을 때만 존재한다(빈 입력창에서 숫자를 치면 밴드 버튼이 눌리는 엔진 동작을 이용).
-- 적용 방식: `turn.step`에서 메인 요청마다 effort를 바꿔 넣는다. 바꾼 값이 실제 API 요청에 나가고 프롬프트 캐시는 깨지지 않는다 [확인: 2026-10-26, 바뀐 직후 캐시 읽기 96~99%]. 우선순위는 직접 고른 값 > auto > 엔진. 서브에이전트 요청은 건드리지 않는다.
+- 적용 방식: `turn.step`에서 메인 요청마다 effort를 바꿔 넣는다(엔진이 effort 없이 보내는 요청은 그대로 지나가고 기록에도 안 남는다). 바꾼 값이 실제 API 요청에 나가고 프롬프트 캐시는 깨지지 않는다 [확인: 2026-10-26, 바뀐 직후 캐시 읽기 96~99%]. 우선순위는 직접 고른 값 > auto > 엔진. 서브에이전트 요청은 건드리지 않는다.
 
 **auto**(기본 꺼짐. 슬라이더 `6`은 이 세션, 설정 `autoEffort`는 새 세션 기본값)
-- 판정(promptVersion 3): 메인 답변의 `turn.start`에서 `$.model.complete`(haiku, 60토큰, 4초 제한)가 메시지를 작업 종류 넷으로만 가른다. `ask`(질문·조회), `routine`(일상 작업), `hard`(설계·디버깅), `long`(큰 장기 작업). 직전 답변 끝 1000자를 함께 준다("이어서 진행하자" 같은 메시지 때문에).
+- 판정(promptVersion 3): 메인 답변의 `turn.start`에서 `$.model.complete`(haiku, 60토큰, 4초 제한)가 메시지를 작업 종류 넷으로만 가른다. `ask`(질문·조회), `routine`(일상 작업), `hard`(설계·디버깅), `long`(큰 장기 작업). 입력은 메시지 앞 2000자와 직전 답변 끝 1000자("이어서 진행하자" 같은 메시지 때문에). 글이 빈 답변은 판정하지 않는다.
 - 종류 → 레벨은 코드가 그 답변 첫 요청의 모델 id로 아래 표에서 찾는다. 판정 모델이 레벨을 직접 고르지 않게 한 이유: effort 이름이 모델·버전마다 같은 양의 생각을 뜻하지 않고, Haiku는 지금 모델들을 모른다.
 - 적용: 첫 요청은 판정을 4.5초까지 기다린다. 실패·시간 초과·알 수 없는 답이면 대체 종류 `hard`의 레벨. 첫 요청에서 정한 값을 그 답변의 나머지 요청에도 쓴다: effort를 메시지 단위로 받는 모델은 질문이 든 요청의 effort가 도구 결과 요청 내내 유지된다 [확인: 타입 문서 `TurnStepInput.effort`, 대화 기록 대조].
 - 표에 줄이 없는 모델은 판정을 기다리지 않고 엔진 effort로 나가며 `auto 기준 없음`으로 보인다(판정은 기록용으로 돈다).
@@ -84,24 +84,24 @@ Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────
   - `outcome` 줄(같은 id로 덧붙임): 사람이 effort를 직접 바꿈, 다음 질문 앞 200자, 그 답변의 도구 실패 수·시간·출력 토큰. Esc는 신호로 쓰지 않는다(불만과 상관없이 누르는 키).
 - 측정 [확인: 기록 470건, 2026-11-11]: 판정 지연 중앙 1.5~1.8초, 최대 3.8초. 대기 4.5초로 바꾼 뒤 첫 요청에 판정이 안 들어간 답변은 11% → 4% → promptVersion 3에서 0건. 판정 호출에 effort `low`를 주는 안은 지연 이득이 작고 xhigh 판정이 절반으로 줄어 쓰지 않는다(사용자 결정 2026-11-08).
 
-**ultracode 표시**: 엔진의 세션 토글(`/effort ultracode on|off`)이 켜져 있으면 effort 뒤에 ` · ultracode`. mod에 상태를 주는 API가 없어 [확인: config·settings·렌더 props·`turn.step` 모두 없음] `/effort` 실행을 `command.run`으로 받아 0.5초·2초 뒤 기록 파일 끝 64KB에서 엔진 출력 줄의 마지막 `Ultracode on|off`를 읽는다. `--effort ultracode` 실행 옵션과 원격 제어로 켠 것은 못 본다.
+**ultracode 표시**: 엔진의 세션 토글(`/effort ultracode on|off`)이 켜져 있으면 effort 뒤에 ` · ultracode`. mod에 상태를 주는 API가 없어 [확인: config·settings·렌더 props·`turn.step` 모두 없음] `/effort` 실행을 `command.run`으로 받아 0.5초·2초 뒤 기록 파일 끝 64KB에서 엔진 출력 줄의 마지막 `Ultracode on|off`를 읽는다. 세션 시작 때는 설정 키 `ultracode`가 true일 때만 켜짐으로 보고, 세션 시작 전 시각의 줄은 무시한다. `--effort ultracode` 실행 옵션과 원격 제어로 켠 것은 못 본다.
 
 ### F4. 대화 줄
 코드는 `hooks/activity/tool-lines.tsx`·`bash-purpose.tsx`.
-- Bash 용도: Bash 행을 `input.description`을 앞에 두고 다시 그린다. 실제 기록의 Bash 1,995건 모두 설명이 있어 haiku 요약은 넣지 않았다. 설명 언어는 `tool.describe` 훅으로 Bash 도구 설명 끝에 "description은 화면에 보이니 한국어 짧은 문구로"를 붙여 맞춘다(응답 언어 설정은 도구 인자에 적용되지 않는다). 지시라 가끔 어길 수 있다.
-- 접힌 도구 묶음: 끝났고 호출만 든 묶음은 `파일 2개 읽음 · 명령 1개 실행`으로 그리고 아래에 `↳ 읽음: a.tsx, b.tsx 외 1`과 Bash 용도. 진행 중에는 엔진 줄 그대로.
+- Bash 용도: Bash 행 아래에 `↳ <input.description>` 한 줄을 붙인다(실패한 행에도). 펼친 보기(ctrl+o)에서는 결과가 그 행 안에 그려지므로 명령 끝에 `  # <용도>`로 붙인다. 실제 기록의 Bash 1,995건 모두 설명이 있어 haiku 요약은 넣지 않았다. 설명 언어는 `tool.describe` 훅으로 Bash 도구 설명 끝에 "description은 화면에 보이니 한국어 짧은 문구로"를 붙여 맞춘다(응답 언어 설정은 도구 인자에 적용되지 않는다). 지시라 가끔 어길 수 있다.
+- 접힌 도구 묶음: 아래에 `↳ 읽음: a.tsx, b.tsx, c.tsx 외 1`(이름 3개까지)과 Bash 용도 줄을 붙인다(진행 중에도). 머리 줄은 끝났고 호출만 든 묶음일 때만 `파일 2개 읽음 · 명령 1개 실행`으로 바꿔 그리고(실패가 있으면 ` · 실패`), 진행 중에는 엔진 줄 그대로.
 - 수정 diff: Edit·Write 결과 행을 `⎿  +40 −12 · ctrl+o로 전체 보기` 한 줄로(새 파일은 `새 파일 120줄`). 결과 행 훅은 PostToolUse 훅 메시지까지 대신 그리므로 접힌 보기에서는 그 메시지도 안 보인다.
-- 답변 끝 요약 줄: `2m13s · 3파일 +24 −3 · Read 5 · Bash 2 · 출력 12k · 5h +3%`. 출력은 메인 요청 합. 5h는 답변 시작과 끝의 차이라 다른 세션 사용이 섞이고 1%p 미만은 숨긴다.
-- 펼친 보기(ctrl+o)와 실패는 엔진 것을 그대로 그린다.
-- 데스크톱 앱 내부 도구 `mcp__ccd_…`는 기록·요약·횟수에서 뺀다. 다른 MCP 도구는 서버 이름을 떼고 도구 이름만.
+- 답변 끝 요약 줄(엔진의 "… for Ns" 줄 아래, 시간은 엔진 줄에): `3파일 +24 −3 · Read 5 · Bash 2 · 에이전트 도구 4 · 실패 1 · 출력 12k · 5h +3%`. 바뀐 파일이 하나면 이름(`app.ts +2 −1`), 도구는 4종까지와 `외 N종`. 출력은 메인 요청 합. 5h는 답변 시작과 끝의 차이를 반올림한 값이라 다른 세션 사용이 섞이고, 0이거나 그 사이 5h가 리셋됐으면 숨긴다.
+- 도구 묶음과 Edit·Write 결과는 펼친 보기(ctrl+o)와 실패일 때 엔진 것을 그대로 그린다.
+- 데스크톱 앱 내부 도구 `mcp__ccd_…`와 엔진 내부 호출 `SubagentHandback`은 기록·요약·횟수에서 뺀다. 다른 MCP 도구는 서버 이름을 떼고 도구 이름만.
 
 ### F5. 활동 기록
-답변마다 도구 호출·바뀐 파일·시간을 `turns` 상태에 쌓는다(최근 100답변). 요약 줄·목차·Files 상자·`/activity <번호>`가 읽는다. 엔진 내장 diff 패널은 세션 단위라 "어느 답변에서 바꿨나"가 없어서 만든 것이다.
+답변마다 도구 호출·바뀐 파일·시간을 `turns` 상태에 쌓는다(최근 100답변, 답변당 호출 400개까지). 요약 줄·목차·Files 상자·`/activity`(인자 없음, 최근 30답변의 요약)가 읽는다. 엔진 내장 diff 패널은 세션 단위라 "어느 답변에서 바꿨나"가 없어서 만든 것이다.
 - +/− 줄 수: Edit·Write 결과의 `structuredPatch` [확인: 타입]. git 없이 세고 새 파일도 센다.
-- 셸로 바꾼 파일(`activity/shell-changes.ts`): 메인 답변에서 파일을 몰래 바꿀 수 있는 첫 호출(Bash·NotebookEdit·`mcp__` 도구) 직전에 git 상태를 찍고 답변 끝에 다시 찍어 비교한다. 그런 호출이 없는 답변은 git을 띄우지 않는다. 한계: 저장소 안만, 그 사이 사람이 편집기로 바꾼 것도 섞임, 줄 수가 같게 바뀐 파일·무시되는 파일은 못 잡음.
+- 셸로 바꾼 파일(`activity/shell-changes.ts`): 메인 답변이 도는 동안 파일을 몰래 바꿀 수 있는 첫 호출(Bash·NotebookEdit·`mcp__` 도구. `mcp__hubblerc__`·`mcp__ccd_`는 빼고, 서브에이전트의 호출도 포함) 직전에 git 상태를 찍고 답변 끝에 다시 찍어 비교한다. 그런 호출이 없는 답변은 git을 띄우지 않는다. 한계: 저장소 안만, 그 사이 사람이 편집기로 바꾼 것도 섞임, 줄 수가 같게 바뀐 파일·무시되는 파일은 못 잡음, 새로 생긴 추적 안 된 파일은 50개까지.
 - 백그라운드 서브에이전트는 띄운 턴이 끝난 뒤에도 도구를 쓴다. Agent 결과의 `agentId`로 띄운 턴에 붙인다.
 - 답변과 "… for Ns" 줄 짝짓기: 그 줄(`TurnDuration`)의 `requestId`는 대화 기록 행 uuid와 같다 [확인]. 엔진이 그 줄에 표시하는 시간은 틀릴 수 있어(백그라운드 서브에이전트 뒤) `turn.complete`의 `durationMs`를 쓴다.
-- 다시 연 세션(`activity/restore.ts`): 상태는 프로세스가 새로 뜨면 비므로, 세션 id가 다르거나 기록이 비었으면 `$.session.messages({ as: 'api' })`에서 답변을 다시 만든다. 기본 형태는 메타 사용자 행을 빼고 주는 것으로 보여 [추정] api 형태로 경계를 읽는다. 제목은 사용자 메시지의 마지막 "답할 거리가 있는" 텍스트 블록(리마인더·로컬 명령 행·스킬 본문은 건너뜀). 대화 기록에는 시간이 없어 복원한 답변은 소요 시간이 없다.
+- 다시 연 세션(`activity/restore.ts`): 상태는 프로세스가 새로 뜨면 비므로, 세션 id가 다르거나 기록이 비었으면 `$.session.messages({ as: 'api' })`에서 답변을 다시 만든다. 기본 형태는 메타 사용자 행을 빼고 주는 것으로 보여 [추정] api 형태로 경계를 읽는다. 제목은 사용자 메시지의 마지막 "답할 거리가 있는" 텍스트 블록(리마인더·로컬 명령 행·스킬 본문은 건너뜀). 대화 기록에는 시간이 없어 복원한 답변은 소요 시간이 없다. 서브에이전트 기록은 30개까지 읽고, 처음 만든 결과가 비면 2초 뒤 한 번 더 한다.
 - `/relaunch`는 기록을 스냅샷으로 넘겨 시간까지 살린다(F8).
 
 ### F6. 사이드바 상자와 Status
@@ -110,49 +110,49 @@ F2의 사이드바를 이루는 상자들.
 **상자 틀**: 위에서부터 Device(F7), Status, relay(F13, run이 있을 때만), Files·Contents(F2)│Todos(F9). 제목은 영어, 안의 글은 한국어.
 - 흐린 둥근 테두리에 제목을 윗변에 겹친다. 제목은 상자의 형제로 두고(`column-reverse` + `marginBottom: -1`) 모서리를 직접 그린다: 상자의 자식으로 얹으면 엔진이 테두리를 나중에 칠해 덮는다 [확인: 화면, 2.1.310].
 - 제목을 누르면 한 줄로 접힌다. `sidebarFolded`(store)에 저장해 새 세션에도 이어진다.
-- 높이: 패널의 `scroll.bodyRows`에서 다른 상자가 쓰는 줄을 빼고 남은 줄을 Files와 Contents│Todos가 나눈다(`sidebar/sidebar-format.ts`의 `shareRows`·`fitFileLayout`·`tocPageSize`). 각자 최소 3줄, 그래도 모자라면 패널을 넘친다(엔진이 스크롤). 상한은 파일 12개, 목차 쪽당 10개.
+- 높이: 패널의 `scroll.bodyRows`에서 다른 상자가 쓰는 줄을 빼고 남은 줄을 Files와 Contents│Todos가 나눈다(`sidebar/sidebar-format.ts`의 `shareRows`·`fitFileLayout`·`tocPageSize`). 각자 최소 3줄(Todos 탭은 아래 줄들 + 항목 3개까지), 그래도 모자라면 패널을 넘친다(엔진이 스크롤). 상한은 파일 12개, 목차 쪽당 10개.
 
 **Status 상자**
 - 모델·effort(단계별 색: low 흐림, medium 기본, high 파랑, xhigh 보라, max 보라 굵게. 경고색은 쓰지 않는다).
 - ctx·5h·7d 막대: 라벨 칸을 맞춰 같은 열에서 시작, 막대 폭 8~20칸, 빈 부분은 흐린 점선. 5h·7d에는 리셋까지 남은 시간.
 - 색 다섯 단계: 0–49% 초록, 50–69% 노랑, 70–84% 주황, 85–94% 빨강, 95%+ 빨강과 `!`. 7d는 속도도 본다: 지금 속도로 리셋 때 닿을 값이 85%·100%·130% 이상이면 주의·위험·한계로 올린다(첫 하루와 리셋 시각이 없을 때는 퍼센트만).
-- 5h 소진 예측: 5h 값이 바뀔 때마다 `fiveHourLog`에 남기고(2시간 보관), 최근 1시간 속도로 리셋 전에 바닥나면 `⚠ 18m 뒤 소진`. 10분 이상, 2%p 이상 오른 뒤에만 믿는다.
+- 5h 소진 예측: 5h 값이 바뀔 때마다 `fiveHourLog`에 남기고(2시간 보관), 최근 1시간 속도로 1시간 안에, 리셋 전에 바닥나면 `⚠ 18m 뒤 소진`. 10분 이상, 2%p 이상 오른 뒤에만 믿는다.
 - 5h가 없을 때: 엔진은 API가 응답 헤더로 알려 주고 리셋 시각이 안 지났을 때만 5h를 준다 [확인: 실행 파일의 상태줄 설명]. 다른 한도는 있는데 5h만 빠지면 흐린 `5h –`.
 - 5h·7d 세션 간 공유: 계정 전체 값인데 엔진은 "마지막 API 응답이 알려 준 값"만 준다 [확인: 타입 문서]. 값이 가장 새로운 세션이 store `usageWindows`에 두 창과 응답 시각을 쓰고, 다른 세션은 그게 자기 것보다 새로우면 그린다(`status/usage-share.ts`). 네트워크 요청 없음. 쓰기는 답변 끝에 한 번, 답변 중 30초에 한 번까지 [확인: 2026-11-12 화면, 새 세션이 요청 없이 같은 값을 그림].
 - 모델별 주간 한도 줄(지금은 Fable, 7d 아래): `/usage`의 "Current week (Fable)"과 같은 값. 엔진이 mod에 주지 않아 [확인: 타입 문서, 2.1.322 실행 파일] `/usage`가 읽는 `https://api.anthropic.com/api/oauth/usage`를 `$.session.authorize()` 핸들로 직접 부른다(토큰은 엔진이 넣고 플러그인은 못 본다). 문서에 없는 주소라 형식이 바뀌면 줄만 사라진다. 코드는 `status/model-limits.ts`, `status/status.ts`의 `refreshModelLimits`.
   - 읽는 항목: `limits` 중 `kind: weekly_scoped`이고 `scope.model.display_name`이 있는 것. 색은 7d와 같은 다섯 단계 + 속도.
-  - 묻는 때(구독 로그인이고 사이드바가 보일 때만): ① 질문을 보내거나 입력창에 칠 때 마지막으로 물은 지 5분이 지났으면 ② 답변 중 그 모델로 요청이 나간 뒤 5h의 정수 %가 움직였을 때 ③ 답변 끝에, 마지막으로 물은 뒤 그 모델로 요청이 나갔으면. ②③은 전 세션 합쳐 1분에 한 번까지. 쉬는 세션은 묻지 않고 30초 주기에 store만 읽는다.
+  - 묻는 때(구독 로그인이고 사이드바가 보일 때만): ⓪ 세션 시작·리로드 뒤 사이드바가 처음 보인 30초 주기에 한 번(5분이 지났으면) ① 질문을 보내거나 입력창에 칠 때(글자는 10초에 한 번만 봄) 마지막으로 물은 지 5분이 지났으면 ② 답변 중 그 모델로 요청이 나간 뒤 5h의 정수 %가 움직였을 때 ③ 답변 끝에, 마지막으로 물은 뒤 그 모델로 요청이 나갔으면. ②③은 전 세션 합쳐 1분에 한 번까지. 쉬는 세션은 ⓪ 뒤로 묻지 않고 30초 주기에 store만 읽는다.
   - 이 주소는 계정 단위로 요청 횟수를 제한한다 [확인: 2026-11-11 `429`]. 한도 값은 모른다. 그래서 세션들이 store `modelLimits`(값, 다음에 물어도 되는 시각, 거절 횟수)로 하나처럼 묻고, 거절(429·403)당하면 `retry-after` 또는 5분에서 두 배씩(최대 1시간) 쉰다. 시작·리로드 때는 store 값을 먼저 그린다.
 - 세션 줄: `/rename`한 이름과 짧은 id. id를 누르면 전체 id가 클립보드로. 이름은 mod API에 없어 대화 기록 파일의 `custom-title` 행을 읽는다(시작 때 전체, 그 뒤 사이드바가 보일 때 30초마다 끝 256KB). `/rename`은 `command.run`으로 잡아 바로 반영.
 - 마지막 요청 줄(밴드 4줄과 같음), likely 줄(F10, 키가 있을 때).
 
 ### F7. Device 상자
 - 내용: 고양이 그림(글줄 왼쪽), 칩·메모리, macOS 버전, 메모리 사용량·디스크 여유, Claude Code 버전, hubblerc 버전(플러그인 캐시 밖이면 흐린 `dev`).
-- 값: 시작 때 `sysctl`·`sw_vers`(절대 경로로, 빠진 값이 있으면 30초마다 다시). 사이드바가 보일 때만 메모리(`vm_stat`) 30초, 디스크(`df -k /`) 5분.
+- 값: 시작 때 `sysctl`·`sw_vers`(절대 경로로. 빠진 값이 있으면 사이드바가 보이는 동안 30초마다 다시). 사이드바가 보일 때만 메모리(`vm_stat`) 30초, 디스크(`df -k /`) 5분.
 - 새 버전 표시: 실행 중인 버전 옆 `↑ 2.1.312`(CHANGELOG 링크). 설치됐고 재시작만 남았으면 노랑 + `재시작`(F8), 나왔는데 안 받았으면 청록. 설치본은 `~/.local/share/claude/versions`의 가장 높은 버전, 배포본은 npm registry의 `latest`. 사이드바가 보일 때 30초 주기에서 실제 시각 기준으로 설치 폴더 5분·npm 1시간(타이머 시간은 맥이 잠든 동안 흐르지 않아서).
 - 고양이: Codex가 `docs/cat-art-brief.md`대로 그린 샴 PNG 9장(`assets/cat/<상태>/`, 256×256 투명). 5줄 높이 `Image`.
   - 상태(이 순서가 우선순위): 도구·서브에이전트 실행 중 → 생각 중 → 답변 쓰는 중 → 답변 진행 중(4초에 한 번 깜빡) → 대기(눈 감음) / 대기인데 직전 답변에 실패가 있으면 놀란 얼굴. 생각·쓰기는 `turn.step` 스트림의 조각 종류가 바뀔 때만 상태에 적는다.
   - PNG는 상태(atom)가 아니라 모듈에 둔다(크고, 사이드바가 자주 읽는다).
-  - 그림을 못 그리는 터미널·모바일·데스크톱 앱에서는 고양이 없이 글줄만. 탐지: 그림을 그린 뒤 같은 그림을 `$.ui.blit`해 보고 거부 사유로 가린다(`sidebar/picture.ts`).
+  - 그림을 못 그리는 터미널·모바일·데스크톱 앱에서는 고양이 없이 글줄만. 탐지: 1초 타이머가 그린 그림을 `$.ui.blit`해 보고 거부 사유로 가린다(`sidebar/picture.ts`, 답을 들으면 멈춤). 그 상태 폴더에 PNG가 없으면 awake 것을 쓴다.
   - Orca: Claude Code가 Orca를 그림 되는 터미널로 알아보지 못해 `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1`이 필요하다. `/setup`이 까는 셸 파일이 Orca에서 넣는다.
-  - 다시 보내기: Orca는 다른 탭을 보고 오면 그림을 잃는다 [확인: 사용자]. 탭 복귀 이벤트가 없어 [확인: 타입 문서] 입력창 편집·메인 질문 시작 때, 마지막으로 보낸 지 10초가 지났으면 한 번 다시 보낸다. 주기 타이머는 두지 않는다(이유는 "주기 작업과 자원"). 잃는 것: 돌아와 보기만 하면 고양이가 빈칸으로 남는다.
+  - 다시 보내기: Orca는 다른 탭을 보고 오면 그림을 잃는다 [확인: 사용자]. 탭 복귀 이벤트가 없어 [확인: 타입 문서] 입력창 편집·메인 질문 시작 때, 마지막으로 보낸 지(새 프레임을 그린 것 포함) 10초가 지났고 터미널이 그림을 그리며 사이드바가 보이면 한 번 다시 보낸다. 다시 보내기용 주기 타이머는 두지 않는다(이유는 "주기 작업과 자원"). 잃는 것: 돌아와 보기만 하면 고양이가 빈칸으로 남는다.
 
 ### F8. 새 버전으로 재시작
 Device 상자의 `재시작`이나 `/relaunch`로 같은 세션을 새 버전으로 다시 연다 [확인: 사용자, 실제 세션].
-- 답변·도구·서브에이전트가 없으면 바로, 있으면 `재시작 대기`로 2초마다 보다가 끝나는 순간(다시 누르면 취소). 사이드바 기록·세션 effort·auto 여부를 store `restartSnapshot`에 저장 → 세션 id를 `$HUBBLERC_RELAUNCH_FILE`에 적음 → `/exit`. 다시 열리면 같은 세션 id의 10분 안 스냅샷을 한 번 읽고 지운다.
+- 답변·도구·서브에이전트가 없으면 바로, 있으면 `재시작 대기`로 2초마다 보다가 끝나는 순간(다시 누르면 취소). 사이드바 기록·세션 effort·auto 여부를 store `restartSnapshot`에 저장 → 세션 id를 `$HUBBLERC_RELAUNCH_FILE`에 적음 → `/exit`. 다시 열리면 같은 세션 id의 10분 안 스냅샷을 읽어 쓴다. 스냅샷은 읽는 세션이 누구든 먼저 지우므로, 저장과 다시 열림 사이에 다른 세션이 시작되면 잃는다(그때는 대화 기록에서 복원, 시간 없음). 1,000,000자를 넘는 스냅샷은 저장하지 않는다.
 - 이 방식을 고른 이유: 진행 중인 답변은 프로세스 메모리에 있어 옮길 수 없다. 엔진의 `/restart`는 기능 플래그가 꺼져 있고 [확인: 2.1.311], 백그라운드 세션(`claude --bg`)은 `respawn`이 진행 중인 답변을 끊으며 Orca가 세션으로 알아보지 못한다 [확인: 실험 3회, 사용자].
 - 한계: 백그라운드 명령(`run_in_background`)은 보지 못해 기다리지 않는다. 셸 함수 없이 띄운 세션에서는 `/setup`을 안내만 한다.
 
 **셸 파일**(`shell/relaunch.zsh`, `/setup`이 `~/.claude/hubblerc/`에 복사하고 `~/.zshrc`에 source 한 줄. 지금 판 4)
-- `claude()`: `HUBBLERC_RELAUNCH_FILE`을 넘기고, 끝난 뒤 그 파일에 세션 id가 있으면 `claude --resume <id>`로 다시 띄운다. 처음 실행의 `--plugin-dir`·`--add-dir`·`--settings`·`--mcp-config`·`--model` 류만 넘기고 세션·권한 옵션은 넘기지 않는다.
+- `claude()`: `HUBBLERC_RELAUNCH_FILE`을 넘기고, 끝난 뒤 그 파일에 세션 id가 있으면 `claude --resume <id>`로 다시 띄운다. 처음 실행의 `--plugin-dir`·`--plugin-dir-no-mcp`·`--add-dir`·`--settings`·`--setting-sources`·`--mcp-config`·`--strict-mcp-config`·`--model`만 넘기고 세션·권한 옵션은 넘기지 않는다. 불러올 때 같은 이름의 alias(`claude`·`hcc`·`hcc-sync`·`hubblerc-key`)는 푼다.
 - Orca 그림 값: `TERM_PROGRAM`이 Orca이고 값이 정해져 있지 않으면 `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1`.
 - `hcc`·`hcc-sync`(개발판 사본): `$HUBBLERC_DEV_SRC`를 `$HUBBLERC_DEV_COPY`(기본 `~/.cache/hubblerc-live`)로 `rsync -ac --delete`한 뒤 `claude --plugin-dir <사본>`. 재시작 직전에도 사본을 다시 복사한다. 이유: 저장소의 플러그인을 `--plugin-dir`로 직접 불러오면 그 세션과 서브에이전트의 `plugins/hubblerc` 수정이 자동 모드 "no verdict"로 막힌다 [확인: 2026-11-11 `claude -p` 시험, 사본이면 통과]. 실행 중 세션은 `hcc-sync`만으로 바뀐 사본을 다시 읽는다 [확인].
 - `hubblerc-key`: likely API 키를 키체인 항목 `hubblerc-likely`에 넣기(`set`, 가린 입력)·지우기(`delete`)·있는지 확인(값은 보이지 않음).
-- 판 번호(`# hubblerc-shell-version: N`): 설치된 판이 더 크면 덮어쓰지 않는다(버전이 다른 세션끼리 서로 되돌리던 문제). 내용을 바꾸면 번호를 올린다.
+- 판 번호(`# hubblerc-shell-version: N`): 설치된 판이 더 크면 덮어쓰지 않고, 작거나 같은데 내용이 다르면 덮어쓴다(버전이 다른 세션끼리 서로 되돌리던 문제). 내용을 바꾸면 번호를 올린다.
 - 도우미 함수 이름은 밑줄로 시작하지 않는다: Claude Code의 Bash 도구와 `!` 입력이 쓰는 셸에는 밑줄로 시작하는 함수가 없다 [확인: 2026-11-11].
 
 ### `/setup`
-세션 시작 때 필요한 설정을 점검해 빠진 게 있으면 "hubblerc 설정 N개가 덜 됐습니다. `/setup`" 한 줄을 남긴다. `/setup`이 하는 일:
+세션 시작 때 필요한 설정을 점검해 빠진 게 있으면 "hubblerc 설정 N개가 덜 됐습니다. `/setup`으로 확인하세요" 한 줄을 남긴다(N에는 안내만 하는 전체 화면 항목도 든다). 경로는 `CLAUDE_CONFIG_DIR`·`$ZDOTDIR`가 있으면 그쪽. `/setup`이 하는 일:
 - 마켓플레이스 자동 업데이트 켜기(`extraKnownMarketplaces.hubblerc.autoUpdate: true`, 먼저 `.bak`). GitHub에서 추가한 마켓플레이스는 기본이 꺼짐이다 [확인: 실행 파일 코드 2.1.310].
 - 빠진 키만 `keybindings.json`에 추가(먼저 `.bak`, 같은 키가 다른 동작에 묶여 있으면 덮어쓰지 않고 알림).
 - 셸 파일 복사와 `~/.zshrc` 한 줄(먼저 `.bak`. zsh가 아니거나 `alias claude=`가 있으면 넣지 않고 알림).
@@ -163,7 +163,7 @@ Device 상자의 `재시작`이나 `/relaunch`로 같은 세션을 새 버전으
 - 저장: 프로젝트(`$.session.root()`)별·기기별 store, 키 `userTodos:<경로 해시>:<경로 끝 80자>`, 값 `{ items, nextId, trash? }`. 워크트리 세션은 본 저장소의 키를 쓴다(`git rev-parse --git-dir --git-common-dir`로 가림). 바꿀 때마다 다시 읽고 → 바꾸고 → 쓴다. 프로젝트당 200개, 항목 500자.
 - 목록은 모듈 메모리에 두고(최악 약 325KB) 바뀌면 `userTodoVersion`만 올려 다시 그린다.
 - 배치: 목차와 한 상자의 탭(`Contents 12 │ Todos 3`). 고른 탭은 store `sidebarTab`.
-- 항목 줄: `📌 내용` + `#14 ↗  ✕ `. 상태 기호를 누르면 대기📌 → 진행⏳ → 완료✅ → 보류💤. 정렬은 진행 → 대기 → 보류 → 완료. 이모지는 2칸으로 센다(`shared/text-width.ts`).
+- 항목 줄: `📌 내용` + 오른쪽 버튼. 대기 항목은 ` ↗  ✕ `, 진행·완료 항목은 답변 번호가 있으면 `#14`와 ` ✕ `. 상태 기호를 누르면 대기📌 → 진행⏳ → 완료✅ → 보류💤. 정렬은 진행 → 대기 → 보류 → 완료. 이모지는 2칸으로 센다(`shared/text-width.ts`).
 - 입력: `/todo 내용`(인자 없으면 목록), `/todo 수정 <번호> <내용>`, `/todo 휴지통`, `/todo 복원 <번호>`, 할 일 탭 아래 입력칸.
 - 넘기기 ↗: 먼저 `$.prompt.suggest`(입력창이 비었고 답변 중이 아니면 흐린 제안, Tab으로 받음). 안 보이면 `$.prompt.fill({ mode: 'insert' })`로 커서 위치에 끼운다(단어가 붙지 않게 빈칸 맞춤). 그것도 안 되면 토스트. 넣은 글이 다음 메인 질문에 그대로(또는 포함돼) 오면 그 항목을 진행 + 그 답변 번호로.
 - Claude 도구 `mcp__hubblerc__user_todos`: `action`(list / add / set_status) 하나로 합쳤다(프롬프트 크기). 수정·지우기는 없다. ToolSearch 뒤에 놓인다.
@@ -173,33 +173,33 @@ Device 상자의 `재시작`이나 `/relaunch`로 같은 세션을 새 버전으
 - 한계: 답변 번호는 세션 기록 순서(100개 상한)라 그 뒤로 어긋난다. 워크트리 경로 키로 이미 적어 둔 할 일은 옮기지 않았다.
 
 **likely 제안**(설정 `likelyTodos`, 기본 켜짐. `todo/todo-judge.ts`): 상태가 저절로 바뀌는 길이 ↗뿐이라 끝난 일이 진행으로 남던 것을 메운다.
-- 판정 둘, 보기는 할 일들과 `none`, Haiku 3회 평균(호출이 먼저 생각함): 메인 질문 시작 때 "이 메시지가 대기 항목 중 무엇을 지금 시키는가(시작하든 이어 가든)"(`todo-take`), 답변 끝에 "이 답변이 진행 항목 중 무엇을 끝냈는가"(`todo-done`). 답변은 판정을 기다리지 않는다.
-- 판정은 아무것도 바꾸지 않는다. 확신이 0.5 이상(`SUGGEST_AT`)이면 할 일 탭에 `시작? <내용> 82%  맞음  아님` 한 줄과 알림. 맞음을 눌러야 바뀐다. 시작 판정에서 가장 확률 높은 항목이 0.3 이상(`CARRY_AT`)이면 제안이 안 떴어도 그 답변의 완료 판정 후보에 넣는다.
-- 누름(맞음·아님·손으로 바꿈·밀림)을 likely 기록의 outcome 줄로 남긴다. 저절로 바꿀 기준값은 이 기록이 수십 건 쌓인 뒤 정한다.
+- 판정 둘, 보기는 할 일들과 `none`, Haiku 3회 평균(호출이 먼저 생각함): 메인 질문 시작 때 "이 메시지가 대기 항목 중 무엇을 지금 시키는가(시작하든 이어 가든)"(`todo-take`), 답변 끝에 "이 답변이 진행 항목 중 무엇을 끝냈는가"(`todo-done`). 후보는 새 것부터 12개. 답변은 판정을 기다리지 않는다. 건너뛰는 때: ↗로 넣은 글이 그대로 온 질문과 빈 질문(시작 판정), 중단되거나 오류로 끝난 답변(완료 판정).
+- 판정은 아무것도 바꾸지 않는다. 확신이 0.5 이상(`SUGGEST_AT`)이면 할 일 탭에 `시작? <내용> 82%  맞음  아님` 한 줄과 알림. 맞음을 눌러야 바뀐다(이어받은 대기 항목의 "완료?"는 대기에서 바로 완료로). 아님을 누르면 그 항목의 "시작?"은 이 세션에서 다시 안 뜨고 "완료?"는 답변 3개 동안 안 뜬다. 시작 판정에서 가장 확률 높은 항목이 0.3 이상(`CARRY_AT`)이면 제안이 안 떴어도 그 답변의 완료 판정 후보에 넣는다.
+- 결과를 likely 기록의 outcome 줄로 남긴다: 맞음 `accepted`, 아님 `rejected`, 손이나 Claude 도구로 판정대로 바뀜 `by hand`(제안이 안 떴던 판정에도), 다른 제안에 밀림 `replaced`, 다른 상태로 감 `lapsed`, 항목이 없어짐 `gone`. 저절로 바꿀 기준값은 이 기록이 수십 건 쌓인 뒤 정한다. `/likely stats`는 예/아니오 판정만 표로 내므로 이 두 과제는 건수만 보인다(읽는 길은 아직 없음).
 - 근거와 한계: 호출 하나가 맞는 항목을 고르는 비율이 약 7할이라 3회 평균이 빗나갈 수 있다 [확인: 실제 판정 13건을 12번씩 다시 물음, 한 사례 중심이라 일반화 못 함]. 기준값을 0.7로 올렸을 때 첫 실제 사례를 놓쳐 0.5로 되돌렸다(잘못 묻는 줄은 정답 하나를 남기지만 안 뜬 줄은 아무것도 안 남긴다). 사이드바가 없는 화면에서는 누를 길이 없고, 한 메시지가 둘을 시작해도 하나만 고른다.
 
 ### F10. likely (확률 판정)
 입력 글 + 질문(predicate 예/아니오, choice 고르기, score 단계) → 답 + 확률을 Haiku로 내는 범용 판정 함수. OpenAI Decisions·Jev의 방식을 따랐다. 목적은 Max 구독의 월 $100 API 크레딧 활용과 확률 붙은 판정·calibration 실험(사용자). 코드는 `hooks/likely/`에 모아 나중에 떼어 낼 수 있게 했다: `method.ts`·`cost.ts`·`record.ts`(순수), `likely.ts`(엔진), `bash-fail.ts`, `command.ts`.
-- 함수: `likely($, { task, input, questions, samples = 5, thinking = false, meta? })` → 답·호출별 분포(`raw`)·spread·지연·비용·토큰, 또는 `{ skipped: 'no-key' | 'daily-cap' | 'budget' }`.
-- 방식(`METHOD_VERSION = 1`, 프롬프트·로직을 바꾸면 올림): N회 병렬. 호출마다 분포를 말로 받는다. 기호 묶음과 보기 순서를 판정 id에서 얻은 씨앗으로 섞고, predicate는 홀수 호출에서 "아니오일 확률"로 뒤집어 묻는다. 받은 값은 범위 검사 → 정규화 → 원래 순서로 → 0.02~0.98로 자름 → 평균. 일부 호출이 실패하면 나머지로, 재시도·시간 제한은 없다.
-- 호출: `$.http.fetch`로 Messages API 직접, 모델 기본 `claude-haiku-5-5`, structured outputs(스키마는 질문과 상관없이 하나), effort low, thinking 끔.
+- 함수: `likely($, { task, input, questions, samples = 5, thinking = false, meta? })` → 답·호출별 분포(`raw`)·spread·지연·비용·토큰, 또는 `{ skipped: 'no-key' | 'daily-cap' | 'budget', reason }`. 호출이 모두 실패하거나 질문이 틀리면 오류를 던지고, 모두 거절이면 refusal 답.
+- 방식(`METHOD_VERSION = 1`, 프롬프트·로직을 바꾸면 올림): N회 병렬. 호출마다 분포를 말로 받는다. 기호 묶음과 보기 순서를 판정 id에서 얻은 씨앗으로 섞고, predicate는 둘째·넷째 호출에서 "아니오일 확률"로 뒤집어 묻고(5회면 2회, 3회면 1회) score는 그 호출들에서 높은 단계부터 적는다. 받은 값은 범위 검사 → (choice·score는 정규화) → 원래 순서로(뒤집은 것은 1−p) → 0.02~0.98로 자름 → (choice·score는 다시 정규화) → 평균. 일부 호출이 실패하면 나머지로, 재시도·시간 제한은 없다.
+- 호출: `$.http.fetch`로 Messages API 직접, 모델 기본 `claude-haiku-5-5`, structured outputs(스키마는 질문과 상관없이 하나), effort low. thinking은 기본 끔(최대 400토큰), 켜면 adaptive에 최대 3000토큰. 할 일 제안은 켜고 쓴다.
 - 키: 플러그인 설정의 민감 항목 `anthropicApiKey` → 키체인 `hubblerc-likely` 순. 환경 변수는 읽지 않는다(이 프로세스의 환경은 모든 Bash 자식으로 넘어가고, `ANTHROPIC_API_KEY`는 Claude Code 자체가 그 키로 돌 수 있다 [추정]). 키는 모듈 변수에만 두고 출력·기록하지 않는다. 개발판(`--plugin-dir`)은 `/plugin configure`에 항목이 안 나와 키체인뿐이다 [확인: 사용자].
 - 설정: `likelyDailyCapUsd`(5), `likelyMonthlyBudgetUsd`(100), `likelyPeriodStartDay`(1), `likelyLogDir`, `likelyModel`, `likelyBashFail`(꺼짐), `likelyTodos`(켜짐).
-- 비용: 응답 usage × Haiku 5.5 가격을 직접 세어 store `likelySpend`에 오늘·이번 주기 합계. 월 예산에 닿으면 다음 주기까지 멈춤. 하루 상한은 예산이 아니라 runaway cap이다(판정이 잘못 반복되는 사고 방지, 사용자 결정). 상한 검사는 판정 전 합계로만 해서 동시 판정 몇 건만큼 넘을 수 있다.
-- 기록: 판정 하나가 한 줄인 기기별 JSONL(`decision` 줄, 정답은 나중에 같은 id의 `outcome` 줄). iCloud Drive `hubblerc/likely/<기기>.jsonl`, 없으면 `~/.claude/hubblerc/likely/`. `umask 077`로 만들고 `tee -a`로 덧붙이기만. 입력은 비밀처럼 보이는 문자열을 `***`로 가린 뒤 4,000자까지 보내고 적는다(`shared/log-safety.ts`). 기록의 입력 원문은 공개 저장소로 옮기지 않는다.
+- 비용: 응답 usage × Haiku 5.5 가격(`likelyModel`을 바꿔도 이 가격으로 센다)을 직접 세어 store `likelySpend`에 오늘·이번 주기 합계. 월 예산에 닿으면 다음 주기까지 멈춤. 하루 상한은 예산이 아니라 runaway cap이다(판정이 잘못 반복되는 사고 방지, 사용자 결정). 상한 검사는 판정 전 합계로만 해서 동시 판정 몇 건만큼 넘을 수 있다.
+- 기록: 판정 하나가 한 줄인 기기별 JSONL(`decision` 줄, 정답은 나중에 같은 id의 `outcome` 줄). iCloud Drive `hubblerc/likely/<기기>.jsonl`, 없으면 `~/.claude/hubblerc/likely/`. `umask 077`로 만들고 `tee -a`로 덧붙이기만. 입력(`input`)은 비밀처럼 보이는 문자열을 `***`로 가린 뒤 4,000자까지 보내고 적는다(`shared/log-safety.ts`). 질문(`questions`)은 가리지 않으므로 부르는 쪽이 가린다(할 일 제안은 보기 글을 가리고 200자로 자른다). 기록의 입력 원문은 공개 저장소로 옮기지 않는다.
 - `/likely <글>`: 그 글을 예/아니오 하나로 판정(task `ask`). `/likely stats [task]`: 건수·비용, Brier·ECE·구간별 표, spread 구간별·변주별 표. `/likely export`: 기록 폴더를 zip으로. 인자 없으면 사용법·키 상태(값은 보이지 않음).
 - 사이드바: 키가 있을 때 Status 상자 끝에 `likely 오늘 N건 · 이번 달 $x.xx / $100`.
 - 사후 calibration은 아직 없다. 넣을 때 규칙: 오래된 기록으로 맞추고 그 뒤 기록으로만 평가(시각 기준 분리), 방식 버전이 바뀌면 그 버전 기록만.
 
 **쓰는 곳**
-- 할 일 제안(F9): 지금 유일하게 켜져 있는 사용처.
-- Bash 실패 예측(`likelyBashFail`, 기본 꺼짐): `tool.call`에서 Bash마다 "이 명령이 실패할까"를 판정하고 결과를 정답으로 기록. 코드·기록은 남겨 다시 켜면 이어진다.
+- 할 일 제안(F9): 지금 저절로 도는 유일한 사용처(그 밖에는 사람이 부르는 `/likely <글>`).
+- Bash 실패 예측(`likelyBashFail`, 기본 꺼짐): `tool.call`에서 Bash마다(서브에이전트 포함, `run_in_background`는 빼고) "이 명령이 실패할까"를 판정하고(10건에 1건은 thinking 켬) 결과를 정답으로 기록. 코드·기록은 남겨 다시 켜면 이어진다.
 
 **실험에서 얻은 결론**(숫자만 집계. 과정과 전체 수치는 이전 판, 결과 파일은 iCloud `hubblerc/likely-replay/`)
 - Bash 실패 예측은 가려내지 못했다. 1차(525건, 실패 3.8%): 예측 평균이 실제의 약 6배, AUC 0.55. 재실행(`tools/likely-replay.ts`): 묻는 방식(뒤집기 없음 + 기저율 힌트)은 수준을 고치지만 순위는 거의 못 바꾸고, thinking·Sonnet·Opus도 뚜렷이 낫지 않았다. 2차(2,245건, 실패 102): Haiku v3 AUC 0.537 대 LLM 없는 단순 통계 0.539, 차이 없음. 같은 세션의 직전 명령 3개와 결과를 입력에 넣은 것만 0.615(탐색). 그래서 2026-11-11에 기본 꺼짐으로.
 - 다른 예보 과제 둘(편집 뒤 검사 명령 결과, 답변 안 도구 실패)도 같았다. 글만 보고 앞일을 맞히는 판정은 AUC 0.54~0.58에 머물고, 올린 것은 그때의 상황을 입력에 넣었을 때뿐이다 [추론].
 - 방향(2026-11-11 사용자 결정): likely의 과제는 예보가 아니라 "입력에 보이는 것을 판단"하는 것으로 고른다. Decisions·Jev의 문서 예시도 모두 그런 판단이다 [확인: 조사 서브에이전트].
-- 판단 과제는 됐다. "이 Bash 명령을 실행 전에 사용자에게 물어야 하는가"를 기준을 나열한 질문으로 물으면, 새 표본 599건에서 Haiku 3회 평균이 Opus 5.5(기준)와 98.7% 일치, AUC 0.997. 기준은 Opus의 판단이지 정답이 아니다. 질문 문구를 같은 표본으로 계속 고치면 그 표본에만 맞으니 고친 문구는 새 표본으로 확인한다.
+- 판단 과제는 됐다. "이 Bash 명령을 실행 전에 사용자에게 물어야 하는가"를 기준을 나열한 질문으로 물으면, 새 표본 599건에서 Haiku 3회 평균(시험 틀은 뒤집어 묻지 않는다. 플러그인의 `METHOD_VERSION 1`과 다른 점)이 Opus 5.5(기준)와 98.7% 일치, AUC 0.997. 기준은 Opus의 판단이지 정답이 아니다. 질문 문구를 같은 표본으로 계속 고치면 그 표본에만 맞으니 고친 문구는 새 표본으로 확인한다.
 - auto effort의 종류 고르기를 likely로: 직전 답변을 붙여도 기준과 73% 일치, 지금 판정기(80%, 61건)보다 낫다는 근거가 없다. 바꾸지 않는 쪽이고 사용자 결정 대기.
 - relay에 붙이기: "직접 할지 맡길지"는 조건이 세션 상태라 맞지 않는다. 위험 명령은 이름으로 가를 수 있는 것(ssh·git push 등)은 Claude Code 권한의 `ask` 규칙이 먼저이고, 규칙으로 못 가르는 나머지가 likely의 몫이다. 규칙 초안 적용은 결정 대기.
 - 판단 과제 시험 틀: 과제 정의는 `tools/likely-tasks.ts`의 항목 하나, 실행은 `bun tools/likely-task.ts tasks | run <과제> haiku|opus | report <과제>`. 표본 id를 고정하고 → 두 모델에 같은 질문 → 일치·구간별 표·기준값 표 → 어긋난 입력은 저장소 밖 파일로.
@@ -221,13 +221,13 @@ Session: <세션 id>
 Model: <실제 모델 ID>
 Effort: <값>            (auto가 정했으면 `auto · medium`)
 Device: MacBook Pro (M3 Pro)
-Task: T3-r1             (relay run 안에서만)
-Run: 2026-11-07-todo    (relay run 안에서만)
+Task: T3-r1             (relay 워커만: brief의 커밋 명령이 붙임)
+Run: 2026-11-07-todo    (relay 워커만: brief의 커밋 명령이 붙임)
 ```
-- 붙이는 방식: Bash의 `git commit …`을 `tool.call`에서 가로채 `--trailer`를 덧붙인다. 확실히 알아보는 형태에만 끼우고 모르는 형태(스크립트 안 커밋, 별칭)는 손대지 않는다. 지시문으로 시키는 안은 Claude가 세션 id·effort를 정확히 모르고, git 전역 훅은 모든 저장소의 기존 훅을 꺼서 버렸다.
+- 붙이는 방식: Bash의 `git commit …`을 `tool.call`에서 가로채 `--trailer`로 앞의 다섯(Agent·Session·Model·Effort·Device)을 덧붙인다. 모르는 값은 그 줄을 뺀다. 명령에 이미 `Agent:`나 `Session:` trailer가 있으면 아무것도 붙이지 않는다. Task·Run은 훅이 아니라 relay brief에 적힌 커밋 명령으로 워커가 붙인다. 확실히 알아보는 형태에만 끼우고 모르는 형태(스크립트 안 커밋, 별칭)는 손대지 않는다. 지시문으로 시키는 안은 Claude가 세션 id·effort를 정확히 모르고, git 전역 훅은 모든 저장소의 기존 훅을 꺼서 버렸다.
 - `commit` 앞에는 아무것도 넣지 않는다: `git -c … commit`이 되면 `Bash(git commit:*)` 허용 규칙과 안 맞아 승인에 막힌다 [확인: 2026-11-09]. 그래서 `--amend`에는 trailer를 붙이지 않는다.
-- 세션 이름과 컴퓨터 이름은 넣지 않는다(공개 저장소에 실명이 남을 수 있음). Device는 기종 + 프로세서(`system_profiler`, 세션 시작 때 한 번). 우리 코드는 `Session`과 함께 붙은 것만 우리 trailer로 읽는다.
-- 끄기: 저장소별 `git config hubblerc.trailers false`.
+- 세션 이름과 컴퓨터 이름은 넣지 않는다(공개 저장소에 실명이 남을 수 있음). Device는 기종 + 프로세서(`system_profiler`, 첫 커밋 때 한 번 읽어 기억). relay는 trailer를 키 이름(`Task`·`Run`·`Effort`)만으로 읽는다(`Session`이 함께 있는지는 보지 않는다).
+- 끄기: 저장소별 `git config hubblerc.trailers false`(커밋마다 `git config --bool`로 읽는다).
 - 서명 줄 제거: `attribution.text` 훅이 `commit`·`pr`을 빈 글로 돌려 `Co-Authored-By: Claude …`와 "Generated with Claude Code"를 없앤다(저장소별 끄기와 상관없이 항상).
 - 실제 세션에서 trailer가 붙는 것 확인 [확인: 2026-11-09 임시 저장소]. heredoc·`-F`·`&&`·`git -C` 형태는 테스트 키트로만 확인.
 
@@ -239,31 +239,31 @@ Run: 2026-11-07-todo    (relay run 안에서만)
 - 사용자에게 묻는 것은 push·배포·외부 전송·비용·완료 기준 변경·되돌리기 어려운 일뿐. 나머지는 리드가 정하고 결정 표에 "결정 — 이유 — 틀렸을 때 비용"으로 적어 끝에 모두 보고한다.
 - 판단(길 고르기, 모델 배정, 재사용·교체)은 프롬프트, 기계로 정해지는 것(brief 칸 검사, 범위 겹침, 기준 명령 실행, 커밋 대 Edit scope, package, verdict 형식)은 도구. 규칙을 본문에만 두면 건너뛴다(조사한 사례에서 1,648줄 본문일 때 검사 단계 실행 0/4).
 - gate는 훅이다: 사후 검사는 덮어쓰기·비용 폭증을 막지 못한다.
-  - gate 1: 진행 중인 run이 있을 때만, brief를 가리키는 서브에이전트 생성·`orca orchestration worker-start`·`send`를 검사하고 띄우기를 예약(launching) → 기록(running). run 안에서 brief 없이 띄우면 막는다(`--comment no-relay`로 우회, `--help`는 통과). run이 없으면 아무것도 안 한다.
-  - gate 2: finish가 verdict 커밋 = 지금 커밋을 대조하고, 답변 끝(`turn.complete`)에 "⚠ relay … 검증되지 않은 커밋" 경고를 덧붙인다.
-- 기록 폴더 `.relay/runs/<날짜-이름>/`(폴더 안 `*` 한 줄 `.gitignore`로 git에서 뺌). 한 사실은 한 곳에만: `progress.md`(리드: Now·Decisions·Tasks·Tools·Log), brief `tasks/T3-r1.md`(리드 → 워커, 도구가 칸을 받아 씀), 보고서 `tasks/T3-r1-report.md`(워커 → 리드), 기계 상태 `state.json`. 워커·검증자만 읽는 문서는 영어.
+  - gate 1: 진행 중인 run이 있을 때만, 그 run의 brief를 가리키는 서브에이전트 생성·SendMessage·`orca orchestration worker-start`·`send`를 검사하고(brief가 띄운 뒤 바뀌지 않았는지, 모델·effort가 brief와 같은지, 한 명령에 띄우기 하나) 띄우기를 예약(launching) → 기록(running). `--spec-file` 없는 `worker-start`는 막는다(`--comment no-relay`로 우회, `--help`는 통과). brief를 가리키지 않는 서브에이전트와 다른 파일을 가리키는 `worker-start`는 다른 일로 보고 그대로 둔다. run이 없으면 아무것도 안 하고, 검사 중 오류가 나면 막지 않고 통과시킨다.
+  - gate 2: 도구의 finish가 verdict 커밋 = 지금 커밋을 대조해 거절하고(이쪽은 훅이 아니라 도구), 메인 답변 끝(`turn.complete`)에는 훅이 `⚠ relay <run>: 검증되지 않은 커밋입니다(HEAD …, 마지막 verdict …). 끝내기 전에 package → 다른 모델 검증 → finish.`를 덧붙인다(끝난 작업이 있고 도는 작업이 없는 run에서만).
+- 기록 폴더 `.relay/runs/<날짜-이름>/`(폴더 안 `*` 한 줄 `.gitignore`로 git에서 뺌). 한 사실은 한 곳에만: `progress.md`(리드: Now·Decisions·Tasks·Tools·Log), brief `tasks/T3-r1.md`(리드 → 워커, 도구가 칸을 받아 씀)와 보낸 사본 `tasks/T3-r1.dispatched.md`, 보고서 `tasks/T3-r1-report.md`(워커 → 리드), 검사 결과 `tasks/T3-r1-checks.md`, `reviews/V<n>-package.md`·`V<n>-verdict.json`, 기계 상태 `state.json`. 워커·검증자만 읽는 문서는 영어.
 - 보낸 brief는 고치지 않고 새 revision. tries(같은 기준의 수정 횟수)는 revision을 넘어 누적하고 3번이면 워커 교체.
-- 커밋: 같은 작업 트리에서 워커가 `git commit --only -- <자기 파일>`로 직접(남이 스테이징한 변경을 안 건드린다 [확인: git 2.54]. 새 파일은 먼저 `git add`). 리드는 git 작업을 하지 않는다.
-- 검증: 결정적 검사는 작업마다(`check`가 Done when 명령을 직접 돌림. 워커 보고의 pass는 증거가 아니다), 다른 모델 검증은 run 끝 + 위험한 작업. 검증자에게는 package(커밋·바뀐 파일·볼 명령)만 주고 워커의 추론은 주지 않는다. verdict는 기준별 pass/fail/unverified + 증거, `reviewed_files` 필수.
+- 커밋: 같은 작업 트리에서 워커가 `git commit --only -- <자기 파일>`로 직접(남이 스테이징한 변경을 안 건드린다 [확인: git 2.54]. 새 파일은 먼저 `git add`). 리드는 git 작업을 하지 않는다는 것이 설계 때의 결정인데, 지금 스킬 글에는 그 문장이 없다 [확인: 2026-11-13 SKILL.md].
+- 검증: 결정적 검사는 작업마다(`check`가 Done when 명령을 직접 돌림. 워커 보고의 pass는 증거가 아니다), 다른 모델 검증은 묶음(batch)이 끝날 때마다 + 위험한 작업 직후. 검증자에게는 package만 준다: 커밋·바뀐 파일·볼 명령, 보낸 brief(Rules·Report format 뺌), 보고서(인계 절 "For whoever picks up" 뺌), check 결과. diff는 넣지 않는다. verdict는 기준별 pass/fail/unverified + 증거, `reviewed_files` 필수.
 - 다른 모델 검증은 Orca 안에서도 `codex exec --sandbox read-only`를 먼저 쓴다. Orca의 Codex 워커는 샌드박스가 Orca 연결을 막아 send·check마다 승인 창에서 멈춘다 [확인: 2026-11-08, 11-11].
 - 끝난 워커는 지우지 않고 같은 영역 후속에 재사용한다(끝난 서브에이전트는 SendMessage로 이어지고 [확인: 2026-11-11 실제 세션], 닫힌 Orca 워커도 `send`로 다시 열면 이전 대화를 기억한다 [확인: 2026-11-08]).
 - CLI로 바꾸지 않고 MCP 도구를 유지한다(2026-11-11 사용자 결정): CLI는 동시 호출 잠금·PATH·기기별 런타임·Bash 시간 제한이 든다.
 
 **도구 동작**: start · list · task · spec_text · dispatched · report · check · package · verdict · pending · cancel · finish · abandon.
 - report: 범위 밖 파일, 테스트 파일 변경, tries 감소, 보고서 불일치를 잡는다. 문제가 없으면 결과 글 한 줄. 워커 커밋의 `Effort:` trailer를 읽어 brief와 다르면 알린다.
-- check: 기준 명령을 직접 돌린다(종료 코드·시간). 트리가 깨끗하지 않으면 unverified. 명령마다 state를 다시 읽어 그 사이 run이 버려졌으면 멈춘다.
+- check: 기준 명령을 직접 돌린다(종료 코드·시간. 명령 하나 120초, 호출 하나 600초를 넘으면 unverified). 트리가 깨끗하지 않으면 unverified. 명령마다 state를 다시 읽어 그 사이 run이 버려졌으면 멈춘다.
 - package·finish: 저장소에 git이 모르는 파일이 있으면 거절.
 - abandon { run, reason }: 워커를 잡은 작업이 없을 때만. 코드는 되돌리지 않고 남은 커밋을 알려 준다. 버린 run은 pending 말고 모두 거절.
 - 안 끝난 run이 있으면 세션 시작 때 도구를 검색 없이 등록한다(세션 중간에는 안 바꿈: 도구 목록이 바뀌면 프롬프트 캐시가 깨진다).
 
 **화면**
 - 대화: relay 호출·결과를 한 줄로(`relay-view.tsx`). 호출 줄은 작업 키 대신 제목, 결과 줄은 `↳`. 결과 줄은 도구 결과 글의 첫 줄 문구를 읽어 만드므로 `relay.ts`의 문구를 바꾸면 `tests/relay.test.tsx`가 깨진다. 펼친 보기는 엔진 기본.
-- 사이드바 relay 상자: 안 끝난 run이 있을 때만. 작업마다 `<상태>  <제목>  rN · 모델/effort · 시각`(좁으면 시각 → 모델 → revision 순으로 뺌), 사용자 답을 기다리는 결정 수, 마지막 verdict(`= HEAD` / `≠ HEAD`). 상태는 값 그대로(ready·launching·running·done 등)이고 상자에서만 긴 셋을 줄인다. 렌더는 상태 `relayStatus`만 읽는다(파일 읽기 0 [확인: 테스트 키트]).
+- 사이드바 relay 상자: 안 끝난 run이 있을 때만. 작업마다 `<상태>  <제목>  rN · 모델/effort · 시각`(좁으면 시각 → 모델 → revision 순으로 뺌), 사용자 답을 기다리는 결정 수, 마지막 verdict(`= HEAD` / `≠ HEAD`). 상태 말은 ready·launching·running·done·`done (concerns)`·`needs context`·blocked·`blocked (live)`·cancelled이고, 상자에서만 긴 셋을 `concerns`·`needs ctx`·`blocked!`로 줄인다. 렌더는 상태 `relayStatus`만 읽는다(파일 읽기 0 [확인: 테스트 키트]).
 - `/relay-status`: 같은 내용을 자르지 않고 글로. 부를 때 run을 다시 읽는다(다른 세션이 바꾼 run을 반영하는 길).
 
 **한계**
 - 서브에이전트 워커는 brief의 effort를 지키지 않는다(Agent 도구가 effort를 받지 않아 세션과 같은 모델이면 세션 effort, 다른 모델이면 그 모델의 값 [확인: 2026-11-11]). 맞추는 기능은 두 가지 설계로 시도했다가 경계 사례가 계속 나와 뺐다(이전 판). effort를 지켜야 하면 Orca 워커(`--effort`). 실제 값은 report와 상자의 `high→xhigh`로 보인다.
-- Orca 워커 세션에 hubblerc 배포판이 안 실려 있으면 커밋에 trailer가 없고 report가 실제 effort를 못 읽는다.
+- Orca 워커 세션에 hubblerc 배포판이 안 실려 있으면 커밋에 Task·Run trailer만 있고 `Effort:`가 없다. 그때 report는 보고서의 `Model / effort` 줄이 낱말 하나일 때만 그 값을 쓴다.
 - 다른 세션이 같은 run을 바꾸면 이 세션의 상자는 다음 relay 저장·재시작·`/relay-status`까지 옛 값이다.
 - 같은 트리에 다른 워커·세션의 커밋 안 된 변경이 있으면 check가 unverified가 된다(모두 끝난 뒤 깨끗한 HEAD에서 다시).
 - 확인 못 함: 자동 호출(스킬 설명만으로 고르는지, Orca의 `orchestration` 스킬과 헷갈리지 않는지), "⚠ relay:" 줄이 모델에게 보이는지, 실패한 SendMessage의 실제 세션 동작, ToolGroup 안 모양.
@@ -293,8 +293,10 @@ Run: 2026-11-07-todo    (relay run 안에서만)
 세션마다 hubblerc가 따로 돌아 세션 수만큼 비용이 는다. 원칙: 새 타이머·폴링·감시를 넣지 않고 이벤트로 받는다. 쉬는 세션에서는 일 자체보다 깨어남이 비쌌다.
 
 **지금 도는 것**
-- 상태 타이머: 답변·도구·서브에이전트가 있으면 1초, 쉴 때 5초(서브에이전트 목록만 봄). 질문·도구 호출이 시작되면 바로 1초로 바꾼다.
-- 30초 주기: 모델·폴더·사용량·git. 전부 읽은 지 15초가 안 됐으면 건너뛴다(쉬는 값은 최대 약 50초 묵음). 사이드바가 보일 때만 세션 이름·메모리·할 일·likely 줄·한도 store 읽기, 디스크·설치 폴더 5분, npm 1시간.
+- 상태 타이머(`status/status.ts`): 답변·도구·서브에이전트가 있으면 1초, 쉴 때 5초(서브에이전트 목록만 봄). 질문·도구 호출이 시작되면 바로 1초로 바꾼다.
+- 자원 타이머(`sidebar/device.ts`): 따로 도는 30초 타이머. 모든 세션에서 깨어나 사이드바가 보이는지 보고, 보일 때만 메모리를 읽고 디스크·설치 폴더(5분)·npm(1시간)을 실제 시각 기준으로 확인한다. 사이드바가 닫혀 있어도 깨어나기는 한다.
+- 그림 탐지 타이머(`sidebar/picture.ts`): 세션 시작부터 1초마다, 터미널이 답하면 멈춘다. 그린 그림 없이 10번이면 멈추고, 답을 모르는 채 사이드바가 그림을 그리면 다시 켠다.
+- 상태 타이머의 30초 주기: 모델·폴더·사용량·git. 전부 읽은 지 15초가 안 됐으면 건너뛴다(쉬는 값은 최대 약 50초 묵음). 사이드바가 보일 때만 세션 이름·할 일·likely 줄·한도 store 읽기.
 - 이벤트: 세션 시작, 메인 답변 끝, 모델 전환(`classic.PostModelSwitch`)에 상태 전체. 요청이 돌아올 때마다 `$.session.usage()`(엔진이 들고 있는 값이라 네트워크 요청 없음 [확인: 타입 문서]). git은 질문 시작과 파일을 바꿀 수 있는 도구 뒤에도.
 - 바뀐 값만 상태에 쓴다(쓰기마다 밴드·사이드바가 다시 그려질 수 있다).
 - 재시작 확인은 예약했을 때만 2초. 고양이 다시 보내기는 입력·질문 때 10초에 한 번까지.
@@ -322,8 +324,8 @@ Run: 2026-11-07-todo    (relay run 안에서만)
 | likely Bash 실패(꺼짐) | 켜면 Bash마다 Haiku 5번·`tee -a` 2개, 하루 약 $0.17~0.5 |
 | 모델별 주간 한도 | 네트워크 요청은 Fable로 일하는 동안 많아야 1분 1번(응답 약 2.6KB) |
 | 5h·7d 공유 | store 읽기는 답변 끝·30초 주기에 1번, 쓰기는 값이 다를 때만 |
-| 커밋 trailer | Bash마다 `git commit`인지 글자 검사, 세션 시작 때 기종 읽기 1번(0.26초) |
-| relay | Bash·서브에이전트 호출마다 진행 중 run이 있는지 확인, 세션 시작 때 `git rev-parse`·`.relay/runs` 읽기 1번. 상자 렌더는 파일 읽기 0 |
+| 커밋 trailer | Bash마다 명령을 셸 해석기로 읽어 `git commit`을 찾음, 커밋마다 `git config --bool` 1번, 첫 커밋 때 기종 읽기 1번(0.26초) |
+| relay | Bash·서브에이전트·SendMessage 호출마다 글자 검사(띄우기나 brief 경로가 보일 때만 run을 읽음), 메인 답변 끝마다 `.relay/runs` 확인(run이 있으면 `state.json`, 후보가 있으면 `git rev-parse HEAD`), 세션 시작 때 `git rev-parse`·`.relay/runs` 읽기 1번. 상자 렌더는 파일 읽기 0 |
 | aside 리서치 | 스킬 설명 558자가 스킬 목록에 |
 
 **기능을 더할 때 점검**: 기능을 더하거나 바꿀 때마다 아래를 보고, 결과를 위 표(새 타이머나 주기 작업이 생기면 "지금 도는 것")에 날짜와 함께 반영한다.
@@ -394,5 +396,5 @@ Run: 2026-11-07-todo    (relay run 안에서만)
 - 테스트 훅은 테스트가 `$`를 처음 부르기 전에 건다. `expect`에 `toBeCloseTo`가 없고, `Engine`에 `$.state`가 없다(상태는 그린 화면에서 찾는다).
 - 밴드 훅이 `next(e)`로 넘기면 테스트에서는 아래에 그릴 것이 없어 오류 → 빈 `Box`를 그리는 대역을 둔다.
 - 앞 테스트가 채운 모듈 변수는 다음 테스트에 남지 않는다 [확인: 2.1.318].
-- 셸 파일은 키트로 시험할 수 없어 가짜 `claude`·`security`를 쓴 zsh 시험(`tests/shell/`)으로 본다.
+- 셸 파일은 키트로 시험할 수 없다. `tests/shell/relaunch-sync.zsh`(가짜 `claude`)가 alias 풀기, `hcc`의 사본 복사와 띄우기, 재시작 전 다시 복사를 본다. `hubblerc-key`의 set·delete·status를 돌리는 시험은 저장소에 없다.
 - 실제 화면 확인: 같은 폴더에서 테스트 세션을 하나 더 열어 SendMessage로 시나리오를 보내고, 정답은 그 세션의 기록 파일에서 뽑는다. Orca 탭의 화면은 `orca terminal read --screen`으로 읽는다(색은 못 읽음).

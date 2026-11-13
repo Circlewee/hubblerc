@@ -88,5 +88,6 @@ stateDiagram-v2
 | 실행 환경별 안내(Orca, 서브에이전트, codex exec) | `plugins/hubblerc/skills/relay/references/` |
 | 도구(brief·보고·검사·package·verdict·끝내기) | `plugins/hubblerc/hooks/relay/relay.ts` |
 | gate 1·2 | `plugins/hubblerc/hooks/relay/gate.ts` |
-| 사이드바 상자·`/relay-status` | `plugins/hubblerc/hooks/relay/relay-view.tsx`, `relay-status.ts` |
+| 대화의 한 줄 그리기 | `plugins/hubblerc/hooks/relay/relay-view.tsx` |
+| 사이드바 상자·`/relay-status` | `plugins/hubblerc/hooks/sidebar/boxes/relay.tsx`, `hooks/relay/relay-status.ts`, `hooks/commands.ts` |
 | run의 기록(진행 기록, brief, 보고서, verdict) | `.relay/runs/<날짜>-<이름>/` (git에 넣지 않음) |
