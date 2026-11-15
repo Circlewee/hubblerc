@@ -21,7 +21,7 @@ export type ContentsDrawing = {
 export function contentsBody(f: Frame, d: ContentsDrawing): JSX.Element {
   const { Box, Text, Button } = f.parts
   const { entries, page, pages, onJump, onPage: goTo } = d
-  const inner = f.inner
+  const inner = f.openInner
 
   return (
     <Box flexDirection="column">

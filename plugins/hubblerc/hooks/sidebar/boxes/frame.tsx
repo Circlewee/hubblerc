@@ -25,7 +25,11 @@ export type Frame = {
   isApp: boolean
   /** What a box holds: the width less the box's frame. */
   inner: number
+  /** What the open box at the bottom holds: the whole width in the terminal, a box's in the app. */
+  openInner: number
   box: (id: SectionId, title: string | ((isFolded: boolean) => Heading), body: JSX.Element) => JSX.Element
+  /** The last box, open (`openBox`); `after` drawn under its body (the to-dos' field). */
+  openBox: (id: SectionId, title: (isFolded: boolean) => Heading, body: JSX.Element, after?: JSX.Element) => JSX.Element
   segmentText: (segment: Segment, key: string) => JSX.Element
 }
 
@@ -119,5 +123,37 @@ export function frame(
     )
   }
 
-  return { parts, isApp, inner, box, segmentText }
+  /**
+   * The last box, open: in the terminal no border, its title then a dim rule to the edge on one row,
+   * its body under it from the first cell (`▾ Contents 12 │ Todos 3 ────`); folded, that row alone.
+   * Its field, under the body, takes the pane's whole width, as the engine reckons a field's room, so
+   * the items and the field start at one cell; the title, first in the tree, is the focus ring's first
+   * stop there (2026-11-16: the field under a bordered box stood apart from it). The boxes above keep
+   * their borders, which part them from it. In the app, a box as the others are.
+   */
+  const openBox = (id: SectionId, title: (isFolded: boolean) => Heading, body: JSX.Element, after?: JSX.Element) => {
+    const isFolded = foldedIds.includes(id)
+    if (isApp) {
+      return (
+        <Box key={`open-${id}`} flexDirection="column">
+          {box(id, title, body)}
+          {isFolded ? null : after}
+        </Box>
+      )
+    }
+    const { element: heading, cells } = title(isFolded)
+
+    return (
+      <Box key={`box-${id}`} flexDirection="column">
+        <Box key={`title-${id}`}>
+          {heading}
+          <Text dimColor>{'─'.repeat(Math.max(0, width - cells))}</Text>
+        </Box>
+        {isFolded ? null : body}
+        {isFolded ? null : after}
+      </Box>
+    )
+  }
+
+  return { parts, isApp, inner, openInner: isApp ? inner : width, box, openBox, segmentText }
 }

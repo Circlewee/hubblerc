@@ -338,7 +338,7 @@ test('the last box has tabs: the contents, or the to-dos, the shown one bold and
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   // Waiting and in progress counted.
-  expect((await ui.find({ key: 'title-contents' }))?.text).toBe('╭── ▾ Contents 1 │ Todos 2 ')
+  expect((await ui.find({ key: 'title-contents' }))?.text).toMatch(/^ ▾ Contents 1 │ Todos 2 ─+$/)
   expect((await ui.find({ type: 'Text', text: 'Contents 1' }))?.props.bold).toBe(true)
   expect((await ui.find({ type: 'Text', text: 'Todos 2' }))?.props.dimColor).toBe(true)
   expect(await ui.find({ key: 'turn-t1' })).toBeDefined()
@@ -605,7 +605,7 @@ test('the tab draws on mobile; a folded box unfolds on a press of a tab', async 
   await start($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'mobile', props: PANE_PROPS })
-  expect((await ui.find({ key: 'box-contents' }))?.text).toMatch(/^╶── ▸ Contents 0 │ Todos 1 ─+$/)
+  expect((await ui.find({ key: 'box-contents' }))?.text).toMatch(/^ ▸ Contents 0 │ Todos 1 ─+$/)
   await ui.press({ key: 'tab-todo' })
   expect(await ui.find({ key: 'todo-1' })).toBeDefined()
   await ui.unmount()
@@ -645,12 +645,12 @@ test('a row: an emoji sign in its own colours, ↗ and ✕ three cells each, the
   for (const sign of ['✅', '💤']) expect((await ui.find({ type: 'Text', text: sign }))?.props).toEqual({})
   expect((await ui.find({ type: 'Text', text: ' 일 2' }))?.props.dimColor).toBe(true)
   expect((await ui.find({ type: 'Text', text: ' 일 3' }))?.props.dimColor).toBe(true)
-  // The sign's two cells counted: the row stays within the box's 52, a cell before the tail.
+  // The sign's two cells counted: the row stays within the open box's 56 (the pane's width), a cell before the tail.
   const row = (await ui.find({ key: 'todo-1' }))?.text ?? ''
   expect(row.endsWith('… ↗  ✕ ')).toBe(true)
   // The tail as the width is counted: ` #N`, then ` ↗ ` and ` ✕ `.
   expect([item(1, 'pending'), item(2, 'in_progress', { turn: 3 }), item(3, 'done', { turn: 12 }), item(4, 'on_hold', { turn: 5 })].map(rowTailCells)).toEqual([6, 6, 7, 3])
-  expect(cellWidth(row)).toBeLessThanOrEqual(52 - 1)
+  expect(cellWidth(row)).toBeLessThanOrEqual(56 - 1)
   expect(cellWidth(row)).toBeGreaterThanOrEqual(52 - 2)
   await ui.unmount()
 })

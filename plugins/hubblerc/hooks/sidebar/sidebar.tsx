@@ -330,7 +330,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       boxRows('status', status.length + (id === '' ? 0 : 1) + (request.length === 0 ? 0 : 1) + (likelyLine === '' ? 0 : 1)) +
       (relay.length === 0 ? 0 : boxRows('relay', relay.length)) +
       (files.length === 0 ? 0 : boxRows('files', 0)) +
-      boxRows('contents', 0)
+      // The last box, open in the terminal: its title row alone above its body; in the app, a box's two.
+      (foldedIds.includes('contents') || !isApp ? 1 : 2)
     // No rows given (a surface that does not say): nothing is cut.
     const bodyRows = e.props.scroll.bodyRows > 0 ? e.props.scroll.bodyRows : Number.POSITIVE_INFINITY
     const room = bodyRows - above
@@ -382,8 +383,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         {statusBox($, f, { status, id, name, request, likelyLine })}
         {relay.length === 0 ? null : relayBox(f, relay)}
         {files.length === 0 ? null : filesBox(f, { shown: shownFiles, isExpanded: isFilesExpanded, isCut, onExpand: expandFiles, onCollapse: () => void update($, filesExpanded, () => false) })}
-        {f.box('contents', tabs, lastBody)}
-        {Input === undefined || shownTab !== 'todo' || !isContentsOpen ? null : todoField($, { Input, edited, rows: fieldRows, columns: width })}
+        {f.openBox('contents', tabs, lastBody, Input === undefined || shownTab !== 'todo' ? undefined : todoField($, { Input, edited, rows: fieldRows, columns: width }))}
       </Box>
     )
   })

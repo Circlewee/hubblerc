@@ -5,6 +5,7 @@ import type { On } from 'claude-code'
 import type { TurnRecord } from '../types'
 import { clipCells, fileLayout, fileRows, fileUrl, fitFileLayout, sessionFiles, shareRows, shortPath, tocEntries, tocPage, tocPageSize, tocRows } from '../hooks/sidebar/sidebar-format'
 import { NOW, standInForEngine, start } from './engine'
+import { cellWidth } from '../hooks/shared/text-width'
 
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
 const BAND_PROPS = {
@@ -329,15 +330,17 @@ test('the sidebar shows the status, the files changed and the contents', async (
   }
 })
 
-test('each part of the sidebar is a box, its title drawn over the top border after it', async ($, on) => {
+test('each part of the sidebar is a box, its title drawn over the top border after it; the last one open, its title a row with a rule', async ($, on) => {
   standInForEngine(on)
   await start($)
   await twoAnswers($)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  for (const id of ['status', 'files', 'contents']) {
+  for (const id of ['status', 'files']) {
     expect((await ui.find({ key: `box-${id}` }))?.props).toMatchObject({ borderStyle: 'round', borderDimColor: true })
   }
+  // The last box is open: no border, its title row first in the tree, so the focus ring meets it first.
+  expect((await ui.find({ key: 'box-contents' }))?.props.borderStyle).toBeUndefined()
   // The title row comes after its box in the tree, so it is painted over the border, not under it.
   expect((await ui.find({ key: 'title-status' }))?.props).toMatchObject({ marginBottom: -1 })
   expect((await ui.find({ key: 'title-status' }))?.text).toBe('╭── ▾ Status ')
@@ -346,7 +349,8 @@ test('each part of the sidebar is a box, its title drawn over the top border aft
   expect((await ui.find({ key: 'fold-files' }))?.text).toBe(' ▾ Files ')
   // The last box's title is its tabs: the arrow folds it, each name shows its tab.
   expect((await ui.find({ key: 'fold-contents' }))?.text).toBe(' ▾ ')
-  expect((await ui.find({ key: 'title-contents' }))?.text).toBe('╭── ▾ Contents 2 │ Todos 0 ')
+  expect((await ui.find({ key: 'title-contents' }))?.text).toMatch(/^ ▾ Contents 2 │ Todos 0 ─+$/)
+  expect(cellWidth((await ui.find({ key: 'title-contents' }))?.text ?? '')).toBe(PANE_PROPS.bodyColumns)
   await ui.unmount()
 })
 

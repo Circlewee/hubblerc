@@ -52,7 +52,8 @@ test('in the desktop app the sidebar draws no cat and no borders: each box a tit
   // The terminal as it was.
   const terminal = await sidebar($, 'terminal')
   expect(terminal.hasCat).toBe(true)
-  expect(terminal.borders).toBe(3)
+  // The last box is open in the terminal too: two borders, the device's and the status's.
+  expect(terminal.borders).toBe(2)
   expect(terminal.effortButton).toBe(true)
 })
 

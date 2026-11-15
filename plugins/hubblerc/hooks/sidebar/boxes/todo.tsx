@@ -35,7 +35,7 @@ export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Elem
   const { Box, Text, Button } = f.parts
   const { items: userTodos, shown: shownTodos, edited, Input, doneCount, undoN, suggested } = d
   const hasField = Input !== undefined
-  const inner = f.inner
+  const inner = f.openInner
 
   const todoRow = (item: UserTodo) => {
     // The item a suggestion is about is marked as the edited one is: the line below says what is asked of it.
