@@ -22,7 +22,7 @@ import { resendPicture } from './sidebar/picture'
 import { layoutOption, showSidebar, startSidebar } from './sidebar/sidebar'
 import { markRunning, noteAnswering, noteCall, noteHere, noteEffortCommand, noteRename, noteTranscript, refreshModelLimits, refreshStatus, requestGitRefresh, startStatus, unmarkRunning } from './status/status'
 import { findTurnForLine, summarize } from './activity/summary'
-import { serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
+import { holdEditFocus, serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
 import { judgeTodoEnd, judgeTodoStart, startTodoJudge } from './todo/todo-judge'
 import { gateLaunches, unverifiedLine } from './relay/gate'
 import { registerRelayTool, serveRelayTool } from './relay/relay'
@@ -187,6 +187,7 @@ export const register: Register = (on, options) => {
   trackPrompts(on)
   answerCommands(on, layout)
   serveTodoTool(on)
+  holdEditFocus(on)
   serveRelayTool(on)
   answerLikelyCommand(on)
   controlEffort(on, autoByDefault)

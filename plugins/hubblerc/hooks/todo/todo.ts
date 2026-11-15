@@ -101,7 +101,7 @@ let undo: { key: string; ids: number[] } | null = null
  * field (it hands the keyboard back), so the pane losing the keyboard while editing is the cancel: a
  * click elsewhere cancels too. Gone with a reload or the item.
  */
-let editing: { key: string; id: number; field: string; sawFocus: boolean } | null = null
+let editing: { key: string; id: number; field: string; sawFocus: boolean; holdsRing?: true } | null = null
 /** Edits started since the module loaded: with the time, what makes each edit's field key new. */
 let edits = 0
 /**
@@ -559,6 +559,28 @@ export async function selectTab($: EngineInterface, tab: SidebarTab): Promise<vo
   await update($, sidebarTab, () => tab)
   await $.store.set(TAB_KEY, tab).catch(() => undefined)
   await refreshTodos($).catch(() => undefined)
+}
+
+/**
+ * While an item is edited, the sidebar's focus ring stays on its field once it got there: Up and Down
+ * past the field's first or last row, and Tab, moved it to another item's buttons (2026-11-16,
+ * reported). The person's moves elsewhere are refused; a plugin's (`$.ui.focus`) pass. A click is a
+ * person's move too, so a press elsewhere does not take the ring while editing [guess: whether the
+ * press itself still runs is not known]; Esc ends the edit (`editTarget`) and the ring is free again.
+ */
+export function holdEditFocus(on: On): void {
+  on('ui.focus', { requestId: SIDEBAR_ID }, async ($, e, next) => {
+    const current = editing
+    if (current === null) return next(e)
+    if (e.element === current.field) {
+      current.holdsRing = true
+
+      return next(e)
+    }
+    if (current.holdsRing === true && e.origin.kind === 'person') return { deny: 'the edit field keeps the keyboard until the edit ends' }
+
+    return next(e)
+  })
 }
 
 /**
