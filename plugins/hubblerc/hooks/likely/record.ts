@@ -29,6 +29,8 @@ export type DecisionLine = {
   at: string
   task: string
   methodVersion: number
+  /** The plugin's version (plugin.json) the decision was made by; absent on lines written before 2026-11-16. */
+  pluginVersion?: string
   model: string
   /** Calls asked for. */
   samples: number

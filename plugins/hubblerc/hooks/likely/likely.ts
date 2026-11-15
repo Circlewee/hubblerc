@@ -118,11 +118,30 @@ let folder: string | null = null
 /** The machine's totals are read, changed and written one change at a time within the session. */
 let spendQueue: Promise<unknown> = Promise.resolve()
 
-/** At session.start: the key from the keychain where the options have none, and what the sidebar shows of the spend. */
+/**
+ * The plugin's version as its plugin.json has it, written on each decision line so that records can
+ * be told apart by the code that made them; '' while unread. A development copy carries the version
+ * of the release it was cut after.
+ */
+let pluginVersion = ''
+
+/** At session.start: the plugin's version from its manifest; unreadable, the lines go without it. */
+async function readPluginVersion($: EngineInterface): Promise<void> {
+  const json = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).catch(() => undefined)
+  let version: unknown
+  try {
+    version = typeof json === 'string' ? (JSON.parse(json) as { version?: unknown }).version : undefined
+  } catch {
+    version = undefined
+  }
+  pluginVersion = typeof version === 'string' ? version : ''
+}
+
+/** At session.start: the key from the keychain where the options have none, the plugin's version, and what the sidebar shows of the spend. */
 export async function startLikely($: EngineInterface): Promise<void> {
   folder = null
   resetLogs()
-  await readKeychainKey($).catch(() => undefined)
+  await Promise.all([readKeychainKey($).catch(() => undefined), readPluginVersion($)])
   await refreshLikelyStatus($)
 }
 
@@ -307,6 +326,7 @@ export async function likely($: EngineInterface, request: LikelyRequest): Promis
     at: new Date(started).toISOString(),
     task: request.task,
     methodVersion: METHOD_VERSION,
+    ...(pluginVersion === '' ? {} : { pluginVersion }),
     model,
     samples,
     thinking,

@@ -361,6 +361,17 @@ test('a decision: five calls at once with the key, no sampling, thinking off, on
   expect(store.likelySpend).toMatchObject({ dayCount: 1, periodCount: 1 })
 })
 
+test("a decision line carries the plugin's version as plugin.json has it", WITH_KEY, async ($, on) => {
+  const standIn = standInForEngine(on)
+  machine(on, standIn)
+  on('fs.read', (_, e) => (e.path.endsWith('/.claude-plugin/plugin.json') ? { value: JSON.stringify({ name: 'hubblerc', version: '9.8.7' }) as never } : { deny: 'no file' }))
+  standIn.anthropic = knowingModel({ predicate: 0.7 })
+  await start($)
+  await likelyCommand($, '사과는 빨갛다')
+
+  expect(lines(standIn)[0]).toMatchObject({ type: 'decision', pluginVersion: '9.8.7' })
+})
+
 test('with iCloud Drive on, the log goes to its hubblerc/likely folder', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn)
