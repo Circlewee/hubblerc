@@ -7,6 +7,8 @@ import {
   clearDone,
   draftInsertText,
   editItem,
+  fieldRows,
+  fieldTextCells,
   isStatus,
   MAX_TODOS,
   nextStatus,
@@ -16,6 +18,7 @@ import {
   restoreItems,
   setItemStatus,
   STATUS_MARK,
+  TODO_FIELDS,
   todoListText,
   mainTreePath,
   todoStoreKey,
@@ -95,6 +98,14 @@ let undo: { key: string; ids: number[] } | null = null
 let editing: { key: string; id: number; field: string; sawFocus: boolean } | null = null
 /** Edits started since the module loaded: with the time, what makes each edit's field key new. */
 let edits = 0
+/**
+ * The rows the field keyed `field` asks for, as a change of its text last left them; null until one.
+ * The module's: a drawing reads it, and only a change of the rows draws again.
+ */
+let typedRows: { field: string; rows: number } | null = null
+
+/** The key of the field that writes an item. */
+export const ADD_FIELD_KEY = 'todo-input'
 
 /** At session.start: the tab chosen in an earlier session, the project's list, and the model's tool. */
 export async function startTodos($: EngineInterface): Promise<void> {
@@ -102,6 +113,7 @@ export async function startTodos($: EngineInterface): Promise<void> {
   offered = null
   undo = null
   editing = null
+  typedRows = null
   const tab = await $.store.get(TAB_KEY).catch(() => undefined)
   if (tab === 'contents' || tab === 'todo') await update($, sidebarTab, () => tab)
   await refreshTodos($).catch(() => undefined)
@@ -234,6 +246,8 @@ async function pressed($: EngineInterface, work: () => Promise<unknown>): Promis
 
 /** The sidebar's field, on Enter: a new item; a refusal as a toast (the field is emptied either way). */
 export async function addTodoFromField($: EngineInterface, text: string): Promise<void> {
+  // The engine empties the field after Enter, written or not: one row again.
+  typedRows = null
   await pressed($, async () => {
     const outcome = await addTodo($, text)
     if ('item' in outcome) {
@@ -361,6 +375,29 @@ export function editFieldKey(): string {
 }
 
 /**
+ * While drawing: the rows of the field shown in a box `inner` cells wide, the one that edits `edited`
+ * or the one that writes: as its typing left them, else what the edited text needs (one, empty).
+ */
+export function todoFieldRows(edited: UserTodo | null, inner: number): number {
+  const key = edited === null ? ADD_FIELD_KEY : editFieldKey()
+  if (typedRows?.field === key) return typedRows.rows
+
+  return edited === null ? 1 : fieldRows(edited.text, fieldTextCells(inner, TODO_FIELDS.edit))
+}
+
+/**
+ * A change of a field's text (`onInput`, every key typed): the rows it needs kept, and the pane drawn
+ * again only when they differ from the `drawn` ones, the field taller as its text wraps. The engine
+ * keeps what a field holds by its key, so the drawing does not lose the typing [guess: from the
+ * edit field keeping its own text over an unchanged `value`, 2026-11-05].
+ */
+export async function noteFieldText($: EngineInterface, field: string, kind: keyof typeof TODO_FIELDS, text: string, inner: number, drawn: number): Promise<void> {
+  const rows = fieldRows(text, fieldTextCells(inner, TODO_FIELDS[kind]))
+  typedRows = { field, rows }
+  if (rows !== drawn) await redraw($)
+}
+
+/**
  * While drawing: the item the field edits, or null. The edit ends here, in the module, when its item
  * is gone, the project changed, or the pane, having held the keyboard, let it go (Esc, a click away).
  */
@@ -386,6 +423,7 @@ export function editTarget(items: readonly UserTodo[], isFocused: boolean): User
 /** The edit field, on Enter: the text saved (status and answers kept); empty, the edit cancelled. */
 export async function saveEditFromField($: EngineInterface, id: number, value: string): Promise<void> {
   editing = null
+  typedRows = null
   if (value.trim() === '') {
     await redraw($)
 

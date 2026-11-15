@@ -2,8 +2,8 @@ import type { ElementConstructor, EngineInterface, InputProps } from 'claude-cod
 
 import { THEME_COLORS } from '../../shared/style'
 import { cellWidth } from '../../shared/text-width'
-import { addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, editFieldKey, offerTodo, saveEditFromField, startEditTodo, undoDelete } from '../../todo/todo'
-import { oneLine, rowTailCells, showsTurn, STATUS_MARK } from '../../todo/todo-format'
+import { ADD_FIELD_KEY, addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, editFieldKey, noteFieldText, offerTodo, saveEditFromField, startEditTodo, undoDelete } from '../../todo/todo'
+import { oneLine, rowTailCells, showsTurn, STATUS_MARK, TODO_FIELDS } from '../../todo/todo-format'
 import { acceptTodoSuggestion, rejectTodoSuggestion } from '../../todo/todo-judge'
 import type { TodoSuggestion } from '../../todo/todo-judge-format'
 import type { UserTodo } from '../../todo/todo-format'
@@ -18,6 +18,8 @@ export type TodoDrawing = {
   edited: UserTodo | null
   /** The field the tab writes with: absent where the surface draws none (mobile). */
   Input: ElementConstructor<InputProps> | undefined
+  /** The field's rows (`todoFieldRows`): more than one as its text wraps. */
+  fieldRows: number
   doneCount: number
   /** The items "↶ 되돌리기" brings back; 0, no button. */
   undoN: number
@@ -33,7 +35,7 @@ export type TodoDrawing = {
  */
 export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Element {
   const { Box, Text, Button } = f.parts
-  const { items: userTodos, shown: shownTodos, edited, Input, doneCount, undoN, suggested } = d
+  const { items: userTodos, shown: shownTodos, edited, Input, fieldRows, doneCount, undoN, suggested } = d
   const hasField = Input !== undefined
   const inner = f.inner
 
@@ -171,23 +173,32 @@ export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Elem
         </Button>
       ) : null}
       {/* Enter writes it; the engine empties the field after. Editing, a field of its own holds the
-          item's text: Enter saves, empty cancels, and so does the pane letting the keyboard go (Esc). */}
+          item's text: Enter saves, empty cancels, and so does the pane letting the keyboard go (Esc).
+          Either grows a row as its text wraps (one row cut a long text and hid the caret's part). */}
       {Input === undefined ? null : edited !== null ? (
         <Input
           key={editFieldKey()}
-          label="수정 중 "
+          label={TODO_FIELDS.edit.label}
           value={edited.text}
+          rows={fieldRows}
           placeholder="비우고 Enter면 취소"
-          submitLabel="저장"
+          submitLabel={TODO_FIELDS.edit.submitLabel}
+          onInput={value => {
+            void noteFieldText($, editFieldKey(), 'edit', value, inner, fieldRows)
+          }}
           onSubmit={value => {
             void saveEditFromField($, edited.id, value)
           }}
         />
       ) : (
         <Input
-          key="todo-input"
+          key={ADD_FIELD_KEY}
+          rows={fieldRows}
           placeholder="할 일 적기"
-          submitLabel="추가"
+          submitLabel={TODO_FIELDS.add.submitLabel}
+          onInput={value => {
+            void noteFieldText($, ADD_FIELD_KEY, 'add', value, inner, fieldRows)
+          }}
           onSubmit={value => {
             void addTodoFromField($, value)
           }}

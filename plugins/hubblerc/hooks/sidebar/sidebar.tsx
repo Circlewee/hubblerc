@@ -12,7 +12,7 @@ import { catImageAt, catMark, catMood } from './cat-images'
 import { notePicture, PICTURE_ROWS, startPictures } from './picture'
 import { fileLayout, fileRows, fitFileLayout, sessionFiles, shareRows, tocEntries, tocPage, tocPageSize, tocRows } from './sidebar-format'
 import type { FileLimits, TocEntry } from './sidebar-format'
-import { editTarget, selectTab, todosForDrawing, undoCount } from '../todo/todo'
+import { editTarget, selectTab, todoFieldRows, todosForDrawing, undoCount } from '../todo/todo'
 import { todoSuggestion } from '../todo/todo-judge'
 import { footerRows, openCount, sortTodos, todoLeastRows, todoRows, todosShown } from '../todo/todo-format'
 import type { SidebarTab } from '../todo/todo-format'
@@ -342,7 +342,9 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const edited = hasField ? editTarget(userTodos, e.props.isFocused) : null
     // A judgment waiting on a press ("시작?", "완료?"): the module's too, a row above the footer's others.
     const suggested = todoSuggestion(userTodos)
-    const todoFooter = footerRows(doneCount, undoN, hasField, suggested !== null)
+    // The field grows as its text wraps: its rows are the footer's.
+    const fieldRows = hasField ? todoFieldRows(edited, f.inner) : 0
+    const todoFooter = footerRows(doneCount, undoN, fieldRows, suggested !== null)
     // However short the pane, the last box keeps three rows of the contents, or the to-dos' footer and
     // a few of them: three rows once left the to-dos one item and "외 1개" under the files (2026-11-04).
     const contentsLeast = shownTab === 'todo' ? todoLeastRows(userTodos.length, todoFooter) : 3
@@ -372,7 +374,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       onFold: () => void toggleFold($, 'contents'),
       onTab: (tab, isFolded) => void selectTab($, tab).then(() => (isFolded ? toggleFold($, 'contents') : undefined)),
     })
-    const lastBody = shownTab === 'todo' ? todoBody($, f, { items: userTodos, shown: shownTodos, edited, Input, doneCount, undoN, suggested }) : contentsBody(f, contents)
+    const lastBody = shownTab === 'todo' ? todoBody($, f, { items: userTodos, shown: shownTodos, edited, Input, fieldRows, doneCount, undoN, suggested }) : contentsBody(f, contents)
 
     return (
       <Box flexDirection="column">

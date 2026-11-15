@@ -290,9 +290,39 @@ export function editItem(record: TodoRecord, id: number, text: string): TodoReco
   return { ...record, items: record.items.map(item => (item.id === id ? { ...item, text } : item)) }
 }
 
-/** The rows under the items: a suggestion ("시작?", "완료?"), "완료 N개 지우기", "↶ 되돌리기", the field. */
-export function footerRows(done: number, undo: number, hasInput: boolean, hasSuggestion = false): number {
-  return (hasSuggestion ? 1 : 0) + (done > 0 ? 1 : 0) + (undo > 0 ? 1 : 0) + (hasInput ? 1 : 0)
+/** The rows under the items: a suggestion ("시작?", "완료?"), "완료 N개 지우기", "↶ 되돌리기", the field's rows (0, none). */
+export function footerRows(done: number, undo: number, inputRows: number, hasSuggestion = false): number {
+  return (hasSuggestion ? 1 : 0) + (done > 0 ? 1 : 0) + (undo > 0 ? 1 : 0) + inputRows
+}
+
+/** The tab's two fields: the one that writes an item, and the one that edits the item whose text was pressed. */
+export const TODO_FIELDS = {
+  add: { label: '', submitLabel: '추가' },
+  edit: { label: '수정 중 ', submitLabel: '저장' },
+} as const
+
+/** The rows a field grows to; past them its text scrolls within. */
+export const FIELD_MOST_ROWS = 4
+
+/**
+ * The cells a field's text gets on a row of a box `inner` cells wide: the label before it, the
+ * submit word the engine draws beside it while it has focus, and a few cells for the caret and the
+ * gaps [guess: the engine's layout is not documented; too few cells only grows the field a row early].
+ */
+export function fieldTextCells(inner: number, field: { label: string; submitLabel: string }): number {
+  return Math.max(8, inner - cellWidth(field.label) - cellWidth(field.submitLabel) - 4)
+}
+
+/**
+ * The rows a field needs to show all of `text` wrapped at `width` cells, the caret's cell after the
+ * last line counted, from 1 to `FIELD_MOST_ROWS`. One row is never asked for a text that fills it:
+ * a field one row tall cut a long text and did not follow the caret into it (2026-11-16, reported),
+ * while one of several rows wraps and scrolls within.
+ */
+export function fieldRows(text: string, width: number): number {
+  const needed = text.split('\n').reduce((rows, line) => rows + Math.max(1, Math.ceil((cellWidth(line) + 1) / width)), 0)
+
+  return Math.min(FIELD_MOST_ROWS, Math.max(1, needed))
 }
 
 /** The rows the tab's body wants: up to `size` items (an empty list's line), "외 N개", and the footer's rows. */

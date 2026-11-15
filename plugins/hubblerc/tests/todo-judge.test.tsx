@@ -93,8 +93,8 @@ test('a judgment is shown the newest twelve items of its kind and `none`; a choi
   expect(doneInput('질문', `${'x'.repeat(3000)}끝`).endsWith('끝\n</answer_end>')).toBe(true)
   expect(doneInput('질문', 'x'.repeat(3000)).length).toBeLessThan(2100)
   // The suggestion's line is a row of the footer.
-  expect(footerRows(1, 0, true, true)).toBe(3)
-  expect(footerRows(0, 0, false)).toBe(0)
+  expect(footerRows(1, 0, 1, true)).toBe(3)
+  expect(footerRows(0, 0, 0)).toBe(0)
 })
 
 test('a question that starts a waiting to-do in other words is put to the person; 맞음 moves it to in progress with that answer', WITH_KEY, async ($, on) => {

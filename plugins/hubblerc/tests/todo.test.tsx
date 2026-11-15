@@ -8,6 +8,8 @@ import {
   clearDone,
   draftInsertText,
   editItem,
+  FIELD_MOST_ROWS,
+  fieldRows,
   MAX_TODOS,
   MAX_TRASH,
   nextStatus,
@@ -146,17 +148,17 @@ test('adding stops at 200; taking up or finishing an item sets the answer, a pre
 
 test('the tab shows twelve at most, fewer in fewer rows with a row for "외 N개"', () => {
   // Items, then the footer: "완료 N개 지우기", "↶ 되돌리기", the field.
-  expect(footerRows(1, 0, true)).toBe(2)
-  expect(footerRows(2, 3, true)).toBe(3)
-  expect(footerRows(0, 0, false)).toBe(0)
-  expect(todoRows(3, footerRows(1, 0, true))).toBe(5)
-  expect(todoRows(0, footerRows(0, 0, true))).toBe(2)
-  expect(todoRows(20, footerRows(0, 0, false))).toBe(13)
-  expect(todosShown(3, 10, footerRows(1, 0, true))).toBe(3)
-  expect(todosShown(20, 40, footerRows(0, 0, true))).toBe(12)
+  expect(footerRows(1, 0, 1)).toBe(2)
+  expect(footerRows(2, 3, 1)).toBe(3)
+  expect(footerRows(0, 0, 0)).toBe(0)
+  expect(todoRows(3, footerRows(1, 0, 1))).toBe(5)
+  expect(todoRows(0, footerRows(0, 0, 1))).toBe(2)
+  expect(todoRows(20, footerRows(0, 0, 0))).toBe(13)
+  expect(todosShown(3, 10, footerRows(1, 0, 1))).toBe(3)
+  expect(todosShown(20, 40, footerRows(0, 0, 1))).toBe(12)
   // Six rows less the field and "지우기": four, one of them "외 N개".
-  expect(todosShown(20, 6, footerRows(2, 0, true))).toBe(3)
-  expect(todosShown(20, 1, footerRows(2, 0, true))).toBe(1)
+  expect(todosShown(20, 6, footerRows(2, 0, 1))).toBe(3)
+  expect(todosShown(20, 1, footerRows(2, 0, 1))).toBe(1)
 })
 
 test('the lists say each item, the model\'s with ids and the answers it was written and taken up in', () => {
@@ -283,6 +285,55 @@ test('the last box has tabs: the contents, or the to-dos, the shown one bold and
   expect(stored.sidebarTab).toBe('contents')
   expect(await again.find({ key: 'todo-1' })).toBeUndefined()
   await again.unmount()
+})
+
+test('a field takes a row more as its text wraps, the caret after the last line counted, four at most', () => {
+  expect(fieldRows('', 20)).toBe(1)
+  expect(fieldRows('a'.repeat(19), 20)).toBe(1)
+  // Full to the last cell, the caret wants the next row: one row would cut it.
+  expect(fieldRows('a'.repeat(20), 20)).toBe(2)
+  // Korean is two cells a letter.
+  expect(fieldRows('가'.repeat(10), 20)).toBe(2)
+  expect(fieldRows('a\nb', 20)).toBe(2)
+  expect(fieldRows('a'.repeat(500), 20)).toBe(FIELD_MOST_ROWS)
+})
+
+test('the field that writes grows as the text typed wraps, the footer with it, and is one row again after Enter', async ($, on) => {
+  standInForEngine(on)
+  const stored = memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending')], nextId: 2 } })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  const rows = async () => (await ui.find({ key: 'todo-input' }))?.props.rows
+
+  expect(await rows()).toBe(1)
+  await ui.input({ key: 'todo-input', text: '짧은 일', kind: 'change' })
+  expect(await rows()).toBe(1)
+  const long = '길게 적은 할 일 '.repeat(8)
+  await ui.input({ key: 'todo-input', text: long, kind: 'change' })
+  expect(await rows()).toBeGreaterThan(1)
+  await ui.input({ key: 'todo-input', text: long })
+  expect(items(stored).map(one => one.id)).toEqual([1, 2])
+  expect(await rows()).toBe(1)
+  await ui.unmount()
+})
+
+test('the edit field opens as tall as the text it edits needs', async ($, on) => {
+  standInForEngine(on)
+  const long = '길게 적은 할 일 '.repeat(8)
+  memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending'), item(2, 'pending', { text: long })], nextId: 3 } })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+
+  await ui.press({ key: 'todo-text-1' })
+  expect((await editField(ui, 1))?.props.rows).toBe(1)
+  const short = await editField(ui, 1)
+  await ui.input({ key: short?.key ?? '', text: long, kind: 'change' })
+  expect((await editField(ui, 1))?.props.rows).toBeGreaterThan(1)
+  await ui.input({ key: short?.key ?? '', text: '' })
+
+  await ui.press({ key: 'todo-text-2' })
+  expect((await editField(ui, 2))?.props.rows).toBeGreaterThan(1)
+  await ui.unmount()
 })
 
 test('a press on the sign cycles the status, ✕ deletes, "완료 N개 지우기" clears the done; the field writes one', async ($, on) => {
