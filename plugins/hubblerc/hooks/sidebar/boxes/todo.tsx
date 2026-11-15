@@ -2,8 +2,8 @@ import type { ElementConstructor, EngineInterface, InputProps } from 'claude-cod
 
 import { THEME_COLORS } from '../../shared/style'
 import { cellWidth } from '../../shared/text-width'
-import { ADD_FIELD_KEY, addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, editFieldKey, noteFieldText, offerTodo, saveEditFromField, startEditTodo, undoDelete } from '../../todo/todo'
-import { oneLine, rowTailCells, showsTurn, STATUS_MARK, TODO_FIELDS } from '../../todo/todo-format'
+import { ADD_FIELD_KEY, addFieldDrawnValue, addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, editFieldKey, noteFieldText, offerTodo, saveEditFromField, startEditTodo, undoDelete } from '../../todo/todo'
+import { DETAIL_MARK, editText, oneLine, rowTailCells, showsTurn, STATUS_MARK, TODO_FIELDS } from '../../todo/todo-format'
 import { acceptTodoSuggestion, rejectTodoSuggestion } from '../../todo/todo-judge'
 import type { TodoSuggestion } from '../../todo/todo-judge-format'
 import type { UserTodo } from '../../todo/todo-format'
@@ -78,6 +78,7 @@ export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Elem
           )}
         </Box>
         <Box>
+          {item.detail === undefined ? null : <Text dimColor>{DETAIL_MARK}</Text>}
           {showsTurn(item) ? <Text dimColor>{` #${item.turn}`}</Text> : null}
           {item.status === 'pending' ? (
             <Button
@@ -179,9 +180,10 @@ export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Elem
  * marked in the box). Drawn outside the box, as wide as the pane: the terminal's engine wraps and
  * scrolls a field's text at the pane's columns whatever holds it, so inside the box's frame its last
  * four cells, the caret's among them, were cut off (2026-11-16, on screen; engine 2.1.325 read).
- * Enter writes it; the engine empties the field after. Editing, a field of its own holds the item's
- * text: Enter saves, empty cancels, and so does the pane letting the keyboard go (Esc). Either grows
- * a row as its text wraps. `$` only on a change or Enter.
+ * Enter writes it, the first line the title and the lines after it (Shift+Enter) the detail; the
+ * field is emptied by drawing it with another value (`addFieldDrawnValue`). Editing, a field of its
+ * own holds the title and the detail under it: Enter saves, empty cancels, and so does the pane
+ * letting the keyboard go (Esc). Either grows a row as its text wraps. `$` only on a change or Enter.
  */
 export function todoField($: EngineInterface, d: { Input: ElementConstructor<InputProps>; edited: UserTodo | null; rows: number; columns: number }): JSX.Element {
   const { Input, edited, rows, columns } = d
@@ -190,7 +192,7 @@ export function todoField($: EngineInterface, d: { Input: ElementConstructor<Inp
     <Input
       key={editFieldKey()}
       label={TODO_FIELDS.edit.label}
-      value={edited.text}
+      value={editText(edited)}
       rows={rows}
       placeholder="비우고 Enter면 취소"
       submitLabel={TODO_FIELDS.edit.submitLabel}
@@ -204,6 +206,7 @@ export function todoField($: EngineInterface, d: { Input: ElementConstructor<Inp
   ) : (
     <Input
       key={ADD_FIELD_KEY}
+      {...(addFieldDrawnValue() === undefined ? {} : { value: '' })}
       rows={rows}
       placeholder="할 일 적기"
       submitLabel={TODO_FIELDS.add.submitLabel}

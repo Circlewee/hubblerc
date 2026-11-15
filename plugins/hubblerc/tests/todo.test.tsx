@@ -8,7 +8,11 @@ import {
   clearDone,
   draftInsertText,
   editItem,
+  editText,
   FIELD_MOST_ROWS,
+  MAX_DETAIL_CHARS,
+  offerText,
+  shapeTodo,
   fieldRows,
   fieldTextCells,
   TODO_FIELDS,
@@ -229,7 +233,7 @@ test("the model's tool lists, adds and sets a status, the answer it runs in on w
   expect(standIn.tools.map(tool => tool.name)).toEqual(['user_todos', 'relay'])
   // Short, in English, and plainly not the model's own task list.
   expect(standIn.tools[0]?.description).toMatch(/^The user's own to-do and idea list/)
-  expect(standIn.tools[0]?.description.length).toBeLessThan(400)
+  expect(standIn.tools[0]?.description.length).toBeLessThan(450)
   expect(standIn.tools[0]?.inputSchema).toMatchObject({ required: ['action'] })
 
   await answer($, '첫 질문', 't1')
@@ -250,6 +254,80 @@ test("the model's tool lists, adds and sets a status, the answer it runs in on w
   expect((await $.tool.call({ tool: TOOL, action: 'set_status', id: 1, status: 'finished' })).deny).toMatch(/needs status/)
   expect((await $.tool.call({ tool: TOOL, action: 'add' })).deny).toBe('add needs text.')
   expect((await $.tool.call({ tool: TOOL, action: 'remove' })).deny).toMatch(/action must be/)
+})
+
+test('a title and its detail: the lines after the first, or a text too long for a title whole, its start the title', () => {
+  expect(shapeTodo('  한 줄  ')).toEqual({ text: '한 줄', isClipped: false })
+  expect(shapeTodo('제목\n세부 1\n세부 2')).toEqual({ text: '제목', detail: '세부 1\n세부 2', isClipped: false })
+  // A detail given, the text's lines stay the title's.
+  expect(shapeTodo('제목', '  맥락  ')).toEqual({ text: '제목', detail: '맥락', isClipped: false })
+  const long = '가'.repeat(300)
+  expect(shapeTodo(long)).toEqual({ text: `${'가'.repeat(80)}…`, detail: long, isClipped: false })
+  expect(shapeTodo('', '맥락만')).toEqual({ text: '맥락만', detail: '맥락만', isClipped: false })
+  expect(shapeTodo('제목', '나'.repeat(MAX_DETAIL_CHARS + 5))).toEqual({ text: '제목', detail: '나'.repeat(MAX_DETAIL_CHARS), isClipped: true })
+
+  // ↗ hands over the title and the detail; a title cut from the detail's start, the detail alone.
+  expect(offerText({ text: '제목' })).toBe('제목')
+  expect(offerText({ text: '제목', detail: '맥락' })).toBe('제목\n\n맥락')
+  expect(offerText(shapeTodo(long))).toBe(long)
+  expect(editText({ text: '제목', detail: '맥락' })).toBe('제목\n맥락')
+
+  const record: TodoRecord = { items: [item(1, 'pending', { detail: '맥락' })], nextId: 2 }
+  expect(editItem(record, 1, '새 제목')?.items[0]).toMatchObject({ text: '새 제목', detail: '맥락' })
+  expect(editItem(record, 1, '새 제목', null)?.items[0]?.detail).toBeUndefined()
+  expect(editItem(record, 1, '새 제목', '새 맥락')?.items[0]?.detail).toBe('새 맥락')
+  expect(parseTodoRecord({ items: [{ ...item(1, 'pending'), detail: '  맥락 ' }], nextId: 2 }).items[0]?.detail).toBe('맥락')
+})
+
+test("the model's tool takes a title and a detail as one item, lists the detail's start, and one item whole by its id", async ($, on) => {
+  standInForEngine(on)
+  const stored = memoryStore(on, { [KEY]: { items: [], nextId: 1 } })
+  await start($)
+
+  const detail = `파일 hooks/todo/todo.ts. ${'결정 사항. '.repeat(40)}`
+  expect((await $.tool.call({ tool: TOOL, action: 'add', text: '세부 내용 나누기', detail })).result).toBe('Added id 1.')
+  expect(items(stored)).toHaveLength(1)
+  expect(items(stored)[0]).toMatchObject({ text: '세부 내용 나누기', detail: detail.trim() })
+  const listed = (await $.tool.call({ tool: TOOL, action: 'list' })).result ?? ''
+  expect(listed).toMatch(/\n {2}detail: 파일 hooks\/todo\/todo\.ts\. 결정 사항\..*… \(\d+ characters; list with this id for all\)$/)
+  expect((await $.tool.call({ tool: TOOL, action: 'list', id: 1 })).result).toBe(`id 1 [pending] 세부 내용 나누기\ndetail:\n${detail.trim()}`)
+  expect((await $.tool.call({ tool: TOOL, action: 'list', id: 7 })).deny).toMatch(/No item has id 7/)
+
+  // A long text with no detail is one item, not cut: its start the title, all of it the detail.
+  const long = '긴 메모 '.repeat(100)
+  expect((await $.tool.call({ tool: TOOL, action: 'add', text: long })).result).toBe('Added id 2 (the text was long, so its start is the title and all of it the detail).')
+  expect(items(stored)[1]?.detail).toBe(long.trim())
+  expect((await $.tool.call({ tool: TOOL, action: 'add', text: '제목', detail: '나'.repeat(MAX_DETAIL_CHARS + 1) })).result).toBe(
+    `Added id 3 (the detail was cut to its first ${MAX_DETAIL_CHARS} characters).`,
+  )
+})
+
+test('a row marks a detail; ↗ puts the title and the detail in the draft; the field writes one from two lines', async ($, on) => {
+  const standIn = standInForEngine(on)
+  const stored = memoryStore(on, { sidebarTab: 'todo', [KEY]: { items: [item(1, 'pending', { text: '제목', detail: '맥락' })], nextId: 2 } })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('📌 제목 ⋯ ↗  ✕ ')
+  await ui.press({ key: 'todo-send-1' })
+  expect(standIn.suggestions).toEqual([])
+  expect(standIn.fills).toEqual([{ text: '제목\n\n맥락', mode: 'insert' }])
+  await $.turn.start({ text: '제목\n\n맥락', turnId: 't1' })
+  expect(items(stored)[0]?.status).toBe('in_progress')
+
+  // The edit field holds the title and the detail under it.
+  await ui.press({ key: 'todo-text-1' })
+  const field = await editField(ui, 1)
+  expect(field?.props.value).toBe('제목\n맥락')
+  await ui.input({ key: field?.key ?? '', text: '고친 제목' })
+  expect(items(stored)[0]?.detail).toBeUndefined()
+
+  // Enter empties the field: drawn with another value each time.
+  const before = (await ui.find({ key: 'todo-input' }))?.props.value
+  await ui.input({ key: 'todo-input', text: '새 일\n새 맥락' })
+  expect(items(stored)[1]).toMatchObject({ text: '새 일', detail: '새 맥락' })
+  expect((await ui.find({ key: 'todo-input' }))?.props.value).not.toBe(before)
+  await ui.unmount()
 })
 
 test('the last box has tabs: the contents, or the to-dos, the shown one bold and kept for the next session', async ($, on) => {
@@ -730,8 +808,13 @@ test('/todo 수정 <번호> <내용> rewrites an item, its status and answer kep
   expect(items(stored)[0]).toEqual(item(1, 'done', { turn: 4, text: '더 나은 말로' }))
   expect(await todo($, '수정 9 무엇')).toBe('9번 할 일이 없습니다. /todo로 번호를 보세요.')
   expect(await todo($, '수정 2')).toBe('새 내용이 없습니다: /todo 수정 2 <내용>')
-  expect(await todo($, `수정 2 ${'가'.repeat(600)}`)).toMatch(/\(500자가 넘어 앞부분만\)$/)
-  expect([...(items(stored)[1]?.text ?? '')]).toHaveLength(500)
+  // Too long for a title: all of it the detail, its start the title.
+  expect(await todo($, `수정 2 ${'가'.repeat(600)}`)).toMatch(/^고쳤습니다: 2\. 가+…$/)
+  expect(items(stored)[1]?.text).toBe(`${'가'.repeat(80)}…`)
+  expect(items(stored)[1]?.detail).toBe('가'.repeat(600))
+  // A line alone keeps the detail.
+  await todo($, '수정 2 짧은 제목')
+  expect(items(stored)[1]).toMatchObject({ text: '짧은 제목', detail: '가'.repeat(600) })
   // No number: an item to write.
   expect(await todo($, '수정 버튼 색')).toBe('할 일에 적었습니다: 수정 버튼 색')
 })

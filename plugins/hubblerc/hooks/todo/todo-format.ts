@@ -10,7 +10,10 @@ export type UserTodoStatus = 'pending' | 'in_progress' | 'done' | 'on_hold'
 export type UserTodo = {
   /** Unique in its project, never reused: what the model's tool names it by. */
   id: number
+  /** The title: what a row shows. */
   text: string
+  /** What goes with the title: context, files, decisions, steps; ↗ hands it over with the title. Absent, none. */
+  detail?: string
   status: UserTodoStatus
   /** When it was written, in milliseconds. */
   createdAt: number
@@ -39,6 +42,12 @@ export type SidebarTab = 'contents' | 'todo'
 
 export const MAX_TODOS = 200
 export const MAX_TODO_CHARS = 500
+/** A detail's characters at most: 250 items and trash at this length stay well under the store's 4 MiB a value. */
+export const MAX_DETAIL_CHARS = 2000
+/** A text without a detail longer than this is no title: all of it goes to the detail, its start the title. */
+export const TITLE_SPLIT_CHARS = 200
+/** The characters of the title such a text keeps, then "…". */
+const SPLIT_TITLE_CHARS = 80
 /** Deleted items kept per project; past it the oldest go. */
 export const MAX_TRASH = 50
 /** Items the sidebar's tab shows at most; fewer in a pane too short for them. */
@@ -94,6 +103,60 @@ export function cleanTodoText(text: string): { text: string; isClipped: boolean 
   if (chars.length <= MAX_TODO_CHARS) return { text: trimmed, isClipped: false }
 
   return { text: chars.slice(0, MAX_TODO_CHARS).join('').trimEnd(), isClipped: true }
+}
+
+/** A title and its detail as written: trimmed, each to its limit; `isClipped` when either was cut. */
+export type ShapedTodo = { text: string; detail?: string; isClipped: boolean }
+
+/**
+ * A title and detail from what was written. With no detail given (the sidebar's fields, `/todo`), the
+ * first line is the title and the lines after it the detail. A title over `TITLE_SPLIT_CHARS`
+ * characters goes whole to the detail's head, its first `SPLIT_TITLE_CHARS` the title with "…": a
+ * long note to keep was cut at 500 or split into several items (2026-11-16, reported). An empty title
+ * with a detail takes the detail's start so.
+ */
+export function shapeTodo(written: string, detail?: string): ShapedTodo {
+  let title = written.trim()
+  let body = (detail ?? '').trim()
+  if (detail === undefined) {
+    const lineEnd = title.indexOf('\n')
+    if (lineEnd >= 0) {
+      body = title.slice(lineEnd + 1).trim()
+      title = title.slice(0, lineEnd).trim()
+    }
+  }
+  if (title === '' && body !== '') title = splitTitle(body)
+  else if ([...title].length > TITLE_SPLIT_CHARS) {
+    body = body === '' ? title : `${title}\n\n${body}`
+    title = splitTitle(title)
+  }
+  const chars = [...body]
+  const isClipped = chars.length > MAX_DETAIL_CHARS
+  if (isClipped) body = chars.slice(0, MAX_DETAIL_CHARS).join('').trimEnd()
+
+  return body === '' ? { text: title, isClipped } : { text: title, detail: body, isClipped }
+}
+
+function splitTitle(text: string): string {
+  const flat = [...oneLine(text)]
+
+  return flat.length <= SPLIT_TITLE_CHARS ? flat.join('') : `${flat.slice(0, SPLIT_TITLE_CHARS).join('').trimEnd()}…`
+}
+
+/**
+ * What ↗ hands over: the title, a blank line, the detail; the detail alone when the title is its
+ * start cut with "…" (`shapeTodo` made it so), not to say the start twice.
+ */
+export function offerText(item: Pick<UserTodo, 'text' | 'detail'>): string {
+  if (item.detail === undefined) return item.text
+  if (item.text.endsWith('…') && oneLine(item.detail).startsWith(item.text.slice(0, -1))) return item.detail
+
+  return `${item.text}\n\n${item.detail}`
+}
+
+/** What the edit field holds: the title, then the detail on the lines under it (`shapeTodo` reads it back so). */
+export function editText(item: Pick<UserTodo, 'text' | 'detail'>): string {
+  return item.detail === undefined ? item.text : `${item.text}\n${item.detail}`
 }
 
 /**
@@ -189,6 +252,10 @@ function parseItem(value: unknown): UserTodo | null {
   if (text === '') return null
 
   const item: UserTodo = { id: raw.id, text, status: raw.status, createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : 0 }
+  if (typeof raw.detail === 'string') {
+    const detail = [...raw.detail.trim()].slice(0, MAX_DETAIL_CHARS).join('').trimEnd()
+    if (detail !== '') item.detail = detail
+  }
   if (isTurn(raw.createdTurn)) item.createdTurn = raw.createdTurn
   if (typeof raw.createdSession === 'string') item.createdSession = raw.createdSession
   if (isTurn(raw.turn)) item.turn = raw.turn
@@ -205,9 +272,10 @@ function isTurn(value: unknown): value is number {
 export type TurnRef = { turn: number; session: string }
 
 /** The record with a new waiting item at the end; null when the project already holds `MAX_TODOS`. */
-export function addItem(record: TodoRecord, text: string, at: number, written: TurnRef): { record: TodoRecord; item: UserTodo } | null {
+export function addItem(record: TodoRecord, text: string, at: number, written: TurnRef, detail?: string): { record: TodoRecord; item: UserTodo } | null {
   if (record.items.length >= MAX_TODOS) return null
   const item: UserTodo = { id: record.nextId, text, status: 'pending', createdAt: at }
+  if (detail !== undefined && detail !== '') item.detail = detail
   if (written.turn > 0) item.createdTurn = written.turn
   if (written.session !== '') item.createdSession = written.session
 
@@ -283,11 +351,23 @@ export function restoreItems(record: TodoRecord, ids: readonly number[]): { reco
   return { record: next, restored }
 }
 
-/** The record with item `id`'s text replaced, its status and answers kept; null when no item has it. */
-export function editItem(record: TodoRecord, id: number, text: string): TodoRecord | null {
+/**
+ * The record with item `id`'s title replaced, its status and answers kept, and its detail: kept
+ * (undefined), removed (null) or replaced. Null when no item has the id.
+ */
+export function editItem(record: TodoRecord, id: number, text: string, detail?: string | null): TodoRecord | null {
   if (!record.items.some(item => item.id === id)) return null
 
-  return { ...record, items: record.items.map(item => (item.id === id ? { ...item, text } : item)) }
+  return {
+    ...record,
+    items: record.items.map(item => {
+      if (item.id !== id) return item
+      const { detail: kept, ...rest } = item
+      const next = detail === undefined ? kept : detail === null || detail === '' ? undefined : detail
+
+      return next === undefined ? { ...rest, text } : { ...rest, text, detail: next }
+    }),
+  }
 }
 
 /** The rows under the items: a suggestion ("시작?", "완료?"), "완료 N개 지우기", "↶ 되돌리기", the field's rows (0, none). */
@@ -377,7 +457,9 @@ export function todoListText(items: readonly UserTodo[]): string {
     .map(status => [status, items.filter(item => item.status === status).length] as const)
     .filter(([, count]) => count > 0)
     .map(([status, count]) => `${STATUS_LABEL[status]} ${count}`)
-  const rows = sortTodos(items).map(item => `${item.id}. ${STATUS_MARK[item.status]} ${oneLine(item.text)}${showsTurn(item) ? `  #${item.turn}` : ''}`)
+  const rows = sortTodos(items).map(
+    item => `${item.id}. ${STATUS_MARK[item.status]} ${oneLine(item.text)}${item.detail === undefined ? '' : `  +detail ${[...item.detail].length}자`}${showsTurn(item) ? `  #${item.turn}` : ''}`,
+  )
 
   return [`할 일: ${counts.join(' · ')}`, ...rows, TODO_USAGE].join('\n')
 }
@@ -415,13 +497,33 @@ export function todoToolList(items: readonly UserTodo[], now: TurnRef): string {
       ...(showsTurn(item) && item.turn !== undefined ? [`${item.status === 'done' ? 'done' : 'taken up'} in answer ${where(item.turn, item.turnSession)}`] : []),
     ]
 
-    return `- id ${item.id} [${item.status}] ${item.text} (${notes.join('; ')})`
+    return `- id ${item.id} [${item.status}] ${item.text} (${notes.join('; ')})${item.detail === undefined ? '' : `\n  detail: ${detailStart(item.detail)}`}`
   })
 
   return [`The user's to-do list for this project (${items.length} items). ${here}`, ...rows].join('\n')
 }
 
-/** How many cells a row's tail takes: ` #14`, then the buttons ` ↗ ` and ` ✕ `, three cells each. */
+/** Characters of a detail the list shows; list with the item's id for all of it. */
+const LIST_DETAIL_CHARS = 200
+
+function detailStart(detail: string): string {
+  const flat = [...oneLine(detail)]
+  if (flat.length <= LIST_DETAIL_CHARS) return flat.join('')
+
+  return `${flat.slice(0, LIST_DETAIL_CHARS).join('')}… (${flat.length} characters; list with this id for all)`
+}
+
+/** `list` with an id: that item whole, its detail as written. */
+export function todoToolItem(item: UserTodo): string {
+  const head = `id ${item.id} [${item.status}] ${item.text}`
+
+  return item.detail === undefined ? `${head}\nNo detail.` : `${head}\ndetail:\n${item.detail}`
+}
+
+/** The mark after a row's title when the item has a detail. */
+export const DETAIL_MARK = ' ⋯'
+
+/** How many cells a row's tail takes: ` ⋯` for a detail, ` #14`, then the buttons ` ↗ ` and ` ✕ `, three cells each. */
 export function rowTailCells(item: UserTodo): number {
-  return (showsTurn(item) ? cellWidth(` #${item.turn}`) : 0) + (item.status === 'pending' ? 3 : 0) + 3
+  return (item.detail === undefined ? 0 : cellWidth(DETAIL_MARK)) + (showsTurn(item) ? cellWidth(` #${item.turn}`) : 0) + (item.status === 'pending' ? 3 : 0) + 3
 }

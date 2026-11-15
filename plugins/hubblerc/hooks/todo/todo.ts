@@ -3,25 +3,29 @@ import type { EngineInterface, On } from 'claude-code'
 
 import {
   addItem,
-  cleanTodoText,
   clearDone,
   draftInsertText,
   editItem,
+  editText,
   fieldRows,
   fieldTextCells,
   isStatus,
   MAX_TODOS,
+  MAX_DETAIL_CHARS,
   nextStatus,
+  offerText,
   oneLine,
   parseTodoRecord,
   removeItem,
   restoreItems,
   setItemStatus,
+  shapeTodo,
   STATUS_MARK,
   TODO_FIELDS,
   todoListText,
   mainTreePath,
   todoStoreKey,
+  todoToolItem,
   todoToolList,
   trashListText,
 } from './todo-format'
@@ -39,8 +43,10 @@ const TAB_KEY = 'sidebarTab'
 const TOOL_NAME = 'user_todos'
 const TODO_TOOL_PATTERN = /^mcp__hubblerc__user_todos$/
 const TOOL_DESCRIPTION =
-  "The user's own to-do and idea list for this project, kept apart from your task tools. Use it when the user asks about their to-dos or ideas. " +
-  'list: each item with its id, status, text and the answer (#N) it was written in. add: append text. set_status: change one by id; set done when you finish one.'
+  "The user's own to-do and idea list for this project, apart from your task tools. Use it when the user asks about their to-dos or ideas. " +
+  'list: id, status, title, detail start, the answer (#N) it was written in; with id, one item whole. ' +
+  `add: one item, never split: text a one-line title, detail the context to take it up later (${MAX_DETAIL_CHARS} chars max). ` +
+  'set_status: by id; set done when you finish one.'
 
 /**
  * The project's list as last read, and the store key it was read under. Kept in the module, not in
@@ -125,8 +131,9 @@ export async function startTodos($: EngineInterface): Promise<void> {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['list', 'add', 'set_status'] },
-          id: { type: 'integer', description: 'set_status: the item' },
-          text: { type: 'string', description: 'add: the item' },
+          id: { type: 'integer', description: 'set_status: the item; list: one item whole' },
+          text: { type: 'string', description: 'add: the title, one short line' },
+          detail: { type: 'string', description: 'add: what goes with it' },
           status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'on_hold'], description: 'set_status: the new status' },
         },
         required: ['action'],
@@ -219,14 +226,14 @@ export async function currentTurn($: EngineInterface): Promise<TurnRef> {
 type AddOutcome = { item: UserTodo; isClipped: boolean } | { error: 'empty' | 'full' }
 
 /** Writes a new waiting item, with when and in which answer it was written. */
-export async function addTodo($: EngineInterface, text: string): Promise<AddOutcome> {
-  const cleaned = cleanTodoText(text)
+export async function addTodo($: EngineInterface, text: string, detail?: string): Promise<AddOutcome> {
+  const cleaned = shapeTodo(text, detail)
   if (cleaned.text === '') return { error: 'empty' }
   const written = await currentTurn($)
   const at = await $.clock.now()
   const added: { item?: UserTodo } = {}
   await changeTodos($, record => {
-    const result = addItem(record, cleaned.text, at, written)
+    const result = addItem(record, cleaned.text, at, written, cleaned.detail)
     if (result !== null) added.item = result.item
 
     return result?.record ?? null
@@ -234,6 +241,8 @@ export async function addTodo($: EngineInterface, text: string): Promise<AddOutc
 
   return added.item === undefined ? { error: 'full' } : { item: added.item, isClipped: cleaned.isClipped }
 }
+
+const CLIPPED_TEXT = `세부 내용이 ${MAX_DETAIL_CHARS}자가 넘어 앞부분만 적었습니다.`
 
 const FULL_TEXT = `할 일이 ${MAX_TODOS}개라 더 적을 수 없습니다. 완료한 것을 지운 뒤 적어 주세요.`
 
@@ -244,14 +253,30 @@ async function pressed($: EngineInterface, work: () => Promise<unknown>): Promis
   })
 }
 
-/** The sidebar's field, on Enter: a new item; a refusal as a toast (the field is emptied either way). */
+/**
+ * The value the field that writes draws: '' and absent by turns. The engine drops what a field holds
+ * when the value it is drawn with changes (engine 2.1.325, read), and its own emptying after Enter did
+ * not happen on screen (2026-11-16, the item written, its text left in the field). It empties a field
+ * only when the input's chain settles on an answer [guess: why that one did not is not known], so each
+ * Enter draws the other value.
+ */
+let addFieldValue: '' | undefined
+
+export function addFieldDrawnValue(): '' | undefined {
+  return addFieldValue
+}
+
+/**
+ * The sidebar's field, on Enter: a new item, the first line its title and the lines after it (Shift+Enter)
+ * its detail; a refusal as a toast. The field is emptied either way, one row again.
+ */
 export async function addTodoFromField($: EngineInterface, text: string): Promise<void> {
-  // The engine empties the field after Enter, written or not: one row again.
   typedRows = null
+  addFieldValue = addFieldValue === undefined ? '' : undefined
   await pressed($, async () => {
     const outcome = await addTodo($, text)
     if ('item' in outcome) {
-      if (outcome.isClipped) $.ui.toast('500자가 넘어 앞부분만 적었습니다.')
+      if (outcome.isClipped) $.ui.toast(CLIPPED_TEXT)
 
       return
     }
@@ -284,12 +309,14 @@ export async function runTodoCommand($: EngineInterface, args: string): Promise<
     const outcome = await editTodo($, id, numbered[2] ?? '')
     if ('error' in outcome) return outcome.error === 'empty' ? `새 내용이 없습니다: /todo 수정 ${id} <내용>` : `${id}번 할 일이 없습니다. /todo로 번호를 보세요.`
 
-    return `고쳤습니다: ${id}. ${clipCells(oneLine(outcome.item.text), 60)}${outcome.isClipped ? ' (500자가 넘어 앞부분만)' : ''}`
+    return `고쳤습니다: ${id}. ${clipCells(oneLine(outcome.item.text), 60)}${outcome.isClipped ? ` (세부 내용은 ${MAX_DETAIL_CHARS}자까지)` : ''}`
   }
   const outcome = await addTodo($, args)
   if ('error' in outcome) return outcome.error === 'full' ? FULL_TEXT : '적을 내용이 없습니다.'
 
-  return `할 일에 적었습니다: ${clipCells(oneLine(outcome.item.text), 60)}${outcome.isClipped ? ' (500자가 넘어 앞부분만)' : ''}`
+  const detail = outcome.item.detail === undefined ? '' : ` (+detail ${[...outcome.item.detail].length}자${outcome.isClipped ? `, ${MAX_DETAIL_CHARS}자까지` : ''})`
+
+  return `할 일에 적었습니다: ${clipCells(oneLine(outcome.item.text), 60)}${detail}`
 }
 
 /** A press on an item's sign: its next status. A press sets no answer number. */
@@ -382,7 +409,7 @@ export function todoFieldRows(edited: UserTodo | null, columns: number): number 
   const key = edited === null ? ADD_FIELD_KEY : editFieldKey()
   if (typedRows?.field === key) return typedRows.rows
 
-  return edited === null ? 1 : fieldRows(edited.text, fieldTextCells(columns, TODO_FIELDS.edit))
+  return edited === null ? 1 : fieldRows(editText(edited), fieldTextCells(columns, TODO_FIELDS.edit))
 }
 
 /**
@@ -430,20 +457,25 @@ export async function saveEditFromField($: EngineInterface, id: number, value: s
     return
   }
   await pressed($, async () => {
-    const outcome = await editTodo($, id, value)
+    const outcome = await editTodo($, id, value, 'whole')
     if ('error' in outcome) $.ui.toast(outcome.error === 'missing' ? '고칠 항목이 목록에 없습니다.' : '내용이 비어 있습니다.')
-    else if (outcome.isClipped) $.ui.toast('500자가 넘어 앞부분만 적었습니다.')
+    else if (outcome.isClipped) $.ui.toast(CLIPPED_TEXT)
   })
   await redraw($)
 }
 
 type EditOutcome = { item: UserTodo; isClipped: boolean } | { error: 'empty' | 'missing' }
 
-/** Item `id`'s text replaced; its status and answers stay. */
-export async function editTodo($: EngineInterface, id: number, text: string): Promise<EditOutcome> {
-  const cleaned = cleanTodoText(text)
+/**
+ * Item `id` rewritten, its status and answers kept. `whole` (the edit field, which holds the title and
+ * the detail under it): the detail is what follows the first line, none when nothing does. `title`
+ * (`/todo 수정`): a line alone keeps the detail; a text long enough to be split replaces it.
+ */
+export async function editTodo($: EngineInterface, id: number, text: string, scope: 'whole' | 'title' = 'title'): Promise<EditOutcome> {
+  const cleaned = shapeTodo(text)
   if (cleaned.text === '') return { error: 'empty' }
-  const changed = await changeTodos($, record => editItem(record, id, cleaned.text))
+  const detail = cleaned.detail ?? (scope === 'whole' ? null : undefined)
+  const changed = await changeTodos($, record => editItem(record, id, cleaned.text, detail))
   const item = changed?.items.find(other => other.id === id)
 
   return item === undefined ? { error: 'missing' } : { item, isClipped: cleaned.isClipped }
@@ -477,17 +509,19 @@ export async function offerTodo($: EngineInterface, item: UserTodo): Promise<voi
     undo = null
     await redraw($)
   }
-  const shown = await $.prompt.suggest({ text: item.text }).catch(() => ({ isShown: false }))
+  const text = offerText(item)
+  // A detail goes in as a draft: a dim suggestion of several lines is not known to show [guess].
+  const shown = item.detail === undefined ? await $.prompt.suggest({ text }).catch(() => ({ isShown: false })) : { isShown: false }
   if (shown.isShown) {
-    offered = { id: item.id, text: item.text, isInDraft: false }
+    offered = { id: item.id, text, isInDraft: false }
 
     return
   }
   // The engine's read never rejects; a box it cannot read is taken as empty (nothing to space from).
   const box = await $.prompt.read().catch(() => ({ text: '', cursor: 0 }))
-  const filled = await $.prompt.fill({ text: draftInsertText(box, item.text), mode: 'insert' }).catch(() => ({ isFilled: false }))
+  const filled = await $.prompt.fill({ text: draftInsertText(box, text), mode: 'insert' }).catch(() => ({ isFilled: false }))
   if (filled.isFilled) {
-    offered = { id: item.id, text: item.text, isInDraft: true }
+    offered = { id: item.id, text, isInDraft: true }
 
     return
   }
@@ -547,15 +581,23 @@ export async function answerTodoTool($: EngineInterface, input: Record<string, u
   const action = input.action
   if (action === 'list') {
     await refreshTodos($)
+    const items = loaded?.record.items ?? []
+    if (input.id === undefined) return { result: todoToolList(items, await currentTurn($)) }
+    const one = items.find(item => item.id === input.id)
 
-    return { result: todoToolList(loaded?.record.items ?? [], await currentTurn($)) }
+    return one === undefined ? { deny: `No item has id ${String(input.id)}; list without an id to see them.` } : { result: todoToolItem(one) }
   }
   if (action === 'add') {
     if (typeof input.text !== 'string') return { deny: 'add needs text.' }
-    const outcome = await addTodo($, input.text)
+    if (input.detail !== undefined && typeof input.detail !== 'string') return { deny: 'detail must be a string.' }
+    const outcome = await addTodo($, input.text, input.detail)
     if ('error' in outcome) return { deny: outcome.error === 'full' ? `The list is full (${MAX_TODOS} items).` : 'add needs a non-empty text.' }
+    const notes = [
+      ...(input.detail === undefined && outcome.item.detail !== undefined ? ['the text was long, so its start is the title and all of it the detail'] : []),
+      ...(outcome.isClipped ? [`the detail was cut to its first ${MAX_DETAIL_CHARS} characters`] : []),
+    ]
 
-    return { result: `Added id ${outcome.item.id}${outcome.isClipped ? ' (cut to its first 500 characters)' : ''}.` }
+    return { result: `Added id ${outcome.item.id}${notes.length > 0 ? ` (${notes.join('; ')})` : ''}.` }
   }
   if (action === 'set_status') {
     const id = input.id
