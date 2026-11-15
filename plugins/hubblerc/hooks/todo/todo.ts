@@ -375,14 +375,14 @@ export function editFieldKey(): string {
 }
 
 /**
- * While drawing: the rows of the field shown in a box `inner` cells wide, the one that edits `edited`
+ * While drawing: the rows of the field shown in a pane `columns` wide, the one that edits `edited`
  * or the one that writes: as its typing left them, else what the edited text needs (one, empty).
  */
-export function todoFieldRows(edited: UserTodo | null, inner: number): number {
+export function todoFieldRows(edited: UserTodo | null, columns: number): number {
   const key = edited === null ? ADD_FIELD_KEY : editFieldKey()
   if (typedRows?.field === key) return typedRows.rows
 
-  return edited === null ? 1 : fieldRows(edited.text, fieldTextCells(inner, TODO_FIELDS.edit))
+  return edited === null ? 1 : fieldRows(edited.text, fieldTextCells(columns, TODO_FIELDS.edit))
 }
 
 /**
@@ -391,8 +391,8 @@ export function todoFieldRows(edited: UserTodo | null, inner: number): number {
  * keeps what a field holds by its key, so the drawing does not lose the typing [guess: from the
  * edit field keeping its own text over an unchanged `value`, 2026-11-05].
  */
-export async function noteFieldText($: EngineInterface, field: string, kind: keyof typeof TODO_FIELDS, text: string, inner: number, drawn: number): Promise<void> {
-  const rows = fieldRows(text, fieldTextCells(inner, TODO_FIELDS[kind]))
+export async function noteFieldText($: EngineInterface, field: string, kind: keyof typeof TODO_FIELDS, text: string, columns: number, drawn: number): Promise<void> {
+  const rows = fieldRows(text, fieldTextCells(columns, TODO_FIELDS[kind]))
   typedRows = { field, rows }
   if (rows !== drawn) await redraw($)
 }

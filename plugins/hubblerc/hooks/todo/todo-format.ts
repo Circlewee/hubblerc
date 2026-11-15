@@ -295,22 +295,33 @@ export function footerRows(done: number, undo: number, inputRows: number, hasSug
   return (hasSuggestion ? 1 : 0) + (done > 0 ? 1 : 0) + (undo > 0 ? 1 : 0) + inputRows
 }
 
-/** The tab's two fields: the one that writes an item, and the one that edits the item whose text was pressed. */
+/**
+ * The tab's two fields: the one that writes an item, and the one that edits the item whose text was
+ * pressed. The engine draws a label as `label: `, so the one that writes has none (an empty label
+ * still draws ": ").
+ */
 export const TODO_FIELDS = {
-  add: { label: '', submitLabel: '추가' },
-  edit: { label: '수정 중 ', submitLabel: '저장' },
+  add: { label: undefined, submitLabel: '추가' },
+  edit: { label: '수정 중', submitLabel: '저장' },
 } as const
 
 /** The rows a field grows to; past them its text scrolls within. */
 export const FIELD_MOST_ROWS = 4
 
 /**
- * The cells a field's text gets on a row of a box `inner` cells wide: the label before it, the
- * submit word the engine draws beside it while it has focus, and a few cells for the caret and the
- * gaps [guess: the engine's layout is not documented; too few cells only grows the field a row early].
+ * The cells a field's text wraps at in a pane `columns` wide, as the terminal's engine (2.1.325)
+ * reckons them: the pane's body columns less `label: `, and less the hint drawn beside it while it has
+ * focus, ` ⏎ 저장 · shift+⏎ new line` when that leaves half the pane (the longer of its two spellings),
+ * else ` ⏎ 저장`; 12 at least. The engine counts the whole pane's width whatever box holds the field,
+ * so the field is drawn outside the boxes, as wide as the pane.
  */
-export function fieldTextCells(inner: number, field: { label: string; submitLabel: string }): number {
-  return Math.max(8, inner - cellWidth(field.label) - cellWidth(field.submitLabel) - 4)
+export function fieldTextCells(columns: number, field: { label: string | undefined; submitLabel: string }): number {
+  const room = columns - (field.label === undefined ? 0 : cellWidth(`${field.label}: `))
+  const short = ` ⏎ ${field.submitLabel}`
+  const long = `${short} · shift+⏎ new line`
+  const hint = room - cellWidth(long) >= columns / 2 ? long : short
+
+  return Math.max(12, room - cellWidth(hint))
 }
 
 /**

@@ -24,7 +24,7 @@ import { frame } from './boxes/frame'
 import type { SectionId } from './boxes/frame'
 import { statusBox } from './boxes/status'
 import { relayBox } from './boxes/relay'
-import { todoBody } from './boxes/todo'
+import { todoBody, todoField } from './boxes/todo'
 import { relayLines } from '../relay/relay-status'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
@@ -342,8 +342,8 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     const edited = hasField ? editTarget(userTodos, e.props.isFocused) : null
     // A judgment waiting on a press ("시작?", "완료?"): the module's too, a row above the footer's others.
     const suggested = todoSuggestion(userTodos)
-    // The field grows as its text wraps: its rows are the footer's.
-    const fieldRows = hasField ? todoFieldRows(edited, f.inner) : 0
+    // The field, under the box as wide as the pane, grows as its text wraps: its rows are the footer's.
+    const fieldRows = hasField ? todoFieldRows(edited, width) : 0
     const todoFooter = footerRows(doneCount, undoN, fieldRows, suggested !== null)
     // However short the pane, the last box keeps three rows of the contents, or the to-dos' footer and
     // a few of them: three rows once left the to-dos one item and "외 1개" under the files (2026-11-04).
@@ -374,7 +374,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
       onFold: () => void toggleFold($, 'contents'),
       onTab: (tab, isFolded) => void selectTab($, tab).then(() => (isFolded ? toggleFold($, 'contents') : undefined)),
     })
-    const lastBody = shownTab === 'todo' ? todoBody($, f, { items: userTodos, shown: shownTodos, edited, Input, fieldRows, doneCount, undoN, suggested }) : contentsBody(f, contents)
+    const lastBody = shownTab === 'todo' ? todoBody($, f, { items: userTodos, shown: shownTodos, edited, Input, doneCount, undoN, suggested }) : contentsBody(f, contents)
 
     return (
       <Box flexDirection="column">
@@ -383,6 +383,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
         {relay.length === 0 ? null : relayBox(f, relay)}
         {files.length === 0 ? null : filesBox(f, { shown: shownFiles, isExpanded: isFilesExpanded, isCut, onExpand: expandFiles, onCollapse: () => void update($, filesExpanded, () => false) })}
         {f.box('contents', tabs, lastBody)}
+        {Input === undefined || shownTab !== 'todo' || !isContentsOpen ? null : todoField($, { Input, edited, rows: fieldRows, columns: width })}
       </Box>
     )
   })

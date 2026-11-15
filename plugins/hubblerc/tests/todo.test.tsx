@@ -10,6 +10,8 @@ import {
   editItem,
   FIELD_MOST_ROWS,
   fieldRows,
+  fieldTextCells,
+  TODO_FIELDS,
   MAX_TODOS,
   MAX_TRASH,
   nextStatus,
@@ -296,6 +298,14 @@ test('a field takes a row more as its text wraps, the caret after the last line 
   expect(fieldRows('가'.repeat(10), 20)).toBe(2)
   expect(fieldRows('a\nb', 20)).toBe(2)
   expect(fieldRows('a'.repeat(500), 20)).toBe(FIELD_MOST_ROWS)
+})
+
+test("a field's text wraps where the engine wraps it: the pane's columns less its label and the hint beside it", () => {
+  // Wide enough, the long hint; it leaving less than half the pane, the short one.
+  expect(fieldTextCells(56, TODO_FIELDS.add)).toBe(56 - cellWidth(' ⏎ 추가 · shift+⏎ new line'))
+  expect(fieldTextCells(30, TODO_FIELDS.add)).toBe(30 - cellWidth(' ⏎ 추가'))
+  expect(fieldTextCells(56, TODO_FIELDS.edit)).toBe(56 - cellWidth('수정 중: ') - cellWidth(' ⏎ 저장'))
+  expect(fieldTextCells(10, TODO_FIELDS.edit)).toBe(12)
 })
 
 test('the field that writes grows as the text typed wraps, the footer with it, and is one row again after Enter', async ($, on) => {
@@ -735,7 +745,7 @@ test('a press on an item\'s text edits it below: Enter saves, empty cancels, the
 
   await ui.press({ key: 'todo-text-1' })
   const field = await editField(ui, 1)
-  expect(field?.props).toMatchObject({ value: '일 1', label: '수정 중 ', submitLabel: '저장' })
+  expect(field?.props).toMatchObject({ value: '일 1', label: '수정 중', submitLabel: '저장' })
   expect(await ui.find({ key: 'todo-input' })).toBeUndefined()
   // The row edited stands out.
   expect((await ui.find({ type: 'Text', text: ' 일 1' }))?.props).toMatchObject({ bold: true })

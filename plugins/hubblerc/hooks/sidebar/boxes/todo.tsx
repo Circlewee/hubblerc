@@ -18,8 +18,6 @@ export type TodoDrawing = {
   edited: UserTodo | null
   /** The field the tab writes with: absent where the surface draws none (mobile). */
   Input: ElementConstructor<InputProps> | undefined
-  /** The field's rows (`todoFieldRows`): more than one as its text wraps. */
-  fieldRows: number
   doneCount: number
   /** The items "↶ 되돌리기" brings back; 0, no button. */
   undoN: number
@@ -30,12 +28,12 @@ export type TodoDrawing = {
 /**
  * The to-dos: in progress, waiting, on hold, done, as many as the rows hold (twelve at most) and
  * "외 N개"; under them a judgment's "시작? …" or "완료? …" with 맞음 and 아님 (its item marked like an
- * edited one), "완료 N개 지우기", "↶ 되돌리기" after a delete, and the field that writes one
- * (or edits the item whose text was pressed, that row marked). `$` only on a press.
+ * edited one), "완료 N개 지우기" and "↶ 되돌리기" after a delete. The field is `todoField`'s, under the
+ * box. `$` only on a press.
  */
 export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Element {
   const { Box, Text, Button } = f.parts
-  const { items: userTodos, shown: shownTodos, edited, Input, fieldRows, doneCount, undoN, suggested } = d
+  const { items: userTodos, shown: shownTodos, edited, Input, doneCount, undoN, suggested } = d
   const hasField = Input !== undefined
   const inner = f.inner
 
@@ -172,38 +170,49 @@ export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Elem
           <Text color={THEME_COLORS.effort}>{`↶ 되돌리기 (${undoN}개)`}</Text>
         </Button>
       ) : null}
-      {/* Enter writes it; the engine empties the field after. Editing, a field of its own holds the
-          item's text: Enter saves, empty cancels, and so does the pane letting the keyboard go (Esc).
-          Either grows a row as its text wraps (one row cut a long text and hid the caret's part). */}
-      {Input === undefined ? null : edited !== null ? (
-        <Input
-          key={editFieldKey()}
-          label={TODO_FIELDS.edit.label}
-          value={edited.text}
-          rows={fieldRows}
-          placeholder="비우고 Enter면 취소"
-          submitLabel={TODO_FIELDS.edit.submitLabel}
-          onInput={value => {
-            void noteFieldText($, editFieldKey(), 'edit', value, inner, fieldRows)
-          }}
-          onSubmit={value => {
-            void saveEditFromField($, edited.id, value)
-          }}
-        />
-      ) : (
-        <Input
-          key={ADD_FIELD_KEY}
-          rows={fieldRows}
-          placeholder="할 일 적기"
-          submitLabel={TODO_FIELDS.add.submitLabel}
-          onInput={value => {
-            void noteFieldText($, ADD_FIELD_KEY, 'add', value, inner, fieldRows)
-          }}
-          onSubmit={value => {
-            void addTodoFromField($, value)
-          }}
-        />
-      )}
     </Box>
+  )
+}
+
+/**
+ * The field under the box that writes an item, or edits the item whose text was pressed (that row
+ * marked in the box). Drawn outside the box, as wide as the pane: the terminal's engine wraps and
+ * scrolls a field's text at the pane's columns whatever holds it, so inside the box's frame its last
+ * four cells, the caret's among them, were cut off (2026-11-16, on screen; engine 2.1.325 read).
+ * Enter writes it; the engine empties the field after. Editing, a field of its own holds the item's
+ * text: Enter saves, empty cancels, and so does the pane letting the keyboard go (Esc). Either grows
+ * a row as its text wraps. `$` only on a change or Enter.
+ */
+export function todoField($: EngineInterface, d: { Input: ElementConstructor<InputProps>; edited: UserTodo | null; rows: number; columns: number }): JSX.Element {
+  const { Input, edited, rows, columns } = d
+
+  return edited !== null ? (
+    <Input
+      key={editFieldKey()}
+      label={TODO_FIELDS.edit.label}
+      value={edited.text}
+      rows={rows}
+      placeholder="비우고 Enter면 취소"
+      submitLabel={TODO_FIELDS.edit.submitLabel}
+      onInput={value => {
+        void noteFieldText($, editFieldKey(), 'edit', value, columns, rows)
+      }}
+      onSubmit={value => {
+        void saveEditFromField($, edited.id, value)
+      }}
+    />
+  ) : (
+    <Input
+      key={ADD_FIELD_KEY}
+      rows={rows}
+      placeholder="할 일 적기"
+      submitLabel={TODO_FIELDS.add.submitLabel}
+      onInput={value => {
+        void noteFieldText($, ADD_FIELD_KEY, 'add', value, columns, rows)
+      }}
+      onSubmit={value => {
+        void addTodoFromField($, value)
+      }}
+    />
   )
 }
