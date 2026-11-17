@@ -253,7 +253,16 @@ test("the model's tool lists, adds and sets a status, the answer it runs in on w
   expect((await $.tool.call({ tool: TOOL, action: 'set_status', id: 9, status: 'done' })).deny).toBe('No item has id 9.')
   expect((await $.tool.call({ tool: TOOL, action: 'set_status', id: 1, status: 'finished' })).deny).toMatch(/needs status/)
   expect((await $.tool.call({ tool: TOOL, action: 'add' })).deny).toBe('add needs text.')
-  expect((await $.tool.call({ tool: TOOL, action: 'remove' })).deny).toMatch(/action must be/)
+  expect((await $.tool.call({ tool: TOOL, action: 'remove' })).deny).toBe('action must be list, add, set_status or delete.')
+
+  expect((await $.tool.call({ tool: TOOL, action: 'delete', id: 9 })).deny).toBe('No item has id 9.')
+  expect((await $.tool.call({ tool: TOOL, action: 'delete', id: 1.5 })).deny).toBe('delete needs an integer id.')
+  expect((await $.tool.call({ tool: TOOL, action: 'delete' })).deny).toBe('delete needs an integer id.')
+  expect((await $.tool.call({ tool: TOOL, action: 'delete', id: 2 })).result).toBe('id 2 moved to the trash (the user can restore it).')
+  expect(items(stored).map(one => one.id)).toEqual([1])
+  expect(((await $.tool.call({ tool: TOOL, action: 'list' })).result as string).includes('id 2 ')).toBe(false)
+  expect(await todo($, '복원 2')).toBe('되살렸습니다: 2. 📌 문서 갱신')
+  expect(items(stored).map(one => one.id)).toEqual([1, 2])
 })
 
 test('a title and its detail: the lines after the first, or a text too long for a title whole, its start the title', () => {

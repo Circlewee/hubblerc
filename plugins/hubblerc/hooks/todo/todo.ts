@@ -46,7 +46,8 @@ const TOOL_DESCRIPTION =
   "The user's own to-do and idea list for this project, apart from your task tools. Use it when the user asks about their to-dos or ideas. " +
   'list: id, status, title, detail start, the answer (#N) it was written in; with id, one item whole. ' +
   `add: one item, never split: text a one-line title, detail the context to take it up later (${MAX_DETAIL_CHARS} chars max). ` +
-  'set_status: by id; set done when you finish one.'
+  'set_status: by id; set done when you finish one. ' +
+  'delete: by id, to the trash; the user can restore it.'
 
 /**
  * The project's list as last read, and the store key it was read under. Kept in the module, not in
@@ -130,8 +131,8 @@ export async function startTodos($: EngineInterface): Promise<void> {
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['list', 'add', 'set_status'] },
-          id: { type: 'integer', description: 'set_status: the item; list: one item whole' },
+          action: { type: 'string', enum: ['list', 'add', 'set_status', 'delete'] },
+          id: { type: 'integer', description: 'set_status, delete: the item; list: one item whole' },
           text: { type: 'string', description: 'add: the title, one short line' },
           detail: { type: 'string', description: 'add: what goes with it' },
           status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'on_hold'], description: 'set_status: the new status' },
@@ -580,7 +581,7 @@ export function holdEditFocus(on: On): void {
 }
 
 /**
- * The model's tool: `list`, `add`, and `set_status`, which sets the answer it runs in on an item
+ * The model's tool: `list`, `add`, `delete` (to the trash), and `set_status`, which sets the answer it runs in on an item
  * it takes up or finishes. A call it cannot do is refused with the reason.
  */
 export function serveTodoTool(on: On): void {
@@ -629,5 +630,15 @@ export async function answerTodoTool($: EngineInterface, input: Record<string, u
     return { result: `id ${id} is now ${status}.` }
   }
 
-  return { deny: 'action must be list, add or set_status.' }
+  if (action === 'delete') {
+    const id = input.id
+    if (typeof id !== 'number' || !Number.isInteger(id)) return { deny: 'delete needs an integer id.' }
+    await refreshTodos($)
+    if (!(loaded?.record.items ?? []).some(item => item.id === id)) return { deny: `No item has id ${id}.` }
+    await deleteTodo($, id)
+
+    return { result: `id ${id} moved to the trash (the user can restore it).` }
+  }
+
+  return { deny: 'action must be list, add, set_status or delete.' }
 }
