@@ -926,7 +926,7 @@ const uncommittedOf = (changes: TreeChanges): string[] => [...changes.tracked, .
  */
 function snapshotProblems(before: Snapshot, after: Snapshot): string[] {
   const problems: string[] = []
-  if (before.changes === undefined || after.changes === undefined) problems.push('git status를 읽지 못해 working tree를 확인하지 못함')
+  if (before.changes === undefined || after.changes === undefined) problems.push('git status를 읽지 못해 커밋하지 않은 변경을 확인하지 못함')
   else {
     const was = uncommittedOf(before.changes)
     if (was.length > 0) problems.push(`실행 전 커밋하지 않은 변경·git이 모르는 파일: ${was.join(', ')}`)
@@ -989,10 +989,10 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
   const head = before.head ?? 'unknown'
   const tree =
     before.changes === undefined
-      ? 'working tree: git status 실패'
+      ? 'git status: 실패'
       : uncommittedOf(before.changes).length === 0
-        ? 'working tree: 깨끗함(git이 모르는 파일도 없음)'
-        : `working tree: 커밋하지 않은 변경·git이 모르는 파일 ${uncommittedOf(before.changes).join(', ')}`
+        ? 'git status: 깨끗함(git이 모르는 파일도 없음)'
+        : `git status: 커밋하지 않은 변경·git이 모르는 파일 ${uncommittedOf(before.changes).join(', ')}`
   const path = checksFile(runDir(root, state.run), key)
   const halt = await stopped()
   if (halt !== undefined) return halt
@@ -1076,9 +1076,9 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
   if (chosen.length === 0) return { deny: 'package에 넣을 task가 없습니다: done인 task가 없습니다. tasks로 직접 고르세요.' }
 
   const changes = await treeChanges($, root)
-  if (changes === undefined) return { deny: 'git status를 읽지 못해 working tree를 확인하지 못했습니다: package를 만들지 않았습니다.' }
+  if (changes === undefined) return { deny: 'git status를 읽지 못해 커밋하지 않은 변경을 확인하지 못했습니다: package를 만들지 않았습니다.' }
   const uncommitted = uncommittedOf(changes)
-  if (uncommitted.length > 0) return { deny: `working tree에 커밋하지 않은 변경·git이 모르는 파일이 있습니다: ${uncommitted.join(', ')}. 검증자는 커밋만 봅니다: 커밋하거나 치운 뒤 package하세요.` }
+  if (uncommitted.length > 0) return { deny: `커밋하지 않은 변경·git이 모르는 파일이 있습니다: ${uncommitted.join(', ')}. 검증자는 커밋만 봅니다: 커밋하거나 치운 뒤 package하세요.` }
   const briefs = new Map<RelayTask, { text: string; note?: string }>()
   const problems: string[] = []
   for (const task of chosen) {

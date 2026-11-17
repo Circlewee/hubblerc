@@ -957,8 +957,8 @@ export function finishProblems(state: RelayState, head: string | undefined, trac
   if (open.length > 0) reasons.push(`끝나지 않은 task: ${open.map(task => `${taskKey(task)}(${statusLabel(task)})`).join(', ')}`)
   const unsent = state.tasks.filter(task => task.status === 'ready')
   if (unsent.length > 0) reasons.push(`띄우지 않은 task: ${unsent.map(taskKey).join(', ')}. 띄우지 않을 것은 cancel로 정리하세요.`)
-  if (tracked === undefined) reasons.push('git status를 읽지 못해 working tree를 확인하지 못했습니다.')
-  else if (tracked.length > 0) reasons.push(`working tree에 커밋하지 않은 변경: ${tracked.join(', ')}`)
+  if (tracked === undefined) reasons.push('git status를 읽지 못해 커밋하지 않은 변경을 확인하지 못했습니다.')
+  else if (tracked.length > 0) reasons.push(`커밋하지 않은 변경: ${tracked.join(', ')}`)
   const last = state.verdicts.at(-1)
   if (last === undefined) {
     reasons.push('verdict가 없습니다: package → 다른 모델 검증 → verdict 뒤에 끝내세요.')

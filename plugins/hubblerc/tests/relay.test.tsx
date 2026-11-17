@@ -722,7 +722,7 @@ test('V1-03 check marks a criterion unverified on a tree with tracked changes, o
   sim.commands['make lint'] = { exitCode: 0 }
   sim.status = ' M hooks/relay/relay.ts\n?? notes.txt\n'
   const dirty = await relay($, { action: 'check', run: RUN, task: 'A' })
-  expect(dirty.result).toContain('working tree: 커밋하지 않은 변경·git이 모르는 파일 hooks/relay/relay.ts, notes.txt (git이 모름)')
+  expect(dirty.result).toContain('git status: 커밋하지 않은 변경·git이 모르는 파일 hooks/relay/relay.ts, notes.txt (git이 모름)')
   expect(dirty.result).toContain('- C1: unverified · exit 0(기대 0) · 0 ms · 실행 전 커밋하지 않은 변경·git이 모르는 파일: hooks/relay/relay.ts')
   expect(sim.files[`${DIR}/tasks/A-r1-checks.md`]).toContain('Summary: pass 0 · fail 0 · unverified 2')
 
@@ -741,9 +741,9 @@ test('V1-03 package and finish refuse a tree with tracked changes not committed'
   await relay($, { action: 'package', run: RUN })
   await verdictOf($, sim, 'V1', PASSED)
   sim.status = ' M src/worker.ts\n'
-  expect((await relay($, { action: 'package', run: RUN })).deny).toContain('working tree에 커밋하지 않은 변경·git이 모르는 파일이 있습니다: src/worker.ts')
+  expect((await relay($, { action: 'package', run: RUN })).deny).toContain('커밋하지 않은 변경·git이 모르는 파일이 있습니다: src/worker.ts')
   const refused = await relay($, { action: 'finish', run: RUN })
-  expect(refused.deny).toContain('working tree에 커밋하지 않은 변경: src/worker.ts')
+  expect(refused.deny).toContain('커밋하지 않은 변경: src/worker.ts')
   sim.status = null
   expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('git status를 읽지 못해')
   sim.status = ''
@@ -932,7 +932,7 @@ test('V1-03b a file git does not know spoils check results, and package and fini
   await verdictOf($, sim, 'V1', PASSED)
   sim.status = '?? src/new-module.ts\n'
   const refused = await relay($, { action: 'finish', run: RUN })
-  expect(refused.deny).toContain('working tree에 커밋하지 않은 변경: src/new-module.ts (git이 모름)')
+  expect(refused.deny).toContain('커밋하지 않은 변경: src/new-module.ts (git이 모름)')
   expect(state(sim).status).toBe('active')
 })
 
@@ -1383,8 +1383,8 @@ test('a clean check is one line; a fail, an unverified one for another reason th
   const unread = await relay($, { action: 'check', run: RUN, task: 'A' })
   expect(unread.result?.split('\n')).toEqual([
     'A-r1 검사 결과(HEAD aaaaaaa): pass 0 · unverified 2 (C1, C2 명령 없음) · 트리 확인 실패 · 0 ms',
-    'working tree: git status 실패',
-    '- C1: unverified · exit 0(기대 0) · 0 ms · git status를 읽지 못해 working tree를 확인하지 못함 · tries 1',
+    'git status: 실패',
+    '- C1: unverified · exit 0(기대 0) · 0 ms · git status를 읽지 못해 커밋하지 않은 변경을 확인하지 못함 · tries 1',
     `검사 결과 파일: ${DIR}/tasks/A-r1-checks.md`,
   ])
   expect(resultView(unread.result, false)?.line).toBe('pass 0 · fail 0 · unverified 2 · 0 ms · 트리 확인 실패')
