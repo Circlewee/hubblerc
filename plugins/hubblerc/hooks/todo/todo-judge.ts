@@ -92,6 +92,32 @@ async function note($: EngineInterface, decisionId: string, outcome: string | nu
 }
 
 /**
+ * A suggestion that goes unpressed: its item standing at what the judgment said answers it (the
+ * model's tool, a hand or another session moved it there before 맞음 could be pressed), else `otherwise`.
+ * Its judgment is answered, so the next question's settling does not log it again.
+ */
+async function noteUnpressed($: EngineInterface, shown: TodoSuggestion, status: UserTodo['status'] | undefined, otherwise: 'lapsed' | 'replaced'): Promise<void> {
+  open = open.filter(entry => entry.decisionId !== shown.decisionId)
+  if (status !== undefined && cameTrue(shown.kind, status)) await note($, shown.decisionId, valueOf(shown.id), 'by hand')
+  else await note($, shown.decisionId, null, otherwise)
+}
+
+/**
+ * At an answer's end: a shown suggestion whose item reached the judged status meanwhile is answered
+ * by that, and logged now. Left to the next question (2026-11-17: what was in use), a later suggestion
+ * logged it as replaced and a session's end logged nothing, so the answers the threshold is to be
+ * read from went missing whenever the model's tool moved the item first.
+ */
+async function settleShown($: EngineInterface): Promise<void> {
+  const shown = suggestion
+  if (shown === null) return
+  const status = (await currentTodos($)).find(item => item.id === shown.id)?.status
+  if (status === undefined || !cameTrue(shown.kind, status)) return
+  suggestion = null
+  await noteUnpressed($, shown, status, 'lapsed')
+}
+
+/**
  * What the judgments since the last question came to, read off the list as it stands: an item moved
  * by hand (or by the model's tool) to what a judgment said answers it; a suggestion whose item moved
  * on or went is taken down. A suggestion still waiting on its item stays, for the person to press.
@@ -115,19 +141,19 @@ async function settle($: EngineInterface): Promise<void> {
   const status = statusOf(shown.id)
   if (status !== undefined && awaits(shown.kind, status)) return
   suggestion = null
-  if (status !== undefined && cameTrue(shown.kind, status)) await note($, shown.decisionId, valueOf(shown.id), 'by hand')
-  else await note($, shown.decisionId, null, 'lapsed')
+  await noteUnpressed($, shown, status, 'lapsed')
   await redrawTodos($)
 }
 
 /** A judgment's choice put to the person when it names an item, is sure enough, and was not refused. */
 async function suggest($: EngineInterface, kind: SuggestionKind, made: Made, at: TurnRef): Promise<void> {
   if (made.id === null || made.probability < SUGGEST_AT || isRejected(kind, made.id)) return
-  const item = (await currentTodos($)).find(other => other.id === made.id)
+  const items = await currentTodos($)
+  const item = items.find(other => other.id === made.id)
   if (item === undefined || !awaits(kind, item.status)) return
   const before = suggestion
   const isSame = before !== null && before.kind === kind && before.id === item.id
-  if (before !== null) await note($, before.decisionId, null, 'replaced')
+  if (before !== null) await noteUnpressed($, before, items.find(other => other.id === before.id)?.status, 'replaced')
   suggestion = { kind, id: item.id, text: item.text, probability: made.probability, decisionId: made.decisionId, at }
   await redrawTodos($)
   // Said once: the same item suggested again by a later judgment keeps its line and stays quiet.
@@ -164,6 +190,7 @@ export async function judgeTodoStart($: EngineInterface, text: string, isOffered
  */
 export async function judgeTodoEnd($: EngineInterface, e: TurnCompleteInput): Promise<void> {
   if (e.agentId !== undefined) return
+  await settleShown($)
   const answer = e.answer.trim()
   const asked = question
   if (answer !== '') previousAnswer = answer.slice(-PREVIOUS_CHARS)
@@ -189,6 +216,7 @@ export async function acceptTodoSuggestion($: EngineInterface): Promise<void> {
   const shown = suggestion
   if (shown === null) return
   suggestion = null
+  open = open.filter(entry => entry.decisionId !== shown.decisionId)
   const changed = await changeTodos($, record => {
     const item = record.items.find(other => other.id === shown.id)
 

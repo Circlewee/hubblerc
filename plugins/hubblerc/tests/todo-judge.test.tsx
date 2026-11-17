@@ -288,6 +288,32 @@ test('a status moved by hand answers the judgment: logged at the next question, 
   await ui.unmount()
 })
 
+test('an item the tool moved before 맞음 was pressed answers the suggestion at the answer\'s end, once, though a later suggestion follows', WITH_KEY, async ($, on) => {
+  const standIn = standInForEngine(on)
+  const store = machine(on, standIn, [item(1, 'pending', '인증 버그 고치기'), item(2, 'pending', '문서 정리')])
+  standIn.anthropic = choosing({ 'todo-1': 0.8, none: 0.2 })
+  await start($)
+  await ask($, standIn, '로그인 문제 잡아 줘', 't1')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await ui.find({ key: 'todo-suggestion' }))?.text).toContain('시작?')
+
+  // The item moves while the answer runs (the sign here, the model's tool in a session), then the answer's own judgment is put.
+  await ui.press({ key: 'todo-status-1' })
+  expect(items(store).find(one => one.id === 1)?.status).toBe('in_progress')
+  standIn.anthropic = choosing({ 'todo-1': 0.9, none: 0.1 })
+  await answered($, standIn, '인증 버그를 고치고 커밋했습니다.', 't1')
+  expect((await ui.find({ key: 'todo-suggestion' }))?.text).toContain('완료?')
+  const outcomes = () => logged(standIn).filter(line => line.type === 'outcome')
+  expect(outcomes()).toHaveLength(1)
+  expect(outcomes()[0]).toMatchObject({ outcome: 'todo-1', note: 'by hand' })
+
+  // The next question logs nothing more for it.
+  standIn.anthropic = choosing({ none: 1 })
+  await ask($, standIn, '다른 얘기', 't2')
+  expect(outcomes()).toHaveLength(1)
+  await ui.unmount()
+})
+
 test('a judgment that comes back after the next question began is not put under it', WITH_KEY, async ($, on) => {
   const standIn = standInForEngine(on)
   machine(on, standIn, [item(1, 'pending', '인증 버그 고치기')])
