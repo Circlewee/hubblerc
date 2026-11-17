@@ -269,6 +269,7 @@ Run: 2026-11-07-todo    (relay 워커만: brief의 커밋 명령이 붙임)
 
 **한계**
 - 서브에이전트 워커는 brief의 effort를 지키지 않는다(Agent 도구가 effort를 받지 않아 세션과 같은 모델이면 세션 effort, 다른 모델이면 그 모델의 값 [확인: 2026-11-11]). 맞추는 기능은 두 가지 설계로 시도했다가 경계 사례가 계속 나와 뺐다(이전 판). effort를 지켜야 하면 Orca 워커(`--effort`). 실제 값은 report와 상자의 `high→xhigh`로 보인다.
+- 서브에이전트 워커는 별칭으로만 띄운다: Agent 도구의 `model`은 `opus`·`sonnet`·`haiku`·`fable`만 받고 `claude-opus-5-5` 같은 ID는 입력 검사에서 `InputValidationError: Invalid option`으로 막힌다 [확인: 2026-11-17 relay 실행에서 두 호출이 막힘]. brief에는 ID를 적고 gate의 `sameModel`이 별칭과 그 별칭을 담은 ID를 같은 모델로 본다. 이 거절은 엔진 입력 검사라 hubblerc 훅까지 오지 않는다 [추정]. 같은 별칭의 다른 버전을 고를 길은 없다(별칭이 가리키는 버전으로 뜬다). 2026-11-17 스킬 문서에서 "ID 그대로"와 "별칭 또는 ID"로 엇갈리던 안내를 별칭으로 맞췄다.
 - Orca 워커 세션에 hubblerc 배포판이 안 실려 있으면 커밋에 Task·Run trailer만 있고 `Effort:`가 없다. 그때 report는 보고서의 `Model / effort` 줄이 낱말 하나일 때만 그 값을 쓴다.
 - 다른 세션이 같은 run을 바꾸면 이 세션의 상자는 다음 relay 저장·재시작·`/relay-status`까지 옛 값이다.
 - 같은 트리에 다른 워커·세션의 커밋 안 된 변경이 있으면 check가 unverified가 된다(모두 끝난 뒤 깨끗한 HEAD에서 다시).
