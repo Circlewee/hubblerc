@@ -298,10 +298,10 @@ export function checkTask(state: RelayState, input: Omit<BriefInput, 'title' | '
       ...input.targets.filter(target => other.targets.includes(target)).map(target => `external target ${target}`),
     ]
     if (clashes.length > 0) {
-      denials.push(`돌고 있는 ${taskKey(other)}와 겹칩니다(${clashes.join('; ')}). 순서대로 돌리세요: 앞 작업 ${taskKey(other)}가 끝난 뒤 그 커밋을 Base로.`)
+      denials.push(`돌고 있는 ${taskKey(other)}와 겹칩니다(${clashes.join('; ')}). 순서대로 돌리세요: 앞 task ${taskKey(other)}가 끝난 뒤 그 커밋을 Base로.`)
     }
   }
-  if (running.length >= MAX_WORKERS) warnings.push(`돌고 있는 작업이 이미 ${running.length}개입니다(기본 상한 ${MAX_WORKERS}): 더 띄우려면 사용자에게 물으세요.`)
+  if (running.length >= MAX_WORKERS) warnings.push(`돌고 있는 task가 이미 ${running.length}개입니다(기본 상한 ${MAX_WORKERS}): 더 띄우려면 사용자에게 물으세요.`)
 
   for (const done of state.tasks) {
     if (done.status !== 'done' && done.status !== 'done_with_concerns') continue
@@ -954,11 +954,11 @@ export function judgeVerdict(verdict: Verdict, pack: RelayPackage): { problems: 
 export function finishProblems(state: RelayState, head: string | undefined, tracked: readonly string[] | undefined): string[] {
   const reasons: string[] = []
   const open = state.tasks.filter(task => isBusy(task) || task.status === 'needs_context' || task.status === 'blocked')
-  if (open.length > 0) reasons.push(`끝나지 않은 작업: ${open.map(task => `${taskKey(task)}(${statusLabel(task)})`).join(', ')}`)
+  if (open.length > 0) reasons.push(`끝나지 않은 task: ${open.map(task => `${taskKey(task)}(${statusLabel(task)})`).join(', ')}`)
   const unsent = state.tasks.filter(task => task.status === 'ready')
-  if (unsent.length > 0) reasons.push(`띄우지 않은 작업: ${unsent.map(taskKey).join(', ')}. 띄우지 않을 것은 cancel로 정리하세요.`)
-  if (tracked === undefined) reasons.push('git status를 읽지 못해 작업 트리를 확인하지 못했습니다.')
-  else if (tracked.length > 0) reasons.push(`작업 트리에 커밋하지 않은 변경: ${tracked.join(', ')}`)
+  if (unsent.length > 0) reasons.push(`띄우지 않은 task: ${unsent.map(taskKey).join(', ')}. 띄우지 않을 것은 cancel로 정리하세요.`)
+  if (tracked === undefined) reasons.push('git status를 읽지 못해 working tree를 확인하지 못했습니다.')
+  else if (tracked.length > 0) reasons.push(`working tree에 커밋하지 않은 변경: ${tracked.join(', ')}`)
   const last = state.verdicts.at(-1)
   if (last === undefined) {
     reasons.push('verdict가 없습니다: package → 다른 모델 검증 → verdict 뒤에 끝내세요.')
@@ -977,7 +977,7 @@ export function finishProblems(state: RelayState, head: string | undefined, trac
   const uncovered = effectiveTasks(state.tasks)
     .filter(isDone)
     .filter(task => !pack.tasks.some(held => held.key === taskKey(task)) || (task.reportedAt ?? 0) > pack.at)
-  if (uncovered.length > 0) reasons.push(`package ${pack.id}에 없거나 그 뒤에 끝난 작업: ${uncovered.map(taskKey).join(', ')}. 다시 package → 검증 → verdict 하세요.`)
+  if (uncovered.length > 0) reasons.push(`package ${pack.id}에 없거나 그 뒤에 끝난 task: ${uncovered.map(taskKey).join(', ')}. 다시 package → 검증 → verdict 하세요.`)
 
   return reasons
 }

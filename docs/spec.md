@@ -265,6 +265,7 @@ Run: 2026-11-07-todo    (relay 워커만: brief의 커밋 명령이 붙임)
 **화면**
 - 대화: relay 호출·결과를 한 줄로(`relay-view.tsx`). 호출 줄은 작업 키 대신 제목, 결과 줄은 `↳`. 결과 줄은 도구 결과 글의 첫 줄 문구를 읽어 만드므로 `relay.ts`의 문구를 바꾸면 `tests/relay.test.tsx`가 깨진다. 펼친 보기는 엔진 기본.
 - 사이드바 relay 상자: 안 끝난 run이 있을 때만. 작업마다 `<상태>  <제목>  rN · 모델/effort · 시각`(좁으면 시각 → 모델 → revision 순으로 뺌), 사용자 답을 기다리는 결정 수, 마지막 verdict(`= HEAD` / `≠ HEAD`). 상태 말은 ready·launching·running·done·`done (concerns)`·`needs context`·blocked·`blocked (live)`·cancelled이고, 상자에서만 긴 셋을 `concerns`·`needs ctx`·`blocked!`로 줄인다. 렌더는 상태 `relayStatus`만 읽는다(파일 읽기 0 [확인: 테스트 키트]).
+- 용어(2026-11-17): 도구 결과·상자 문구에서 relay의 작업 단위는 `task`, git 작업 트리는 `working tree`라고 쓴다. 전에는 둘 다 "작업"이라 한 거절 글 안에 "끝나지 않은 작업"과 "작업 트리에 …"가 섞였다. 세션 폴더를 뜻하는 "작업 폴더"는 그대로. 도구 인자·기록 형식은 원래 `task`라 바뀌지 않았다.
 - `/relay-status`: 같은 내용을 자르지 않고 글로. 부를 때 run을 다시 읽는다(다른 세션이 바꾼 run을 반영하는 길).
 
 **한계**

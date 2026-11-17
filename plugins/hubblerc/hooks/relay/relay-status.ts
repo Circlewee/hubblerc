@@ -262,7 +262,7 @@ export function relayLines(status: RelayStatus | null, palette: Palette, width?:
 
   return runs.flatMap(run => [
     [{ text: run.run, bold: true }],
-    ...(run.tasks.length === 0 ? [[{ text: '작업 없음', dim: true }]] : run.tasks.map(task => taskSegments(task, palette, column, width))),
+    ...(run.tasks.length === 0 ? [[{ text: 'task 없음', dim: true }]] : run.tasks.map(task => taskSegments(task, palette, column, width))),
     pendingSegments(run.pending, palette),
     verdictSegments(run.verdict, palette),
   ])

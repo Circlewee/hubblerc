@@ -310,7 +310,7 @@ test('start makes the folder, its .gitignore, progress, state and the verdict sc
 
   expect((await relay($, { action: 'start', name: 'demo', goal: 'Again', done_when: ['x'] })).deny).toMatch(/같은 run이 이미 있습니다/)
   expect((await relay($, { action: 'start', name: 'Bad Name', goal: 'x', done_when: ['x'] })).deny).toMatch(/소문자/)
-  expect((await relay($, { action: 'list' })).result).toContain(`- ${RUN} · 목표: Ship relay. · 작업 0개`)
+  expect((await relay($, { action: 'list' })).result).toContain(`- ${RUN} · 목표: Ship relay. · task 0개`)
 })
 
 test('task writes the brief with its head lines, criteria, rules and trailers, and registers it ready', async ($, on) => {
@@ -354,7 +354,7 @@ test('task refuses an empty model, a repeated criterion id, and files a running 
 
   const sameFiles = await relay($, { ...TASK_A, id: 'B', edit_scope: ['hooks/relay/relay.ts'], reads: [] })
   expect(sameFiles.deny).toContain('돌고 있는 A-r1와 겹칩니다')
-  expect(sameFiles.deny).toContain('순서대로 돌리세요: 앞 작업 A-r1가 끝난 뒤 그 커밋을 Base로')
+  expect(sameFiles.deny).toContain('순서대로 돌리세요: 앞 task A-r1가 끝난 뒤 그 커밋을 Base로')
   const readsTheirs = await relay($, { ...TASK_A, id: 'B', edit_scope: ['docs/other.md'], reads: ['hooks/relay/relay-format.ts'] })
   expect(readsTheirs.deny).toMatch(/내 reads ↔ 그 edit_scope/)
   const editsTheirReads = await relay($, { ...TASK_A, id: 'B', edit_scope: ['docs/spec.md'], reads: [] })
@@ -408,7 +408,7 @@ test('a DONE report with a failed criterion is a mismatch, and the task is block
   expect(checked.result).toContain('보고서 불일치')
   expect(checked.result).toContain('DONE인데 통과하지 않은 기준: C1(fail)')
   expect(state(sim).tasks[0]?.status).toBe('blocked')
-  expect((await relay($, { action: 'report', run: RUN, task: 'Z' })).deny).toBe('작업이 없습니다: Z')
+  expect((await relay($, { action: 'report', run: RUN, task: 'Z' })).deny).toBe('task가 없습니다: Z')
 })
 
 test('the effort a worker ran at is read from its commits’ Effort trailer, else from a report line that is one plain word', () => {
@@ -558,7 +558,7 @@ test('finish refuses a running task and a failed verdict, all reasons at once', 
   sim.files[`${DIR}/reviews/V1-verdict.json`] = JSON.stringify({ commit: HEAD_1, result: 'fail', model: 'm', criteria: PASSED, findings: [{ severity: 'high', file: 'a.ts', line: 3, issue: 'x', evidence: 'y' }], reviewed_files: ['hooks/relay/relay.ts'] })
   await relay($, { action: 'verdict', run: RUN, id: 'V1' })
   const refused = await relay($, { action: 'finish', run: RUN })
-  expect(refused.deny).toContain('끝나지 않은 작업: B-r1(running)')
+  expect(refused.deny).toContain('끝나지 않은 task: B-r1(running)')
   expect(refused.deny).toContain('마지막 verdict V1가 fail입니다')
 })
 
@@ -667,11 +667,11 @@ test('V1-02 finish refuses a revision never launched; cancel clears it, with its
   await verdictOf($, sim, 'V1', PASSED)
   await relay($, { ...TASK_A, done_when: [{ text: 'a new requirement' }] })
   const refused = await relay($, { action: 'finish', run: RUN })
-  expect(refused.deny).toContain('띄우지 않은 작업: A-r2')
+  expect(refused.deny).toContain('띄우지 않은 task: A-r2')
   expect(state(sim).status).toBe('active')
 
   expect((await relay($, { action: 'cancel', run: RUN, task: 'A-r2' })).deny).toMatch(/reason이 비었습니다/)
-  expect((await relay($, { action: 'cancel', run: RUN, task: 'A-r1', reason: 'x' })).deny).toMatch(/끝난 작업/)
+  expect((await relay($, { action: 'cancel', run: RUN, task: 'A-r1', reason: 'x' })).deny).toMatch(/끝난 task/)
   expect((await relay($, { action: 'cancel', run: RUN, task: 'A-r2', reason: '요구가 바뀜' })).result).toContain('A-r2: ready → cancelled · 요구가 바뀜')
   expect(state(sim).tasks[1]).toMatchObject({ status: 'cancelled', cancelReason: '요구가 바뀜' })
   expect((await relay($, { action: 'finish', run: RUN })).result).toContain('run을 끝냈습니다')
@@ -698,10 +698,10 @@ test('V1-02 finish refuses a done task its last package did not hold, or one don
   sim.commits[SHA_B] = { task: 'B-r1', subject: 'B', files: ['other/b.ts'] }
   sim.files[`${DIR}/tasks/B-r1-report.md`] = report({ commits: SHA_B }).replace('# Report A-r1', '# Report B-r1')
   await relay($, { action: 'report', run: RUN, task: 'B' })
-  expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('package V1에 없거나 그 뒤에 끝난 작업: B-r1')
+  expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('package V1에 없거나 그 뒤에 끝난 task: B-r1')
 
   // By default a package holds every done task.
-  expect((await relay($, { action: 'package', run: RUN })).result).toContain('담은 작업: A-r1, B-r1')
+  expect((await relay($, { action: 'package', run: RUN })).result).toContain('담은 task: A-r1, B-r1')
 })
 
 test('V1-03 DONE with uncommitted work is a mismatch, and the task is blocked', async ($, on) => {
@@ -722,7 +722,7 @@ test('V1-03 check marks a criterion unverified on a tree with tracked changes, o
   sim.commands['make lint'] = { exitCode: 0 }
   sim.status = ' M hooks/relay/relay.ts\n?? notes.txt\n'
   const dirty = await relay($, { action: 'check', run: RUN, task: 'A' })
-  expect(dirty.result).toContain('작업 트리: 커밋하지 않은 변경·git이 모르는 파일 hooks/relay/relay.ts, notes.txt (git이 모름)')
+  expect(dirty.result).toContain('working tree: 커밋하지 않은 변경·git이 모르는 파일 hooks/relay/relay.ts, notes.txt (git이 모름)')
   expect(dirty.result).toContain('- C1: unverified · exit 0(기대 0) · 0 ms · 실행 전 커밋하지 않은 변경·git이 모르는 파일: hooks/relay/relay.ts')
   expect(sim.files[`${DIR}/tasks/A-r1-checks.md`]).toContain('Summary: pass 0 · fail 0 · unverified 2')
 
@@ -741,9 +741,9 @@ test('V1-03 package and finish refuse a tree with tracked changes not committed'
   await relay($, { action: 'package', run: RUN })
   await verdictOf($, sim, 'V1', PASSED)
   sim.status = ' M src/worker.ts\n'
-  expect((await relay($, { action: 'package', run: RUN })).deny).toContain('작업 트리에 커밋하지 않은 변경·git이 모르는 파일이 있습니다: src/worker.ts')
+  expect((await relay($, { action: 'package', run: RUN })).deny).toContain('working tree에 커밋하지 않은 변경·git이 모르는 파일이 있습니다: src/worker.ts')
   const refused = await relay($, { action: 'finish', run: RUN })
-  expect(refused.deny).toContain('작업 트리에 커밋하지 않은 변경: src/worker.ts')
+  expect(refused.deny).toContain('working tree에 커밋하지 않은 변경: src/worker.ts')
   sim.status = null
   expect((await relay($, { action: 'finish', run: RUN })).deny).toContain('git status를 읽지 못해')
   sim.status = ''
@@ -768,7 +768,7 @@ test('V1-04 the package carries the commits of every revision, their scope and t
   sim.files[`${DIR}/tasks/A-r2-report.md`] = report({ commits: newer, criteria: ['- C1: pass · tries 2 · ok', '- C2: pass · tries 0 · ok'] }).replace('# Report A-r1', '# Report A-r2')
   await relay($, { action: 'report', run: RUN, task: 'A' })
 
-  expect((await relay($, { action: 'package', run: RUN })).result).toContain('담은 작업: A-r2')
+  expect((await relay($, { action: 'package', run: RUN })).result).toContain('담은 task: A-r2')
   const text = sim.files[`${DIR}/reviews/V1-package.md`] ?? ''
   expect(text).toContain('### Commits of every revision of A')
   expect(text).toContain('#### A-r1 (cancelled: 새 revision A-r2가 이어받음)')
@@ -811,7 +811,7 @@ test('V1-06 a running task holds its files: no new revision, no second dispatch,
   await begin($, sim)
   await relay($, TASK_A)
   await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'old-worker' })
-  expect((await relay($, TASK_A)).deny).toContain('같은 작업의 A-r1(running · old-worker)가 돌고 있습니다')
+  expect((await relay($, TASK_A)).deny).toContain('같은 task의 A-r1(running · old-worker)가 돌고 있습니다')
   expect((await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'new-worker' })).deny).toContain('A-r1는 running 상태라 running으로 바꾸지 않습니다')
   expect((await relay($, { ...TASK_A, id: 'B' })).deny).toContain('돌고 있는 A-r1와 겹칩니다')
   expect(state(sim).tasks.map(task => [taskKeyOf(task), task.status, task.runner])).toEqual([['A-r1', 'running', 'old-worker']])
@@ -850,7 +850,7 @@ test('V1-07 reserveDispatch lets one of two overlapping launches through; launch
   expect('commit' in first).toBe(true)
   expect('deny' in second && second.deny).toContain('돌고 있는 A-r1와 겹칩니다')
   expect(state(sim).tasks.map(task => task.status)).toEqual(['launching', 'ready'])
-  expect((await relay($, TASK_A)).deny).toContain('같은 작업의 A-r1(launching)가 돌고 있습니다')
+  expect((await relay($, TASK_A)).deny).toContain('같은 task의 A-r1(launching)가 돌고 있습니다')
   expect((await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'x' })).deny).toContain('launching 상태라')
 
   if (!('commit' in first)) return
@@ -932,7 +932,7 @@ test('V1-03b a file git does not know spoils check results, and package and fini
   await verdictOf($, sim, 'V1', PASSED)
   sim.status = '?? src/new-module.ts\n'
   const refused = await relay($, { action: 'finish', run: RUN })
-  expect(refused.deny).toContain('작업 트리에 커밋하지 않은 변경: src/new-module.ts (git이 모름)')
+  expect(refused.deny).toContain('working tree에 커밋하지 않은 변경: src/new-module.ts (git이 모름)')
   expect(state(sim).status).toBe('active')
 })
 
@@ -948,7 +948,7 @@ test('V1-04b the package shows the commits of tasks outside it, cancelled ones i
   const loose = '8'.repeat(40)
   sim.commits[loose] = { task: '', subject: 'Lead fixup', files: ['docs/notes.md'] }
 
-  expect((await relay($, { action: 'package', run: RUN })).result).toContain('담은 작업: A-r1')
+  expect((await relay($, { action: 'package', run: RUN })).result).toContain('담은 task: A-r1')
   const text = sim.files[`${DIR}/reviews/V1-package.md`] ?? ''
   expect(text).toContain('## Other commits of this run')
   expect(text).toContain('### Task B (not in this package)')
@@ -1069,7 +1069,7 @@ test('V3-01 a launch blocked after it went out keeps its files: an overlapping l
   const { engine, held } = await liveBlockedA($, sim)
   // Both starts issued at once: A's commit (blocked) and B's claim; the lock orders them, A first.
   const [committed, second] = await Promise.all([held.commit('orca dispatch:ctx_live_A'), reserveDispatch(engine, ROOT, RUN, 'B')])
-  expect('deny' in committed && committed.deny).toContain('워커(orca dispatch:ctx_live_A)는 떠 있을 수 있어 이 작업이 파일을 계속 점유합니다')
+  expect('deny' in committed && committed.deny).toContain('워커(orca dispatch:ctx_live_A)는 떠 있을 수 있어 이 task가 파일을 계속 점유합니다')
   expect('deny' in second && second.deny).toContain('돌고 있는 A-r1와 겹칩니다')
   expect(state(sim).tasks.map(task => [task.id, task.status, task.runner, task.workerLive])).toEqual([
     ['A', 'blocked', 'orca dispatch:ctx_live_A', true],
@@ -1087,7 +1087,7 @@ test('V3-01 a task blocked after its launch takes no new revision until its work
   const { held } = await liveBlockedA($, sim, false)
   await held.commit('orca dispatch:ctx_still_alive')
   const revision = await relay($, TASK_A)
-  expect(revision.deny).toContain('같은 작업의 A-r1(blocked (live: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) · orca dispatch:ctx_still_alive)가 돌고 있습니다')
+  expect(revision.deny).toContain('같은 task의 A-r1(blocked (live: brief가 바뀜 — 워커를 멈추고 cancel(confirmed_stopped)) · orca dispatch:ctx_still_alive)가 돌고 있습니다')
   expect(state(sim).tasks.map(task => [taskKeyOf(task), task.status])).toEqual([['A-r1', 'blocked']])
 
   await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'replace worker', confirmed_stopped: true })
@@ -1107,7 +1107,7 @@ test('V3-01 a task blocked after its launch is cancelled only with confirmed_sto
   sim.files[`${DIR}/tasks/A-r1-report.md`] = report()
   const reported = await relay($, { action: 'report', run: RUN, task: 'A' })
   expect(reported.result).toContain('A-r1: 보고 DONE → 상태 done')
-  expect(reported.result).toContain('띄운 뒤 막혀 있던 작업의 워커가 보고했습니다')
+  expect(reported.result).toContain('띄운 뒤 막혀 있던 task의 워커가 보고했습니다')
   expect(state(sim).tasks[0]?.workerLive).toBeUndefined()
   // A worker's own BLOCKED report frees its files: that worker stopped.
   sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', criteria: ['- C1: fail · tries 1 · red', '- C2: unverified · tries 0 · -'] })
@@ -1221,7 +1221,7 @@ test('a refusal says its first reason, a failure of the tool says so, and a text
   expect(refused.problem).toBe(true)
   expect(refused.result).toMatch(/^거절: verdict가 없습니다/)
   const bad = await said($, { action: 'cancel', run: RUN, task: 'Z', reason: 'x' })
-  expect(bad.result).toBe('거절: 작업이 없습니다: Z')
+  expect(bad.result).toBe('거절: task가 없습니다: Z')
   const noRun = await said($, { action: 'task', run: 'nope' })
   expect(noRun.result).toMatch(/^거절: run은 start가 돌려준/)
 
@@ -1383,8 +1383,8 @@ test('a clean check is one line; a fail, an unverified one for another reason th
   const unread = await relay($, { action: 'check', run: RUN, task: 'A' })
   expect(unread.result?.split('\n')).toEqual([
     'A-r1 검사 결과(HEAD aaaaaaa): pass 0 · unverified 2 (C1, C2 명령 없음) · 트리 확인 실패 · 0 ms',
-    '작업 트리: git status 실패',
-    '- C1: unverified · exit 0(기대 0) · 0 ms · git status를 읽지 못해 작업 트리를 확인하지 못함 · tries 1',
+    'working tree: git status 실패',
+    '- C1: unverified · exit 0(기대 0) · 0 ms · git status를 읽지 못해 working tree를 확인하지 못함 · tries 1',
     `검사 결과 파일: ${DIR}/tasks/A-r1-checks.md`,
   ])
   expect(resultView(unread.result, false)?.line).toBe('pass 0 · fail 0 · unverified 2 · 0 ms · 트리 확인 실패')
@@ -1431,7 +1431,7 @@ test('abandon refuses an empty reason and a task holding a worker; then the run 
   expect((await relay($, { action: 'abandon', run: RUN, reason: '  ' })).deny).toBe('reason이 비었습니다: 왜 이 run을 버리는지 적으세요.')
   const held = await said($, { action: 'abandon', run: RUN, reason: 'the person stopped it' })
   expect(held.problem).toBe(true)
-  expect(held.result).toBe('거절: 워커를 잡고 있는 작업이 있어 버리지 않았습니다: A-r1(running · subagent a). 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.')
+  expect(held.result).toBe('거절: 워커를 잡고 있는 task가 있어 버리지 않았습니다: A-r1(running · subagent a). 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.')
   expect(state(sim).status).toBe('active')
 
   await relay($, { action: 'cancel', run: RUN, task: 'A', reason: 'stopped', confirmed_stopped: true })

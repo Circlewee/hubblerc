@@ -161,7 +161,7 @@ test('a verdict of another commit than HEAD, HEAD not read, no verdict, no decis
   expect(texts(relayLines({ runs: [runStatus(STATE, PROGRESS, undefined)] }, THEME_COLORS)).at(-1)).toBe('verdict V1 fail · ccccccc · HEAD unknown')
 
   const bare = texts(relayLines({ runs: [runStatus({ ...STATE, tasks: [], verdicts: [] }, PROGRESS.replace('| asked |', '| decided |'), undefined)] }, THEME_COLORS))
-  expect(bare).toEqual([RUN, '작업 없음', '사용자 답을 기다리는 결정 없음', 'verdict 없음'])
+  expect(bare).toEqual([RUN, 'task 없음', '사용자 답을 기다리는 결정 없음', 'verdict 없음'])
   expect(texts(relayLines({ runs: [runStatus(STATE, undefined, undefined)] }, THEME_COLORS)).at(-2)).toBe('기다리는 결정: progress.md를 읽지 못함')
   // Nothing to show: no lines, so no box.
   expect(relayLines(null, THEME_COLORS)).toEqual([])
@@ -307,7 +307,7 @@ test('the relay tool’s changes show at the next drawing: the run started, a ta
   expect(await boxLines(ui)).toBeUndefined()
 
   expect((await relay($, { action: 'start', name: 'demo', goal: 'Ship relay.', done_when: ['all checks pass'] })).deny).toBeUndefined()
-  expect(await boxLines(ui)).toEqual([run, '작업 없음', '사용자 답을 기다리는 결정 없음', 'verdict 없음'])
+  expect(await boxLines(ui)).toEqual([run, 'task 없음', '사용자 답을 기다리는 결정 없음', 'verdict 없음'])
 
   const written = await relay($, {
     action: 'task',

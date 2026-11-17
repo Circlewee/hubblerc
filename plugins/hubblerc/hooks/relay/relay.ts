@@ -575,7 +575,7 @@ async function listAction($: EngineInterface, root: string): Promise<Answer> {
       .filter(([, count]) => count > 0)
       .map(([status, count]) => `${status} ${count}`)
 
-    return `- ${run} · 목표: ${state.goal.replace(/\s+/g, ' ')} · 작업 ${state.tasks.length}개${counts.length === 0 ? '' : `(${counts.join(', ')})`} · ${dir}`
+    return `- ${run} · 목표: ${state.goal.replace(/\s+/g, ' ')} · task ${state.tasks.length}개${counts.length === 0 ? '' : `(${counts.join(', ')})`} · ${dir}`
   })
   const note = runs.length > 1 ? ['', '여럿입니다: 어느 run을 이어받을지 사용자에게 물으세요.'] : []
 
@@ -591,7 +591,7 @@ async function taskAction($: EngineInterface, root: string, state: RelayState, i
   if (holding.length > 0) {
     const named = holding.map(task => `${taskKey(task)}(${statusLabel(task)}${task.runner === null ? '' : ` · ${task.runner}`})`).join(', ')
 
-    return { deny: `같은 작업의 ${named}가 돌고 있습니다: 먼저 report를 받거나, 워커가 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.` }
+    return { deny: `같은 task의 ${named}가 돌고 있습니다: 먼저 report를 받거나, 워커가 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.` }
   }
   const checked = checkTask(state, brief)
   if (checked.denials.length > 0) return { deny: checked.denials.join('\n') }
@@ -717,7 +717,7 @@ async function setBlocked($: EngineInterface, root: string, state: RelayState, t
   await save($, root, state)
 
   return {
-    deny: `${taskKey(task)}를 blocked로 두었습니다(${LIVE_BLOCKED}): ${reason} 워커(${runner})는 떠 있을 수 있어 이 작업이 파일을 계속 점유합니다. 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주고, 그다음 task로 새 revision을 만드세요.`,
+    deny: `${taskKey(task)}를 blocked로 두었습니다(${LIVE_BLOCKED}): ${reason} 워커(${runner})는 떠 있을 수 있어 이 task가 파일을 계속 점유합니다. 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주고, 그다음 task로 새 revision을 만드세요.`,
   }
 }
 
@@ -734,7 +734,7 @@ export async function markDispatched($: EngineInterface, root: string, run: stri
     const closed = closedRun(state)
     if (closed !== undefined) return { deny: closed }
     const task = findTask(state, name)
-    if (task === undefined) return { deny: `작업이 없습니다: ${name}(${run})` }
+    if (task === undefined) return { deny: `task가 없습니다: ${name}(${run})` }
     if (task.status !== 'ready') return { deny: `${taskKey(task)}는 ${task.status} 상태라 running으로 바꾸지 않습니다(ready인 revision만). 새로 보낼 것이면 task로 새 revision을 만드세요.` }
     const brief = await briefNow($, task)
     if ('problem' in brief) return setBlocked($, root, state, task, runner, brief.problem)
@@ -771,7 +771,7 @@ export async function reserveDispatch($: EngineInterface, root: string, run: str
     const closed = closedRun(state)
     if (closed !== undefined) return { deny: closed }
     const task = findTask(state, name)
-    if (task === undefined) return { deny: `작업이 없습니다: ${name}(${run})` }
+    if (task === undefined) return { deny: `task가 없습니다: ${name}(${run})` }
     const key = taskKey(task)
     if (task.status !== 'ready') return { deny: `${key}는 ${task.status} 상태라 띄우지 않습니다(ready인 revision만).` }
     const overlaps = overlapWarnings(state, task)
@@ -819,12 +819,12 @@ export async function reserveDispatch($: EngineInterface, root: string, run: str
 async function cancelAction($: EngineInterface, root: string, state: RelayState, input: Record<string, unknown>): Promise<Answer> {
   const name = text(input.task)
   const task = findTask(state, name)
-  if (task === undefined) return { deny: `작업이 없습니다: ${name}` }
+  if (task === undefined) return { deny: `task가 없습니다: ${name}` }
   const key = taskKey(task)
   const reason = text(input.reason)
   if (reason === '') return { deny: 'reason이 비었습니다: 왜 띄우지 않는지 적으세요.' }
   if (task.status === 'cancelled') return { deny: `${key}는 이미 취소됐습니다.` }
-  if (isDone(task)) return { deny: `${key}는 끝난 작업(${task.status})이라 취소하지 않습니다: 그 커밋은 검증 package에 들어갑니다.` }
+  if (isDone(task)) return { deny: `${key}는 끝난 task(${task.status})라 취소하지 않습니다: 그 커밋은 검증 package에 들어갑니다.` }
   if (isBusy(task) && input.confirmed_stopped !== true) {
     return { deny: `${key}는 ${statusLabel(task)} 상태입니다${task.runner === null ? '' : `(${task.runner})`}: 워커가 멈춘 것을 확인한 뒤 confirmed_stopped: true를 주세요.` }
   }
@@ -840,7 +840,7 @@ async function cancelAction($: EngineInterface, root: string, state: RelayState,
 
 async function reportAction($: EngineInterface, root: string, state: RelayState, name: string): Promise<Answer> {
   const task = findTask(state, name)
-  if (task === undefined) return { deny: `작업이 없습니다: ${name}` }
+  if (task === undefined) return { deny: `task가 없습니다: ${name}` }
   const key = taskKey(task)
   const dir = runDir(root, state.run)
   const path = reportFile(dir, key)
@@ -894,7 +894,7 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
   const tried = task.criteria.filter(criterion => (task.tries[criterion.id] ?? 0) >= 1).map(criterion => `${criterion.id} ${task.tries[criterion.id]}`)
   const lines = [
     [`${key}: 보고 ${report.status ?? '없음'} → 상태 ${status}`, commits, criteria, ...(isDoneNow ? ['다음: check'] : [])].join(' · '),
-    ...(wasLive ? ['띄운 뒤 막혀 있던 작업의 워커가 보고했습니다: 이제 점유하지 않습니다(보고대로 처리).'] : []),
+    ...(wasLive ? ['띄운 뒤 막혀 있던 task의 워커가 보고했습니다: 이제 점유하지 않습니다(보고대로 처리).'] : []),
     ...(notPassed.length === 0 ? [] : [`기준(워커 보고): ${notPassed.map(criterion => `${criterion.id} ${criterion.result}`).join(', ')}`]),
     ...(tried.length === 0 ? [] : [`tries: ${tried.join(', ')}`]),
     ...(look.outside.length === 0 ? [] : [`범위 밖 파일: ${look.outside.join(', ')}`]),
@@ -926,7 +926,7 @@ const uncommittedOf = (changes: TreeChanges): string[] => [...changes.tracked, .
  */
 function snapshotProblems(before: Snapshot, after: Snapshot): string[] {
   const problems: string[] = []
-  if (before.changes === undefined || after.changes === undefined) problems.push('git status를 읽지 못해 작업 트리를 확인하지 못함')
+  if (before.changes === undefined || after.changes === undefined) problems.push('git status를 읽지 못해 working tree를 확인하지 못함')
   else {
     const was = uncommittedOf(before.changes)
     if (was.length > 0) problems.push(`실행 전 커밋하지 않은 변경·git이 모르는 파일: ${was.join(', ')}`)
@@ -940,7 +940,7 @@ function snapshotProblems(before: Snapshot, after: Snapshot): string[] {
 
 async function checkAction($: EngineInterface, root: string, state: RelayState, name: string): Promise<Answer> {
   const task = findTask(state, name)
-  if (task === undefined) return { deny: `작업이 없습니다: ${name}` }
+  if (task === undefined) return { deny: `task가 없습니다: ${name}` }
   const key = taskKey(task)
   const startedAt = await $.clock.now()
   const before = await snapshot($, root)
@@ -989,10 +989,10 @@ async function checkAction($: EngineInterface, root: string, state: RelayState, 
   const head = before.head ?? 'unknown'
   const tree =
     before.changes === undefined
-      ? '작업 트리: git status 실패'
+      ? 'working tree: git status 실패'
       : uncommittedOf(before.changes).length === 0
-        ? '작업 트리: 깨끗함(git이 모르는 파일도 없음)'
-        : `작업 트리: 커밋하지 않은 변경·git이 모르는 파일 ${uncommittedOf(before.changes).join(', ')}`
+        ? 'working tree: 깨끗함(git이 모르는 파일도 없음)'
+        : `working tree: 커밋하지 않은 변경·git이 모르는 파일 ${uncommittedOf(before.changes).join(', ')}`
   const path = checksFile(runDir(root, state.run), key)
   const halt = await stopped()
   if (halt !== undefined) return halt
@@ -1065,7 +1065,7 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     chosen = []
     for (const name of asked) {
       const task = findTask(state, name)
-      if (task === undefined) return { deny: `작업이 없습니다: ${name}` }
+      if (task === undefined) return { deny: `task가 없습니다: ${name}` }
       if (!isDone(task)) warnings.push(`${taskKey(task)}는 ${task.status} 상태입니다.`)
       if (!chosen.includes(task)) chosen.push(task)
     }
@@ -1073,12 +1073,12 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
     // Every task done as it stands: finish asks the last verdict's package to hold them all.
     chosen = effectiveTasks(state.tasks).filter(isDone)
   }
-  if (chosen.length === 0) return { deny: 'package에 넣을 작업이 없습니다: done인 작업이 없습니다. tasks로 직접 고르세요.' }
+  if (chosen.length === 0) return { deny: 'package에 넣을 task가 없습니다: done인 task가 없습니다. tasks로 직접 고르세요.' }
 
   const changes = await treeChanges($, root)
-  if (changes === undefined) return { deny: 'git status를 읽지 못해 작업 트리를 확인하지 못했습니다: package를 만들지 않았습니다.' }
+  if (changes === undefined) return { deny: 'git status를 읽지 못해 working tree를 확인하지 못했습니다: package를 만들지 않았습니다.' }
   const uncommitted = uncommittedOf(changes)
-  if (uncommitted.length > 0) return { deny: `작업 트리에 커밋하지 않은 변경·git이 모르는 파일이 있습니다: ${uncommitted.join(', ')}. 검증자는 커밋만 봅니다: 커밋하거나 치운 뒤 package하세요.` }
+  if (uncommitted.length > 0) return { deny: `working tree에 커밋하지 않은 변경·git이 모르는 파일이 있습니다: ${uncommitted.join(', ')}. 검증자는 커밋만 봅니다: 커밋하거나 치운 뒤 package하세요.` }
   const briefs = new Map<RelayTask, { text: string; note?: string }>()
   const problems: string[] = []
   for (const task of chosen) {
@@ -1240,7 +1240,7 @@ async function packageAction($: EngineInterface, root: string, state: RelayState
 
   return {
     result: withWarnings(
-      [`검증 package ${id}: ${packagePath}`, `verdict 파일: ${verdictPath}`, `verdict 형식: ${schemaPath}`, `담은 작업: ${chosen.map(taskKey).join(', ')} · HEAD ${head.slice(0, 7)} · 검토할 파일 ${files.length}개`],
+      [`검증 package ${id}: ${packagePath}`, `verdict 파일: ${verdictPath}`, `verdict 형식: ${schemaPath}`, `담은 task: ${chosen.map(taskKey).join(', ')} · HEAD ${head.slice(0, 7)} · 검토할 파일 ${files.length}개`],
       warnings,
     ),
   }
@@ -1361,7 +1361,7 @@ async function abandonAction($: EngineInterface, root: string, state: RelayState
   if (holding.length > 0) {
     const named = holding.map(task => `${taskKey(task)}(${statusLabel(task)}${task.runner === null ? '' : ` · ${task.runner}`})`).join(', ')
 
-    return { deny: `워커를 잡고 있는 작업이 있어 버리지 않았습니다: ${named}. 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.` }
+    return { deny: `워커를 잡고 있는 task가 있어 버리지 않았습니다: ${named}. 워커를 멈추고, 멈춘 것을 확인한 뒤 cancel에 confirmed_stopped: true를 주세요.` }
   }
   const left = await commitsLeft($, root, state)
   const at = await $.clock.now()
