@@ -1,4 +1,4 @@
-import { cellWidth } from '../shared/text-width'
+import { cellWidth, clipCells } from '../shared/text-width'
 
 /**
  * The person's own to-dos (`/todo`, the sidebar's "할 일" tab, the model's `user_todos` tool): a
@@ -526,4 +526,23 @@ export const DETAIL_MARK = ' ⋯'
 /** How many cells a row's tail takes: ` ⋯` for a detail, ` #14`, then the buttons ` ↗ ` and ` ✕ `, three cells each. */
 export function rowTailCells(item: UserTodo): number {
   return (item.detail === undefined ? 0 : cellWidth(DETAIL_MARK)) + (showsTurn(item) ? cellWidth(` #${item.turn}`) : 0) + (item.status === 'pending' ? 3 : 0) + 3
+}
+
+/**
+ * A row's title in `room` cells. Without a detail, clipped with `…`. With one, the ` ⋯` at the row's
+ * end already says there is more, so the title is cut flat and loses the `…` a long add left on it:
+ * one mark, not two.
+ */
+export function rowTitle(item: UserTodo, room: number): string {
+  const title = oneLine(item.text)
+  if (item.detail === undefined) return clipCells(title, room)
+
+  const bare = title.endsWith('…') ? title.slice(0, -1).trimEnd() : title
+  let cut = ''
+  for (const char of bare) {
+    if (cellWidth(cut + char) > room) break
+    cut += char
+  }
+
+  return cut.trimEnd()
 }

@@ -42,3 +42,31 @@ test('each to-do row shows its id dim between the status mark and the title, and
   expect((await ui.find({ key: 'todo-text-21' }))?.text).toMatch(/^ 아주/)
   await ui.unmount()
 })
+
+test('a to-do with a detail keeps one mark: its title is cut flat, the ⋯ at the row end says there is more', async ($, on) => {
+  standInForEngine(on)
+  const long = '아주 길게 적어 둔 할 일의 제목이라서 줄 안에 다 들어가지 않습니다 정말로'
+  const stored: Record<string, unknown> = {
+    sidebarTab: 'todo',
+    [KEY]: {
+      items: [
+        { ...item(4, long), detail: '세부' },
+        { ...item(5, '짧게 남은 제목…'), detail: '긴 글 전체' },
+        item(6, long),
+      ],
+      nextId: 7,
+    },
+  }
+  on('store.get', (_, e) => ({ value: stored[e.key] }))
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+
+  const clipped = (await ui.find({ key: 'todo-text-4' }))?.text ?? ''
+  expect(clipped).toMatch(/^ 아주/)
+  expect(clipped).not.toContain('…')
+  expect((await ui.find({ key: 'todo-4' }))?.text).toContain(' ⋯')
+  expect((await ui.find({ key: 'todo-text-5' }))?.text).toBe(' 짧게 남은 제목')
+  expect((await ui.find({ key: 'todo-text-6' }))?.text).toMatch(/…$/)
+  expect(cellWidth((await ui.find({ key: 'todo-4' }))?.text ?? '')).toBeLessThanOrEqual(COLUMNS)
+  await ui.unmount()
+})

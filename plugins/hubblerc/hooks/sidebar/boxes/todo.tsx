@@ -3,7 +3,7 @@ import type { ElementConstructor, EngineInterface, InputProps } from 'claude-cod
 import { THEME_COLORS } from '../../shared/style'
 import { cellWidth } from '../../shared/text-width'
 import { ADD_FIELD_KEY, addFieldDrawnValue, addTodoFromField, clearDoneTodos, cycleTodo, deleteTodo, editFieldKey, noteFieldText, offerTodo, saveEditFromField, startEditTodo, undoDelete } from '../../todo/todo'
-import { DETAIL_MARK, editText, oneLine, rowTailCells, showsTurn, STATUS_MARK, TODO_FIELDS } from '../../todo/todo-format'
+import { DETAIL_MARK, editText, oneLine, rowTailCells, rowTitle, showsTurn, STATUS_MARK, TODO_FIELDS } from '../../todo/todo-format'
 import { acceptTodoSuggestion, rejectTodoSuggestion } from '../../todo/todo-judge'
 import type { TodoSuggestion } from '../../todo/todo-judge-format'
 import type { UserTodo } from '../../todo/todo-format'
@@ -46,7 +46,7 @@ export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Elem
     const idText = ` ${item.id}`
     const room = inner - cellWidth(mark) - cellWidth(idText) - 1 - rowTailCells(item) - 1
     const text = (
-      <Text {...(isEdited ? { bold: true, color: THEME_COLORS.effort } : isDim ? { dimColor: true } : {})}>{` ${clipCells(oneLine(item.text), room)}`}</Text>
+      <Text {...(isEdited ? { bold: true, color: THEME_COLORS.effort } : isDim ? { dimColor: true } : {})}>{` ${rowTitle(item, room)}`}</Text>
     )
 
     // ↗ and ✕ hold a space each side, three cells to press, the sign in the middle of the focus mark.
