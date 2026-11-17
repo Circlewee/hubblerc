@@ -42,8 +42,9 @@ export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Elem
     const isEdited = edited?.id === item.id || suggested?.id === item.id
     const isDim = !isEdited && (item.status === 'done' || item.status === 'on_hold')
     const mark = STATUS_MARK[item.status]
-    // The sign (an emoji, two cells), a space, the text; then a cell at least before the tail.
-    const room = inner - cellWidth(`${mark} `) - rowTailCells(item) - 1
+    // The sign (an emoji, two cells), the id dim, the text, each after a space; then a cell at least before the tail.
+    const idText = ` ${item.id}`
+    const room = inner - cellWidth(mark) - cellWidth(idText) - 1 - rowTailCells(item) - 1
     const text = (
       <Text {...(isEdited ? { bold: true, color: THEME_COLORS.effort } : isDim ? { dimColor: true } : {})}>{` ${clipCells(oneLine(item.text), room)}`}</Text>
     )
@@ -62,6 +63,8 @@ export function todoBody($: EngineInterface, f: Frame, d: TodoDrawing): JSX.Elem
           >
             <Text>{mark}</Text>
           </Button>
+          {/* The id, outside the press: the number `/todo 수정` and the tool name it by. */}
+          <Text dimColor>{idText}</Text>
           {/* A press on the text edits it in the field below; no field (mobile), no press. */}
           {hasField ? (
             <Button
