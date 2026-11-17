@@ -317,7 +317,7 @@ test('a row marks a detail; ↗ puts the title and the detail in the draft; the 
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
 
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('📌 제목 ⋯ ↗  ✕ ')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('📌 1 제목 ⋯ ↗  ✕ ')
   await ui.press({ key: 'todo-send-1' })
   expect(standIn.suggestions).toEqual([])
   expect(standIn.fills).toEqual([{ text: '제목\n\n맥락', mode: 'insert' }])
@@ -359,9 +359,9 @@ test('the last box has tabs: the contents, or the to-dos, the shown one bold and
   expect(await ui.find({ key: 'turn-t1' })).toBeUndefined()
   // In progress, waiting, done; the answer number only on what is taken up or done.
   expect(await rowKeys(ui)).toEqual(['todo-2', 'todo-1', 'todo-3'])
-  expect((await ui.find({ key: 'todo-2' }))?.text).toBe('⏳ 일 2 #3 ✕ ')
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('📌 일 1 ↗  ✕ ')
-  expect((await ui.find({ key: 'todo-3' }))?.text).toBe('✅ 일 3 #2 ✕ ')
+  expect((await ui.find({ key: 'todo-2' }))?.text).toBe('⏳ 2 일 2 #3 ✕ ')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('📌 1 일 1 ↗  ✕ ')
+  expect((await ui.find({ key: 'todo-3' }))?.text).toBe('✅ 3 일 3 #2 ✕ ')
   expect((await ui.find({ key: 'todo-clear-done' }))?.text).toBe('완료 1개 지우기')
   expect((await ui.find({ key: 'todo-input' }))?.type).toBe('Input')
   await ui.unmount()
@@ -444,7 +444,7 @@ test('a press on the sign cycles the status, ✕ deletes, "완료 N개 지우기
   expect(items(stored).find(one => one.id === 1)).toMatchObject({ status: 'in_progress' })
   // A press sets no answer number.
   expect(items(stored).find(one => one.id === 1)?.turn).toBeUndefined()
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 일 1 ✕ ')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 1 일 1 ✕ ')
   for (const status of ['done', 'on_hold', 'pending']) {
     await ui.press({ key: 'todo-status-1' })
     expect(items(stored).find(one => one.id === 1)?.status).toBe(status)
@@ -482,7 +482,7 @@ test('↗ offers a waiting item in the prompt box; sent as offered, that answer 
   // Sent as offered, spaces around aside: in progress, and this answer's number.
   await $.turn.start({ text: '  인증 버그 고치기\n', turnId: 't2' })
   expect(items(stored).find(one => one.id === 1)).toMatchObject({ status: 'in_progress', turn: 2, turnSession: 'session-1' })
-  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 인증 버그 고치기 #2 ✕ ')
+  expect((await ui.find({ key: 'todo-1' }))?.text).toBe('⏳ 1 인증 버그 고치기 #2 ✕ ')
   await $.turn.complete({ answer: '', isAborted: false, reason: 'answer', turnId: 't2', durationMs: 1000 })
 
   // Edited before it was sent: the offer is forgotten, and a later question of the same text takes nothing.
