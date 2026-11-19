@@ -44,7 +44,7 @@ test("a session's name is its transcript's custom-title row; another row, or non
   expect(titleIn('')).toBeUndefined()
 })
 
-test("the status box ends with the session's name and short id; with no name, the id alone; with no registry entry, a press copies the whole id", async ($, on) => {
+test("with no registry entry, the status box ends with the session's /rename name, or with none its short id; a press copies the whole id", async ($, on) => {
   const standIn = standInForEngine(on)
   mock.env(on, { HOME: '/home/me' })
   standIn.sessionId = '444027a3-234d-4c3c-8232-a7e561773f2d'
@@ -68,7 +68,7 @@ test("the status box ends with the session's name and short id; with no name, th
   standIn.sessionName = 'v0.4.0'
   await standIn.clock.advance(30_000)
   const named = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
-  expect((await named.find({ key: 'session' }))?.text).toBe('v0.4.0 · 444027a3')
+  expect((await named.find({ key: 'session' }))?.text).toBe('v0.4.0')
   await named.unmount()
 })
 
@@ -82,7 +82,7 @@ test("the session registry's entry for this session gives its peer name and star
   expect(startedText(NOW)).toMatch(/^\d\d-\d\d \d\d:\d\d$/)
 })
 
-test("with this session in the registry, the status box shows its peer name and a press copies the name and start", async ($, on) => {
+test("with this session in the registry, the status box shows its peer name and a press copies the name and start; a rename shows as that one name", async ($, on) => {
   const standIn = standInForEngine(on)
   mock.env(on, { HOME: '/home/me' })
   standIn.sessionId = '444027a3-234d-4c3c-8232-a7e561773f2d'
@@ -93,6 +93,7 @@ test("with this session in the registry, the status box shows its peer name and 
   }
   on('fs.list', (_, e) => (e.path === '/home/me/.claude/sessions' ? { value: ['111.json', '222.json', '222.key'].map(name => ({ name, kind: 'file' as const, size: 10, mtimeMs: 0, isLink: false })) } : { deny: 'no folder' }))
   on('fs.read', (_, e) => (registry[e.path] === undefined ? { deny: 'no file' } : { value: registry[e.path] as never }))
+  on('command.run', { command: 'rename' }, () => ({ text: 'Session renamed' }))
   const copied: string[] = []
   on('ui.copy', (_, e) => {
     copied.push(e.text)
@@ -107,6 +108,17 @@ test("with this session in the registry, the status box shows its peer name and 
   expect(copied).toEqual([`hubblerc-1b (${startedText(NOW - 3_600_000)} 시작)`])
   expect(JSON.stringify(standIn.toasts.at(-1))).toContain('메시지용 세션 이름을 복사했습니다')
   await ui.unmount()
+
+  // A rename renames the registry's entry too: shown at once, and read again a second on.
+  registry['/home/me/.claude/sessions/222.json'] = JSON.stringify({ pid: 222, sessionId: standIn.sessionId, startedAt: NOW - 3_600_000, name: 'test', nameSource: 'user' })
+  await $.command.run({ ...COMMAND, command: 'rename', args: 'test' })
+  const atOnce = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await atOnce.find({ key: 'session' }))?.text).toBe('test')
+  await atOnce.unmount()
+  await standIn.clock.advance(1000)
+  const renamed = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await renamed.find({ key: 'session' }))?.text).toBe('test')
+  await renamed.unmount()
 })
 
 test('a read of the machine that failed at the start is made again, and the chip, memory and OS come back', async ($, on) => {
@@ -211,11 +223,11 @@ test('/rename shows its name at once; with none given, the name the engine chose
 
   await $.command.run({ ...COMMAND, command: 'rename', args: ' 작업 이름 ' })
   // No sidebar shown, no clock moved: the name came from the command itself.
-  expect(await line()).toBe('작업 이름 · 444027a3')
+  expect(await line()).toBe('작업 이름')
 
   standIn.sessionName = 'fix-sidebar-height'
   await $.command.run({ ...COMMAND, command: 'rename' })
-  expect(await line()).toBe('작업 이름 · 444027a3')
+  expect(await line()).toBe('작업 이름')
   await standIn.clock.advance(1000)
-  expect(await line()).toBe('fix-sidebar-height · 444027a3')
+  expect(await line()).toBe('fix-sidebar-height')
 })

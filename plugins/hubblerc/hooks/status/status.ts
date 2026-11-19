@@ -13,7 +13,7 @@ import { isSidebarShown } from '../shared/pane'
 import { isRecord } from '../shared/values'
 import { refreshTodos } from '../todo/todo'
 import { refreshLikelyStatus } from '../likely/likely'
-import { forgetPeerEntry, refreshPeerName } from './peer'
+import { forgetPeerEntry, notePeerRename, refreshPeerName } from './peer'
 
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
 const agents = atom({ plugin: 'hubblerc', key: 'agents' } as const, [])
@@ -149,8 +149,8 @@ export async function startStatus($: EngineInterface): Promise<void> {
         if (!hasLookedForModelLimits) void refreshModelLimits($).catch(() => undefined)
         // What another session asked shows here within the half minute: the store is read, the endpoint is not asked.
         else await takeSharedModelLimits($).then(() => showModelLimits($)).catch(() => undefined)
-        await refreshSessionName($).catch(() => undefined)
-        await refreshPeerName($).catch(() => undefined)
+        // The registry's name follows a rename: the transcript is read (a process) only while it is unread.
+        if ((await refreshPeerName($).catch(() => undefined)) === undefined) await refreshSessionName($).catch(() => undefined)
         // Another session's to-dos (the same project) show within the half minute.
         await refreshTodos($).catch(() => undefined)
         // Another session's decisions, and a new day's count, show within the half minute.
@@ -538,18 +538,16 @@ const RENAME_READS_MS = [1000, 3000]
  */
 export async function noteRename($: EngineInterface, args: string): Promise<void> {
   const name = args.trim()
-  if (name !== '') {
-    await update($, sessionName, () => name)
-
-    return
-  }
+  // A rename gives the registry's name too (`nameSource: "user"`): read again either way.
   for (const ms of RENAME_READS_MS) {
     $.clock.after(ms, () => {
-      void refreshSessionName($).catch(() => undefined)
-      // The registry's name may follow a rename [추정]: read it again too.
+      if (name === '') void refreshSessionName($).catch(() => undefined)
       void refreshPeerName($).catch(() => undefined)
     })
   }
+  if (name === '') return
+  await update($, sessionName, () => name)
+  await notePeerRename($, name)
 }
 
 /**

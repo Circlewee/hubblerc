@@ -10,7 +10,7 @@ import type { Frame } from './frame'
 export type StatusDrawing = {
   /** The band's line 1 as the sidebar draws it, one part a line. */
   status: readonly Segment[][]
-  /** The session's id ('' none) and its name as `/rename` set it. */
+  /** The session's id ('' none) and its name as `/rename` set it (read from the transcript: shown only while the registry is unread). */
   id: string
   name: string | null
   /** What another session messages this one by (the session registry's name), null unread. */
@@ -25,7 +25,8 @@ export type StatusDrawing = {
 export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.Element {
   const { Box, Text, Button } = f.parts
   const { status, id, name, peer, request, likelyLine } = s
-  const label = peer === null ? id.slice(0, 8) : peer.name
+  // One name: the registry's (a rename sets it), else the `/rename` name read from the transcript, else the short id.
+  const label = peer?.name ?? name ?? id.slice(0, 8)
 
   return f.box(
     'status',
@@ -52,16 +53,9 @@ export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.E
         </Box>
       ))}
       {id === '' ? null : (
-        // The session: its name as `/rename` set it (none, none shown), and the name another session
-        // messages it by (the short id until the registry is read). A press copies that name and the
+        // The session's one name: what another session messages it by. A press copies it with the
         // start: what another session's SendMessage finds it by (it does not find a session id).
         <Box key="session">
-          {name === null ? null : (
-            <Text key="session-name" wrap="truncate-end">
-              {clipCells(name, Math.max(1, f.inner - label.length - 3))}
-              <Text dimColor> · </Text>
-            </Text>
-          )}
           <Button
             key="session-id"
             plain
@@ -69,7 +63,9 @@ export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.E
               void copySession($, id, peer)
             }}
           >
-            <Text dimColor>{label}</Text>
+            <Text dimColor wrap="truncate-end">
+              {clipCells(label, Math.max(1, f.inner))}
+            </Text>
           </Button>
         </Box>
       )}

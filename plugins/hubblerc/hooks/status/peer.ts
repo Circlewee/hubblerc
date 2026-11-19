@@ -91,6 +91,11 @@ export async function refreshPeerName($: EngineInterface): Promise<PeerName | un
   return next
 }
 
+/** After `/rename <name>`: the registry's name becomes it (`nameSource: "user"`), shown at once; the read a second on confirms it. */
+export async function notePeerRename($: EngineInterface, name: string): Promise<void> {
+  await update($, peerName, known => (known === null ? null : { ...known, name }))
+}
+
 /** Forgets the registry file found (a new session in the same process reads it again). */
 export function forgetPeerEntry(): void {
   entryPath = undefined
