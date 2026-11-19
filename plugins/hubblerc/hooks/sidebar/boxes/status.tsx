@@ -63,7 +63,7 @@ export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.E
               void copySession($, id, peer)
             }}
           >
-            <Text dimColor wrap="truncate-end">
+            <Text dimColor={peer === null && name === null} wrap="truncate-end">
               {clipCells(label, Math.max(1, f.inner))}
             </Text>
           </Button>
