@@ -3,6 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { statusParts } from '../hooks/status/band-format'
 import { limitsLine } from '../hooks/effort/effort-log'
 import { titleIn, ultracodeIn } from '../hooks/status/status'
+import { peerCopyText, peerIn, startedText } from '../hooks/status/peer'
 import { NOW, standInForEngine, start } from './engine'
 
 const COMMAND = { args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 200 } }
@@ -43,7 +44,7 @@ test("a session's name is its transcript's custom-title row; another row, or non
   expect(titleIn('')).toBeUndefined()
 })
 
-test("the status box ends with the session's name and short id; with no name, the id alone; a press copies the whole id", async ($, on) => {
+test("the status box ends with the session's name and short id; with no name, the id alone; with no registry entry, a press copies the whole id", async ($, on) => {
   const standIn = standInForEngine(on)
   mock.env(on, { HOME: '/home/me' })
   standIn.sessionId = '444027a3-234d-4c3c-8232-a7e561773f2d'
@@ -69,6 +70,43 @@ test("the status box ends with the session's name and short id; with no name, th
   const named = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
   expect((await named.find({ key: 'session' }))?.text).toBe('v0.4.0 · 444027a3')
   await named.unmount()
+})
+
+test("the session registry's entry for this session gives its peer name and start; another session's, or a broken one, nothing", () => {
+  const entry = (sessionId: string, name: unknown) => JSON.stringify({ pid: 40395, sessionId, cwd: '/repo', startedAt: NOW - 60_000, name, nameSource: 'derived' })
+  expect(peerIn(entry('s-1', 'hubblerc-1b'), 's-1')).toEqual({ name: 'hubblerc-1b', startedAt: NOW - 60_000 })
+  expect(peerIn(entry('s-2', 'hubblerc-1b'), 's-1')).toBeUndefined()
+  expect(peerIn(entry('s-1', ''), 's-1')).toBeUndefined()
+  expect(peerIn('{', 's-1')).toBeUndefined()
+  expect(peerCopyText({ name: 'hubblerc-1b', startedAt: NOW })).toBe(`hubblerc-1b (${startedText(NOW)} 시작)`)
+  expect(startedText(NOW)).toMatch(/^\d\d-\d\d \d\d:\d\d$/)
+})
+
+test("with this session in the registry, the status box shows its peer name and a press copies the name and start", async ($, on) => {
+  const standIn = standInForEngine(on)
+  mock.env(on, { HOME: '/home/me' })
+  standIn.sessionId = '444027a3-234d-4c3c-8232-a7e561773f2d'
+  standIn.panes.push({ id: 'hubblerc', title: 'hubblerc', isShown: true, isFocused: false, isPlaced: true })
+  const registry: Record<string, string> = {
+    '/home/me/.claude/sessions/111.json': JSON.stringify({ pid: 111, sessionId: 'other', startedAt: NOW, name: 'resume-a3' }),
+    '/home/me/.claude/sessions/222.json': JSON.stringify({ pid: 222, sessionId: standIn.sessionId, startedAt: NOW - 3_600_000, name: 'hubblerc-1b' }),
+  }
+  on('fs.list', (_, e) => (e.path === '/home/me/.claude/sessions' ? { value: ['111.json', '222.json', '222.key'].map(name => ({ name, kind: 'file' as const, size: 10, mtimeMs: 0, isLink: false })) } : { deny: 'no folder' }))
+  on('fs.read', (_, e) => (registry[e.path] === undefined ? { deny: 'no file' } : { value: registry[e.path] as never }))
+  const copied: string[] = []
+  on('ui.copy', (_, e) => {
+    copied.push(e.text)
+
+    return { value: { isCopied: true } as never }
+  })
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect((await ui.find({ key: 'session-id' }))?.text).toBe('hubblerc-1b')
+  await ui.press({ key: 'session-id' })
+  expect(copied).toEqual([`hubblerc-1b (${startedText(NOW - 3_600_000)} 시작)`])
+  expect(JSON.stringify(standIn.toasts.at(-1))).toContain('메시지용 세션 이름을 복사했습니다')
+  await ui.unmount()
 })
 
 test('a read of the machine that failed at the start is made again, and the chip, memory and OS come back', async ($, on) => {

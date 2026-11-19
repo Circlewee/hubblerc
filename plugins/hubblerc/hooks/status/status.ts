@@ -13,6 +13,7 @@ import { isSidebarShown } from '../shared/pane'
 import { isRecord } from '../shared/values'
 import { refreshTodos } from '../todo/todo'
 import { refreshLikelyStatus } from '../likely/likely'
+import { forgetPeerEntry, refreshPeerName } from './peer'
 
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
 const agents = atom({ plugin: 'hubblerc', key: 'agents' } as const, [])
@@ -122,6 +123,8 @@ export async function startStatus($: EngineInterface): Promise<void> {
     .catch(() => false)
   await refreshStatus($)
   await refreshSessionName($, true).catch(() => undefined)
+  forgetPeerEntry()
+  await refreshPeerName($).catch(() => undefined)
   await startUltracode($).catch(() => undefined)
 
   let lastSlow = await $.clock.now()
@@ -147,6 +150,7 @@ export async function startStatus($: EngineInterface): Promise<void> {
         // What another session asked shows here within the half minute: the store is read, the endpoint is not asked.
         else await takeSharedModelLimits($).then(() => showModelLimits($)).catch(() => undefined)
         await refreshSessionName($).catch(() => undefined)
+        await refreshPeerName($).catch(() => undefined)
         // Another session's to-dos (the same project) show within the half minute.
         await refreshTodos($).catch(() => undefined)
         // Another session's decisions, and a new day's count, show within the half minute.
@@ -542,6 +546,8 @@ export async function noteRename($: EngineInterface, args: string): Promise<void
   for (const ms of RENAME_READS_MS) {
     $.clock.after(ms, () => {
       void refreshSessionName($).catch(() => undefined)
+      // The registry's name may follow a rename [추정]: read it again too.
+      void refreshPeerName($).catch(() => undefined)
     })
   }
 }

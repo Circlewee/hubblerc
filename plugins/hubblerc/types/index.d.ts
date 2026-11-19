@@ -285,6 +285,8 @@ declare module 'claude-code' {
       restartPending: boolean
       /** The session's name as `/rename` set it (its transcript's last `custom-title` row); null when it has none. */
       sessionName: string | null
+      /** What another session's SendMessage addresses this one by and when it started, from Claude Code's session registry (`hooks/status/peer.ts`); null until read. */
+      peerName: { name: string; startedAt: number } | null
       /** The tab the sidebar's last box shows: the contents or the person's to-dos; kept across sessions in `$.store`. */
       sidebarTab: 'contents' | 'todo'
       /**

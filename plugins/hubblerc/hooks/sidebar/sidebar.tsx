@@ -53,6 +53,7 @@ const restartPending = atom({ plugin: 'hubblerc', key: 'restartPending' } as con
 const lastRequest = atom({ plugin: 'hubblerc', key: 'lastRequest' } as const, null)
 const sessionId = atom({ plugin: 'hubblerc', key: 'sessionId' } as const, '')
 const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, null)
+const peerName = atom({ plugin: 'hubblerc', key: 'peerName' } as const, null)
 const sidebarTab = atom({ plugin: 'hubblerc', key: 'sidebarTab' } as const, 'contents')
 const userTodoVersion = atom({ plugin: 'hubblerc', key: 'userTodoVersion' } as const, 0)
 const likelyStatus = atom({ plugin: 'hubblerc', key: 'likelyStatus' } as const, null)
@@ -242,6 +243,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     // Read so the pictures, once loaded, redraw the cat.
     await read($, catImageCount)
     const isUltracode = await read($, ultracode)
+    const peer = await read($, peerName)
     // likely's spend, one line when an API key is set (`hooks/likely/`).
     const decisions = await read($, likelyStatus)
     const likelyLine = decisions === null ? '' : statusLine(decisions)
@@ -380,7 +382,7 @@ export function showSidebar(on: On, layout: Layout, autoByDefault: boolean): voi
     return (
       <Box flexDirection="column">
         {deviceBox($, f, { info: deviceInfo, lines, note, picture, pictureColumns, Image, mood, mark: catMark(mood), isRestartPending })}
-        {statusBox($, f, { status, id, name, request, likelyLine })}
+        {statusBox($, f, { status, id, name, peer, request, likelyLine })}
         {relay.length === 0 ? null : relayBox(f, relay)}
         {files.length === 0 ? null : filesBox(f, { shown: shownFiles, isExpanded: isFilesExpanded, isCut, onExpand: expandFiles, onCollapse: () => void update($, filesExpanded, () => false) })}
         {f.openBox('contents', tabs, lastBody, Input === undefined || shownTab !== 'todo' ? undefined : todoField($, { Input, edited, rows: fieldRows, columns: width }))}

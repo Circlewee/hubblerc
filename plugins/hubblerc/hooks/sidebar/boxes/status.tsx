@@ -2,6 +2,8 @@ import type { EngineInterface } from 'claude-code'
 
 import { EFFORT_KEY_ACTION, togglePicker } from '../../effort/effort-picker'
 import type { Segment } from '../../shared/style'
+import { peerCopyText, refreshPeerName } from '../../status/peer'
+import type { PeerName } from '../../status/peer'
 import { clipCells } from '../sidebar-format'
 import type { Frame } from './frame'
 
@@ -11,6 +13,8 @@ export type StatusDrawing = {
   /** The session's id ('' none) and its name as `/rename` set it. */
   id: string
   name: string | null
+  /** What another session messages this one by (the session registry's name), null unread. */
+  peer: PeerName | null
   /** When the last request went out and what it carried. */
   request: readonly Segment[]
   /** likely's spend, '' with no API key. */
@@ -20,7 +24,8 @@ export type StatusDrawing = {
 /** The band's status, one item a line; the session; the last request; likely's spend. `$` only on a press. */
 export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.Element {
   const { Box, Text, Button } = f.parts
-  const { status, id, name, request, likelyLine } = s
+  const { status, id, name, peer, request, likelyLine } = s
+  const label = peer === null ? id.slice(0, 8) : peer.name
 
   return f.box(
     'status',
@@ -47,12 +52,13 @@ export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.E
         </Box>
       ))}
       {id === '' ? null : (
-        // The session: its name as `/rename` set it (none, none shown), and its short id, a press
-        // that copies the whole id (what `claude --resume` takes).
+        // The session: its name as `/rename` set it (none, none shown), and the name another session
+        // messages it by (the short id until the registry is read). A press copies that name and the
+        // start: what another session's SendMessage finds it by (it does not find a session id).
         <Box key="session">
           {name === null ? null : (
             <Text key="session-name" wrap="truncate-end">
-              {clipCells(name, Math.max(1, f.inner - 11))}
+              {clipCells(name, Math.max(1, f.inner - label.length - 3))}
               <Text dimColor> · </Text>
             </Text>
           )}
@@ -60,10 +66,10 @@ export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.E
             key="session-id"
             plain
             onPress={() => {
-              void $.ui.copy({ text: id }).then(copied => $.ui.toast(copied.isCopied ? `세션 id를 복사했습니다: ${id}` : `세션 id를 복사하지 못했습니다: ${copied.reason ?? ''}`))
+              void copySession($, id, peer)
             }}
           >
-            <Text dimColor>{id.slice(0, 8)}</Text>
+            <Text dimColor>{label}</Text>
           </Button>
         </Box>
       )}
@@ -75,4 +81,13 @@ export function statusBox($: EngineInterface, f: Frame, s: StatusDrawing): JSX.E
       )}
     </Box>,
   )
+}
+
+/** Copies what another session messages this one by, read again at the press; the session id when the registry has none. */
+async function copySession($: EngineInterface, id: string, known: PeerName | null): Promise<void> {
+  const peer = (await refreshPeerName($).catch(() => undefined)) ?? known ?? undefined
+  const copyText = peer === undefined ? id : peerCopyText(peer)
+  const what = peer === undefined ? '세션 id를' : '메시지용 세션 이름을'
+  const copied = await $.ui.copy({ text: copyText })
+  $.ui.toast(copied.isCopied ? `${what} 복사했습니다: ${copyText}` : `${what} 복사하지 못했습니다: ${copied.reason ?? ''}`)
 }
