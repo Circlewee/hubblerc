@@ -63,11 +63,22 @@ test('line 1 drops 7d, then the project name, then the bars, to fit a narrow ban
   }
   const text = (columns: number) => statusParts(input, columns).map(part => part.map(s => s.text).join('')).join(' │ ')
 
-  expect(text(200)).toBe('Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻1h30m │ 7d 12% │ hubblerc main*')
-  expect(text(80)).toBe('Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻1h30m │ hubblerc main*')
-  expect(text(70)).toBe('Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻1h30m │ main*')
+  expect(text(200)).toBe('Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻ 1h 30m │ 7d 12% │ hubblerc main*')
+  expect(text(80)).toBe('Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻ 1h 30m │ hubblerc main*')
+  expect(text(70)).toBe('Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻ 1h 30m │ main*')
+  // Short of room even with no bars: the reset written close (`↻1h30m`) rather than the line cut.
+  expect(text(52)).toBe('Opus 5.5 · xhigh │ ctx 45% │ 5h 25% ↻ 1h 30m │ main*')
   expect(text(50)).toBe('Opus 5.5 · xhigh │ ctx 45% │ 5h 25% ↻1h30m │ main*')
   expect(partsWidth(statusParts(input, 50))).toBeLessThanOrEqual(50)
+
+  // With the session's name and 7d's reset: the name goes first, then the reset, then 7d.
+  const full = { ...input, session: 'hubblerc-1b', usage: { ...input.usage, sevenDay: { percent: 12, resetsAt: new Date(NOW + (3 * 24 + 4) * 3_600_000).toISOString() } } }
+  const fullText = (columns: number) => statusParts(full, columns).map(part => part.map(s => s.text).join('')).join(' │ ')
+  const all = 'Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻ 1h 30m │ 7d 12% ↻ 3d 4h │ hubblerc main* │ hubblerc-1b'
+  expect(fullText(200)).toBe(all)
+  expect(fullText(all.length - 1)).toBe('Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻ 1h 30m │ 7d 12% ↻ 3d 4h │ hubblerc main*')
+  expect(fullText(all.length - 15)).toBe('Opus 5.5 · xhigh │ ctx ━━━━──── 45% │ 5h ━━────── 25% ↻ 1h 30m │ 7d 12% │ hubblerc main*')
+  expect(statusParts(full, 200).at(-1)).toEqual([{ text: 'hubblerc-1b', role: 'session' }])
 })
 
 test('line 1 marks a usage percent that runs high, and an effort chosen for the session', () => {
@@ -167,10 +178,10 @@ test('in the sidebar every bar starts in one column, 7d has one too, and they st
   // Narrow, what is left after the longest line's tail; eight at least.
   expect(lines(30)[0]).toBe(`ctx ${'━'.repeat(5)}${'╌'.repeat(7)}  45%`)
   expect(lines(10)[2]).toBe(`7d  ━${'╌'.repeat(7)}  12% ↻ 3d 4h`)
-  // The band keeps its short bars, and 7d none.
+  // The band keeps its short bars, and 7d none; 7d says its reset there too (2026-11-19).
   const band = statusParts(input, 200).map(part => part.map(segment => segment.text).join(''))
   expect(band[1]).toBe('ctx ━━━━──── 45%')
-  expect(band[3]).toBe('7d 12%')
+  expect(band[3]).toBe('7d 12% ↻ 3d 4h')
 })
 
 test('in the sidebar a reading takes one of five steps, its number always coloured, bold from 70%, with a ! from 95%', () => {

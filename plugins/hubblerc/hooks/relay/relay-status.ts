@@ -287,3 +287,37 @@ export function statusText(status: RelayStatus, palette: Palette, finishedLast?:
 
   return [`진행 중인 relay run ${status.runs.length}개:`, ...blocks, ...lightBlock].join('\n\n')
 }
+
+/** The order the band counts statuses in: what wants a look first. */
+const BAND_ORDER = ['running', 'launching', 'blocked', 'needs_context', 'done_with_concerns', 'ready', 'done', 'cancelled']
+
+function countSegments(tasks: readonly RelayTaskLine[], palette: Palette): Segment[] {
+  return BAND_ORDER.flatMap(status => {
+    const of = tasks.filter(task => task.status === status)
+    if (of.length === 0) return []
+    const color = statusColor(of[0]!, palette)
+
+    return [{ text: ' ' }, { text: `${BOX_STATUS_WORDS[status] ?? statusWord(status)} ${of.length}`, ...(color === undefined ? { dim: true } : { color }) }]
+  })
+}
+
+/**
+ * The band's one line for relay (it has no room for the box): the light delegations and each run
+ * not finished, each with its tasks counted by status and, for a run, the decisions waiting.
+ * Empty with neither.
+ */
+export function relayBandLine(status: RelayStatus | null, palette: Palette): Segment[] {
+  const light = status?.light ?? []
+  const runs = status?.runs ?? []
+  const groups: Segment[][] = [
+    ...(light.length === 0 ? [] : [[{ text: 'light', bold: true }, ...countSegments(light, palette)]]),
+    ...runs.map(run => [
+      { text: run.run, bold: true },
+      ...(run.tasks.length === 0 ? [{ text: ' task 없음', dim: true }] : countSegments(run.tasks, palette)),
+      ...(run.pending !== null && run.pending > 0 ? [SEPARATOR, { text: `결정 ${run.pending}`, color: palette.warn }] : []),
+    ]),
+  ]
+  if (groups.length === 0) return []
+
+  return [{ text: 'relay  ', dim: true }, ...groups.flatMap((group, i) => (i === 0 ? group : [{ text: ' │ ', dim: true }, ...group]))]
+}

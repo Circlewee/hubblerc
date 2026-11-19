@@ -11,6 +11,8 @@ import { isAppSurface } from '../shared/pane'
 import { burnoutMinutes, requestTime } from './forecast'
 import { syncSidebar } from '../sidebar/sidebar'
 import type { Layout } from '../sidebar/sidebar'
+import { relayBandLine } from '../relay/relay-status'
+import { copySessionName, sessionLabel } from './peer'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const running = atom({ plugin: 'hubblerc', key: 'running' } as const, [])
@@ -29,13 +31,18 @@ const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
 const fiveHourLog = atom({ plugin: 'hubblerc', key: 'fiveHourLog' } as const, [])
 const lastRequestAt = atom({ plugin: 'hubblerc', key: 'lastRequestAt' } as const, null)
 const lastRequest = atom({ plugin: 'hubblerc', key: 'lastRequest' } as const, null)
+const sessionId = atom({ plugin: 'hubblerc', key: 'sessionId' } as const, '')
+const sessionName = atom({ plugin: 'hubblerc', key: 'sessionName' } as const, null)
+const peerName = atom({ plugin: 'hubblerc', key: 'peerName' } as const, null)
+const relayStatus = atom({ plugin: 'hubblerc', key: 'relayStatus' } as const, null)
 
 const LEVEL_LABELS: Record<EffortLevel, string> = { low: 'low', medium: 'med', high: 'high', xhigh: 'xhigh', max: 'max' }
 
 /**
  * The three lines above the prompt, in place of the claude-hud status line:
- * 1. model · effort │ context │ 5h and 7d limits (a burn-out chip when 5h runs out soon) │ project branch
+ * 1. model · effort │ context │ 5h and 7d limits with their resets (a burn-out chip when 5h runs out soon) │ project branch │ the session's name (a press copies it)
  * 2. what runs now, or that it waits
+ *    (relay's light delegations and runs not finished, counted on a line of their own, only while there are any)
  * 3. the last answer's summary and, while idle, how long since the last request; or the effort slider while it is open
  *
  * Colors only where something needs attention, by the terminal's own color names.
@@ -70,6 +77,11 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
         read($, lastRequest),
       ])
     const isUltracode = await read($, ultracode)
+    // What the sidebar shows besides (CLAUDE.md: the band carries the same): the session's name, relay.
+    const id = await read($, sessionId)
+    const peer = await read($, peerName)
+    const session = id === '' ? undefined : sessionLabel(id, await read($, sessionName), peer)
+    const relay = relayBandLine(await read($, relayStatus), COLORS)
     // Read so the timer's writes redraw elapsed times and countdowns.
     await read($, tick)
     const now = await $.clock.now()
@@ -79,7 +91,7 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
     const effort = override ?? (isAuto ? (pick === null ? null : (pick.level ?? '기준 없음')) : engine)
     const burnout = burnoutMinutes(log, figures?.fiveHour, now)
     const line1 = statusParts(
-      { model: modelId, effort, isOverridden: override !== null, isAuto, isUltracode, usage: figures, project: projectName, git: gitInfo, now, burnout },
+      { model: modelId, effort, isOverridden: override !== null, isAuto, isUltracode, usage: figures, project: projectName, git: gitInfo, now, burnout, ...(session === undefined ? {} : { session }) },
       e.props.bodyColumns,
     )
     const line2 = activityParts(runningList, agentList, e.props.isWorking, now).join(SEPARATOR)
@@ -167,6 +179,16 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
                 >
                   {segmentText(segment)}
                 </Button>
+              ) : segment.role === 'session' ? (
+                <Button
+                  key="band-session"
+                  plain
+                  onPress={() => {
+                    void copySessionName($, id, peer)
+                  }}
+                >
+                  {segmentText(segment)}
+                </Button>
               ) : (
                 segmentText(segment)
               ),
@@ -176,6 +198,11 @@ export function showBand(on: On, layout: Layout, autoByDefault: boolean): void {
         <Text wrap="truncate-end" {...(isIdle ? { dimColor: true } : { color: COLORS.running })}>
           {line2}
         </Text>
+        {relay.length === 0 ? null : (
+          <Text key="band-relay" wrap="truncate-end">
+            {relay.map(segment => segmentText(segment))}
+          </Text>
+        )}
         {pickerOpenedAt !== null ? (
           slider
         ) : (

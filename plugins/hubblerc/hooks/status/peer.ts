@@ -42,6 +42,20 @@ export function peerCopyText(peer: PeerName): string {
   return `${peer.name} (${startedText(peer.startedAt)} 시작)`
 }
 
+/** The session's one name as shown: the registry's (a rename sets it), else the `/rename` name, else the short id. */
+export function sessionLabel(id: string, name: string | null, peer: PeerName | null): string {
+  return peer?.name ?? name ?? id.slice(0, 8)
+}
+
+/** Copies what another session messages this one by, read again at the press; the session id when the registry has none. */
+export async function copySessionName($: EngineInterface, id: string, known: PeerName | null): Promise<void> {
+  const peer = (await refreshPeerName($).catch(() => undefined)) ?? known ?? undefined
+  const copyText = peer === undefined ? id : peerCopyText(peer)
+  const what = peer === undefined ? '세션 id를' : '메시지용 세션 이름을'
+  const copied = await $.ui.copy({ text: copyText })
+  $.ui.toast(copied.isCopied ? `${what} 복사했습니다: ${copyText}` : `${what} 복사하지 못했습니다: ${copied.reason ?? ''}`)
+}
+
 /** The registry file found to be this session's: read alone after the first scan. */
 let entryPath: string | undefined
 

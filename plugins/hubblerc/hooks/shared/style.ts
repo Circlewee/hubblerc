@@ -2,14 +2,15 @@
 
 /**
  * A run of text in one style. `role` marks what the band draws its own way: a bar's filled and
- * empty cells, and the effort value (a control that opens the effort slider).
+ * empty cells, the effort value (a control that opens the effort slider), and the session's name
+ * (a press copies what another session messages it by).
  */
 export type Segment = {
   text: string
   color?: string
   dim?: boolean
   bold?: boolean
-  role?: 'barFilled' | 'barEmpty' | 'effort'
+  role?: 'barFilled' | 'barEmpty' | 'effort' | 'session'
 }
 
 /** What each colour means: the same roles on the band and in the sidebar, each drawn from its own palette. */

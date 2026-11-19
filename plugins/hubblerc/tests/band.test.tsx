@@ -1,6 +1,9 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
-import { standInForEngine, start } from './engine'
+import { relayBandLine } from '../hooks/relay/relay-status'
+import { startedText } from '../hooks/status/peer'
+import { COLORS } from '../hooks/shared/style'
+import { NOW, standInForEngine, start } from './engine'
 
 const SURFACES = ['terminal', 'desktop'] as const
 const BAND = { plugin: 'hubblerc', component: 'AbovePrompt', requestId: 'band' } as const
@@ -26,7 +29,7 @@ test('the band shows the model, effort, usage and branch, then idle, then no ans
     else expect(await ui.find({ key: 'effort' })).toBeUndefined()
     expect((await ui.find({ type: 'Text', text: 'xhigh' }))?.text).toBe('xhigh')
     expect(await ui.find({ type: 'Text', text: '45%' })).toBeDefined()
-    expect((await ui.find({ type: 'Text', text: /↻/ }))?.text).toBe(' ↻1h30m')
+    expect((await ui.find({ type: 'Text', text: /↻/ }))?.text).toBe(' ↻ 1h 30m')
     expect(await ui.find({ type: 'Text', text: '7d ' })).toBeDefined()
     expect((await ui.find({ type: 'Text', text: /main/ }))?.text).toBe('main')
     expect(await ui.find({ type: 'Text', text: '*' })).toBeDefined()
@@ -193,4 +196,40 @@ test('collapsed, the band draws nothing and reads no state; uncollapsed, it draw
   const shown = await $.ui.mount({ ...BAND, surface: 'terminal', props: BAND_PROPS })
   expect((await shown.find({ type: 'Text', text: /^Opus/ }))?.text).toBe('Opus 5.5')
   await shown.unmount()
+})
+
+test("the band ends line 1 with the session's name as the sidebar does, a press copying it; relay's light delegations get a line of their own", async ($, on) => {
+  const standIn = standInForEngine(on)
+  mock.env(on, { HOME: '/home/me' })
+  standIn.sessionId = '444027a3-234d-4c3c-8232-a7e561773f2d'
+  const entry = JSON.stringify({ pid: 222, sessionId: standIn.sessionId, startedAt: NOW - 3_600_000, name: 'hubblerc-1b' })
+  on('fs.list', (_, e) => (e.path === '/home/me/.claude/sessions' ? { value: [{ name: '222.json', kind: 'file' as const, size: 10, mtimeMs: 0, isLink: false }] } : { deny: 'no folder' }))
+  on('fs.read', (_, e) => (e.path === '/home/me/.claude/sessions/222.json' ? { value: entry as never } : { deny: 'no file' }))
+  const copied: string[] = []
+  on('ui.copy', (_, e) => {
+    copied.push(e.text)
+
+    return { value: { isCopied: true } as never }
+  })
+  await start($)
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND_PROPS, bodyColumns: 200 } })
+  expect((await ui.find({ key: 'band-session' }))?.text).toBe('hubblerc-1b')
+  await ui.press({ key: 'band-session' })
+  expect(copied).toEqual([`hubblerc-1b (${startedText(NOW - 3_600_000)} 시작)`])
+  expect(await ui.find({ type: 'Text', text: /^relay {2}/ })).toBeUndefined()
+
+  const spec = (await $.tool.call({ tool: 'mcp__hubblerc__relay', action: 'spec_text', id: 'T21', title: 'Fix the band', goal: 'Fix it.', model: 'claude-sonnet-5-5', effort: 'high', edit_scope: ['hooks/**'], done_when: [{ text: 'tests pass', command: 'make test' }], runner_kind: 'claude' } as never)) as { deny?: string }
+  expect(spec.deny).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /^relay {2}/ }))?.text).toBe('relay  light ready 1')
+  await ui.unmount()
+})
+
+test("the band's relay line counts each group's tasks by status, a run's waiting decisions too", () => {
+  const task = (status: string) => ({ key: 'A', id: 'A', rev: 1, title: 'A', status, model: 'm', effort: 'e', runner: '', dispatchedAt: null })
+  const text = (line: { text: string }[]) => line.map(segment => segment.text).join('')
+  expect(relayBandLine(null, COLORS)).toEqual([])
+  expect(relayBandLine({ runs: [] }, COLORS)).toEqual([])
+  const line = relayBandLine({ light: [task('done'), task('running'), task('done')], runs: [{ run: '2026-11-19-demo', tasks: [task('ready'), task('done_with_concerns')], pending: 2, verdict: null }] }, COLORS)
+  expect(text(line)).toBe('relay  light running 1 done 2 │ 2026-11-19-demo concerns 1 ready 1 · 결정 2')
 })

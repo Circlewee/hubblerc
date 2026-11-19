@@ -97,6 +97,8 @@ export type StatusInput = {
   usage: UsageSnapshot | null
   project: string
   git: GitInfo | null
+  /** The session's name, last on the line (the band; the sidebar has a line of its own for it). */
+  session?: string
   now: number
   /** Minutes until the 5-hour window runs out at the current pace, when that is soon (`burnoutMinutes`). */
   burnout?: number | null
@@ -122,15 +124,19 @@ const WIDE_PERCENT_CELLS = 5
 /** How a usage part is drawn: how many cells its bar takes (0, none), in what style, and (wide) the cells its label pads to. */
 type BarStyle = { cells: number; isWide: boolean; labelCells?: number }
 
-type StatusShape = { bars: boolean; sevenDay: boolean; projectName: boolean }
+/** `isClose`: the resets written close (`↻1h30m`), the last thing given up before the line is cut. */
+type StatusShape = { bars: boolean; sevenDay: boolean; sevenDayReset: boolean; projectName: boolean; session: boolean; isClose?: boolean }
 
 /** Line 1, as parts to join with SEPARATOR, made to fit `columns` by dropping the least needed first. */
 export function statusParts(input: StatusInput, columns: number): Segment[][] {
   const shapes: StatusShape[] = [
-    { bars: true, sevenDay: true, projectName: true },
-    { bars: true, sevenDay: false, projectName: true },
-    { bars: true, sevenDay: false, projectName: false },
-    { bars: false, sevenDay: false, projectName: false },
+    { bars: true, sevenDay: true, sevenDayReset: true, projectName: true, session: true },
+    { bars: true, sevenDay: true, sevenDayReset: true, projectName: true, session: false },
+    { bars: true, sevenDay: true, sevenDayReset: false, projectName: true, session: false },
+    { bars: true, sevenDay: false, sevenDayReset: false, projectName: true, session: false },
+    { bars: true, sevenDay: false, sevenDayReset: false, projectName: false, session: false },
+    { bars: false, sevenDay: false, sevenDayReset: false, projectName: false, session: false },
+    { bars: false, sevenDay: false, sevenDayReset: false, projectName: false, session: false, isClose: true },
   ]
   let parts: Segment[][] = []
   for (const shape of shapes) {
@@ -170,15 +176,16 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
       ? []
       : [{ text: input.isRoomy === true ? ` ⚠ ${input.burnout}m 뒤 소진` : ` ⚠${input.burnout}m`, color: (input.palette ?? COLORS).alert, bold: true }]
   const isWide = input.barColumns !== undefined
-  const fiveHourTail = [...resetSegments(fiveHour?.resetsAt, input.now, isWide), ...burnout]
+  // The reset as the sidebar says it, the band too (` ↻ 1h 30m`, 2026-11-19).
+  const fiveHourTail = [...resetSegments(fiveHour?.resetsAt, input.now, shape.isClose === true), ...burnout]
   const sevenDay = input.usage?.sevenDay
-  // Wide, 7d says when it resets too (`↻ 3d4h`).
-  const sevenDayTail = isWide ? resetSegments(sevenDay?.resetsAt, input.now, true) : []
+  // 7d says when it resets too (`↻ 3d 4h`); the band lets it go before 7d itself when short of room.
+  const sevenDayTail = isWide || shape.sevenDayReset ? resetSegments(sevenDay?.resetsAt, input.now) : []
   // Wide, a line for each weekly limit of a single model (Fable's) beneath 7d: one still running,
   // its reset said only when it is not 7d's.
   const modelLines = (isWide ? (input.usage?.modelLimits ?? []) : [])
     .filter(limit => limit.resetsAt === undefined || !(Date.parse(limit.resetsAt) <= input.now))
-    .map(limit => ({ limit, tail: resetsWith(limit.resetsAt, sevenDay?.resetsAt) ? [] : resetSegments(limit.resetsAt, input.now, true) }))
+    .map(limit => ({ limit, tail: resetsWith(limit.resetsAt, sevenDay?.resetsAt) ? [] : resetSegments(limit.resetsAt, input.now) }))
   // One width for every label and every bar: the longest name, and what the longest line leaves.
   const labelCells = Math.max(WIDE_LABEL_CELLS, ...modelLines.map(line => cellWidth(line.limit.name) + 1))
   const tail = Math.max(segmentsWidth(fiveHourTail), segmentsWidth(sevenDayTail), ...modelLines.map(line => segmentsWidth(line.tail)))
@@ -211,6 +218,7 @@ function buildStatus(input: StatusInput, shape: StatusShape): Segment[][] {
     if (input.git.isDirty) where.push({ text: '*', color: (input.palette ?? COLORS).dirty })
   }
   if (where.some(segment => segment.text.trim() !== '')) parts.push(where)
+  if (shape.session && input.session !== undefined && input.session !== '') parts.push([{ text: input.session, role: 'session' }])
 
   return parts
 }
@@ -238,11 +246,11 @@ function usagePart(name: string, percent: number, tail: readonly Segment[], bar:
   return part
 }
 
-/** ` ↻1h30m` (wide, ` ↻ 1h 30m`), dim; none when the reset is unknown or past. */
-function resetSegments(resetsAt: string | undefined, now: number, isWide = false): Segment[] {
-  const reset = countdown(resetsAt, now, isWide)
+/** ` ↻ 1h 30m`, dim, the band and the sidebar alike (`isClose`: ` ↻1h30m`, a band short of room); none when the reset is unknown or past. */
+function resetSegments(resetsAt: string | undefined, now: number, isClose = false): Segment[] {
+  const reset = countdown(resetsAt, now, !isClose)
 
-  return reset === '' ? [] : [{ text: isWide ? ` ↻ ${reset}` : ` ↻${reset}`, dim: true }]
+  return reset === '' ? [] : [{ text: isClose ? ` ↻${reset}` : ` ↻ ${reset}`, dim: true }]
 }
 
 /** Two resets under a minute apart: one window's, said once (a model's weekly limit resets with 7d). */
