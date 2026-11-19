@@ -112,7 +112,7 @@ const byName = (runs: readonly RelayRunStatus[]): RelayRunStatus[] => [...runs].
 export function withRun(current: RelayStatus | null, run: string, status: RelayRunStatus | undefined): RelayStatus {
   const others = (current?.runs ?? []).filter(other => other.run !== run)
 
-  return { runs: byName(status === undefined ? others : [...others, status]) }
+  return { ...current, runs: byName(status === undefined ? others : [...others, status]) }
 }
 
 /** After a save: the run's summary in the box, or out of it once finished or abandoned. */
@@ -123,7 +123,7 @@ export async function noteRun($: EngineInterface, state: RelayState, progress: s
 
 /** The whole list, as read at session.start or by `/relay-status`. */
 export async function setRuns($: EngineInterface, runs: readonly RelayRunStatus[]): Promise<void> {
-  await update($, relayStatus, () => ({ runs: byName(runs) }))
+  await update($, relayStatus, current => ({ ...current, runs: byName(runs) }))
 }
 
 // ── As shown ──────────────────────────────────────────────
@@ -248,34 +248,42 @@ function verdictSegments(verdict: RelayRunStatus['verdict'], palette: Palette): 
   return [{ text: `verdict ${verdict.id} `, dim: true }, { text: verdict.result, color: verdict.result === 'pass' ? palette.ok : palette.alert }, head]
 }
 
+/** The heading over the light delegations' tasks, where a run's name heads its own. */
+export const LIGHT_HEADER = 'light (spec_text)'
+
 /**
  * What the box draws (`width`: the cells a line has) and `/relay-status` writes (no width), one
  * line each: per run its name, its tasks, the decisions waiting and the last verdict.
  */
 export function relayLines(status: RelayStatus | null, palette: Palette, width?: number): Segment[][] {
   const runs = status?.runs ?? []
+  const light = status?.light ?? []
   // One column for every run in the box, so the statuses line up down the whole of it.
   const column = statusColumn(
-    runs.flatMap(run => run.tasks),
+    [...runs.flatMap(run => run.tasks), ...light],
     width !== undefined,
   )
+  // Light delegations: no run, so no decisions or verdict, only the tasks.
+  const lightLines: Segment[][] = light.length === 0 ? [] : [[{ text: LIGHT_HEADER, bold: true }], ...light.map(task => taskSegments(task, palette, column, width))]
 
-  return runs.flatMap(run => [
+  return [...lightLines, ...runs.flatMap(run => [
     [{ text: run.run, bold: true }],
     ...(run.tasks.length === 0 ? [[{ text: 'task 없음', dim: true }]] : run.tasks.map(task => taskSegments(task, palette, column, width))),
     pendingSegments(run.pending, palette),
     verdictSegments(run.verdict, palette),
-  ])
+  ])]
 }
 
 const lineText = (line: readonly Segment[]): string => line.map(segment => segment.text).join('')
 
 /** `/relay-status`'s text: the runs as the box shows them; with none, the run finished last (by its last verdict) if any. */
 export function statusText(status: RelayStatus, palette: Palette, finishedLast?: string): string {
+  const light = status.light ?? []
+  const lightBlock = light.length === 0 ? [] : [relayLines({ runs: [], light }, palette).map(lineText).join('\n')]
   if (status.runs.length === 0) {
-    return `진행 중인 relay run이 없습니다. ${finishedLast === undefined ? '이 저장소에 끝난 run도 없습니다.' : `가장 최근에 끝난 run: ${finishedLast}`}`
+    return [`진행 중인 relay run이 없습니다. ${finishedLast === undefined ? '이 저장소에 끝난 run도 없습니다.' : `가장 최근에 끝난 run: ${finishedLast}`}`, ...lightBlock].join('\n\n')
   }
   const blocks = status.runs.map(run => relayLines({ runs: [run] }, palette).map(lineText).join('\n'))
 
-  return [`진행 중인 relay run ${status.runs.length}개:`, ...blocks].join('\n\n')
+  return [`진행 중인 relay run ${status.runs.length}개:`, ...blocks, ...lightBlock].join('\n\n')
 }

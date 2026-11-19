@@ -25,6 +25,7 @@ import { findTurnForLine, summarize } from './activity/summary'
 import { holdEditFocus, serveTodoTool, startTodos, startTodoTurn } from './todo/todo'
 import { judgeTodoEnd, judgeTodoStart, startTodoJudge } from './todo/todo-judge'
 import { gateLaunches, unverifiedLine } from './relay/gate'
+import { noteLightAnswerEnd, noteLightTurnEnd } from './relay/relay-light'
 import { registerRelayTool, serveRelayTool } from './relay/relay'
 import { showRelayLines } from './relay/relay-view'
 import { showToolLines } from './activity/tool-lines'
@@ -111,6 +112,9 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined) noteAnswering(false)
     if (e.agentId === undefined) noteMainTurn(e.turnId, false)
     rememberAnswer(e)
+    // relay's light delegations: a subagent's end finishes its line, a main answer's end clears the finished ones.
+    if (e.agentId !== undefined) await noteLightTurnEnd($, e.agentId, e.reason).catch(() => undefined)
+    else await noteLightAnswerEnd($).catch(() => undefined)
     const done = await next(e)
     if (e.agentId === undefined) {
       void noteTurnDone($, e.turnId).catch(() => undefined)

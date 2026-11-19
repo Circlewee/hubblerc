@@ -5,6 +5,7 @@ import type { On } from 'claude-code'
 import { localDate } from '../hooks/relay/relay-format'
 import type { RelayState, RelayTask, TaskStatus } from '../hooks/relay/relay-format'
 import { findTaskLine, relayLines, runStatus, statusText, taskName, withRun } from '../hooks/relay/relay-status'
+import { specIdsIn, withAnswerEnd, withSpec, withSpawn, withTurnEnd } from '../hooks/relay/relay-light'
 import { THEME_COLORS } from '../hooks/shared/style'
 import { cellWidth } from '../hooks/shared/text-width'
 import { NOW, standInForEngine, start } from './engine'
@@ -418,4 +419,62 @@ test('idle with a run under way, nothing under .relay is read: the box waits for
   await standIn.clock.advance(180_000)
   expect(seen.reads.filter(path => path.includes('.relay'))).toEqual([])
   expect(seen.lists.filter(path => path.includes('.relay'))).toEqual([])
+})
+
+// ── Light delegation (spec_text, no run) ──────────────────────────────────────────────
+
+const LIGHT_A = { id: 'T21', title: 'Fix the band', model: 'claude-sonnet-5-5', effort: 'high' }
+const LIGHT_B = { id: 'T22', title: 'Write the doc', model: 'claude-opus-5-5', effort: 'medium' }
+
+test('a light spec is ready, running once a subagent takes it, then done; finished lines go at the second answer end, or at a new spec when all are finished', () => {
+  const made = withSpec(withSpec([], LIGHT_A), LIGHT_B)
+  expect(made.map(line => [line.id, line.status])).toEqual([['T21', 'ready'], ['T22', 'ready']])
+  const running = withSpawn(made, 'T21', 'ag-1', NOW)
+  expect(running[0]).toMatchObject({ status: 'running', agentId: 'ag-1', runner: 'subagent', dispatchedAt: NOW })
+  const ended = withTurnEnd(withTurnEnd(running, 'ag-1', 'answer'), 'ag-other', 'answer')
+  expect(ended.map(line => line.status)).toEqual(['done', 'ready'])
+  expect(withTurnEnd(running, 'ag-1', 'aborted')[0]?.status).toBe('cancelled')
+  expect(withTurnEnd(running, 'ag-1', 'error')[0]?.status).toBe('blocked')
+  // The answer it finished in keeps it; the next one's end takes it out. A ready one stays.
+  const once = withAnswerEnd(ended)
+  expect(once.map(line => line.id)).toEqual(['T21', 'T22'])
+  expect(withAnswerEnd(once).map(line => line.id)).toEqual(['T22'])
+  // A new spec while one is still ready keeps the list; with all finished, it starts afresh.
+  expect(withSpec(ended, { ...LIGHT_A, id: 'T23' }).map(line => line.id)).toEqual(['T21', 'T22', 'T23'])
+  const allDone = withTurnEnd(withSpawn(withSpec([], LIGHT_A), 'T21', 'ag-1', NOW), 'ag-1', 'answer')
+  expect(withSpec(allDone, LIGHT_B).map(line => line.id)).toEqual(['T22'])
+})
+
+test('a light spec is found in a prompt by its head line; a run spec’s key or another prompt names none', () => {
+  expect(specIdsIn('/tmp/x\n# Task T21: Fix the band\n\n- Base: abc')).toEqual(['T21'])
+  expect(specIdsIn('# Task T21-r1: Fix the band')).toEqual([])
+  expect(specIdsIn('Look at the Task T21: please')).toEqual([])
+})
+
+test('a light delegation shows in the relay box with no run: ready at spec_text, running at the spawn, done at its end, gone at the second answer end', async ($, on) => {
+  const standIn = standInForEngine(on)
+  disk(on, standIn)
+  on('agent.spawn', (_, e) => ({ model: e.model ?? 'inherited', agentId: 'ag-light-1' }))
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PANE_PROPS })
+  expect(await boxLines(ui)).toBeUndefined()
+
+  const spec = await relay($, { action: 'spec_text', ...LIGHT_A, goal: 'Fix it.', edit_scope: ['hooks/status/**'], done_when: [{ text: 'tests pass', command: 'make test' }], runner_kind: 'claude' })
+  expect(spec.deny).toBeUndefined()
+  expect(await boxLines(ui)).toEqual(['light (spec_text)', 'ready  Fix the band                     sonnet/high'])
+
+  const started = (await $.agent.spawn({ tool_use_id: 'toolu_l1', prompt: `spec\n${spec.result ?? ''}`, description: 'T21', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', model: 'sonnet' } as never)) as { agentId?: string }
+  expect(started.agentId).toBe('ag-light-1')
+  expect((await boxLines(ui))?.[1]).toBe(`running  Fix the band           sonnet/high · ${hhmm(NOW)}`)
+
+  await $.turn.complete({ answer: 'DONE', isAborted: false, reason: 'answer', turnId: 'tw', durationMs: 10, agentId: 'ag-light-1' })
+  expect((await boxLines(ui))?.[1]).toMatch(/^done  +Fix the band/)
+  expect(await relayStatus($)).toContain('light (spec_text)\ndone  Fix the band · sonnet-5-5/high · subagent')
+
+  await $.turn.complete({ answer: '보고', isAborted: false, reason: 'answer', turnId: 'm1', durationMs: 10 })
+  expect((await boxLines(ui))?.[1]).toMatch(/^done/)
+  await $.turn.complete({ answer: '다음', isAborted: false, reason: 'answer', turnId: 'm2', durationMs: 10 })
+  expect(await boxLines(ui)).toBeUndefined()
+  await ui.unmount()
 })

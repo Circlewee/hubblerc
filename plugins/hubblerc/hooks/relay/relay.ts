@@ -51,6 +51,7 @@ import {
 } from './relay-format'
 import type { BriefInput, CheckOutcome, Criterion, FileChange, RelayPackage, RelayState, RelayTask, RunnerKind, TaskStatus } from './relay-format'
 import { noteRun, runStatus, setRuns, statusText } from './relay-status'
+import { lightLines, noteLightSpec } from './relay-light'
 import type { RelayRunStatus } from '../../types'
 import { THEME_COLORS } from '../shared/style'
 
@@ -165,7 +166,9 @@ export async function relayStatusText($: EngineInterface): Promise<string> {
   const when = (state: RelayState) => state.verdicts.at(-1)?.at ?? state.createdAt
   const last = runs.filter(found => found.state.status === 'finished').reduce<ActiveRun | undefined>((latest, found) => (latest === undefined || when(found.state) > when(latest.state) ? found : latest), undefined)
 
-  return statusText({ runs: shown }, THEME_COLORS, last?.run)
+  const light = await lightLines($).catch(() => [])
+
+  return statusText({ runs: shown, ...(light.length === 0 ? {} : { light }) }, THEME_COLORS, last?.run)
 }
 
 export function serveRelayTool(on: On): void {
@@ -662,6 +665,8 @@ async function specTextAction($: EngineInterface, input: Record<string, unknown>
   const root = await repoRoot($)
   const base = (root === undefined ? undefined : await headSha($, root)) ?? 'unknown'
   const lead = await $.session.id().catch(() => '')
+  // The sidebar's relay box shows it from here: ready, then running once a subagent takes it.
+  await noteLightSpec($, brief).catch(() => undefined)
 
   return { result: briefText(brief, { kind: 'light', base, lead }) }
 }

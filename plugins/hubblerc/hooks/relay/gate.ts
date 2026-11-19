@@ -6,6 +6,7 @@ import { findActiveRuns, repoRoot, reserveDispatch, sha256 } from './relay'
 import type { ActiveRun } from './relay'
 import { isBusy, sameCommit, taskKey } from './relay-format'
 import type { RelayTask } from './relay-format'
+import { lightSpecOf, noteLightResume, noteLightSpawn } from './relay-light'
 
 /**
  * relay's gates, as hooks. Gate 1 looks at a worker about to start or to be sent a brief (`orca
@@ -371,6 +372,24 @@ async function resumeOf<R extends { deny?: string }>(going: Sending, agentId: st
   }
 }
 
+/**
+ * A spawn outside any run: a light spec's (spec_text) start, or a light worker resumed by a
+ * SendMessage, moves its line in the sidebar's relay box. Nothing is checked or refused here.
+ */
+async function spawnLight<R>($: EngineInterface, e: AgentSpawnInput, next: (e: AgentSpawnInput) => Promise<R>): Promise<R> {
+  const resumed = e.resume?.agentId
+  const id = resumed === undefined ? await lightSpecOf($, e.prompt).catch(() => undefined) : undefined
+  const started = await next(e)
+  if (resumed !== undefined) {
+    if (failureOf(started) === undefined) await noteLightResume($, resumed).catch(() => undefined)
+  } else if (id !== undefined && failureOf(started) === undefined) {
+    const agentId = recordOf(started)?.agentId
+    if (typeof agentId === 'string' && agentId !== '') await noteLightSpawn($, id, agentId).catch(() => undefined)
+  }
+
+  return started
+}
+
 /** Notes for subagents started, by the Agent call that started them: the spawn cannot carry one, its tool result can. */
 const spawnNotes = new Map<string, string>()
 const MAX_NOTES = 20
@@ -575,7 +594,7 @@ export function gateLaunches(on: On): void {
     // The resume a SendMessage of a claimed brief caused: that send was checked and holds the claim.
     const going = await sendOf($, e)
     if (going !== undefined && e.resume !== undefined) return resumeOf(going, e.resume.agentId, () => next(e))
-    if (!e.prompt.includes('.relay/runs/')) return next(e)
+    if (!e.prompt.includes('.relay/runs/')) return spawnLight($, e, next)
     const plan = await planSpawn($, e.prompt, e.model)
     if ('deny' in plan) return { deny: plan.deny }
     if (plan.hold === undefined) return next(e)

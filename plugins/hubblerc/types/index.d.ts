@@ -228,8 +228,17 @@ export type RelayRunStatus = {
   verdict: { id: string; result: 'pass' | 'fail'; commit: string; head?: string } | null
 }
 
-/** The relay runs of the session's repository not finished, by name: refreshed as a run's state is saved and at session.start. */
-export type RelayStatus = { runs: RelayRunStatus[] }
+/**
+ * A task of a light delegation (`spec_text`, no run): the task line, the subagent that took it, and
+ * whether a main answer has ended since it finished (the next one's end takes it out).
+ */
+export type RelayLightLine = RelayTaskLine & { agentId?: string; isAnswerEnded?: true }
+
+/**
+ * The relay runs of the session's repository not finished, by name: refreshed as a run's state is
+ * saved and at session.start. `light`: this session's light delegations, kept in state alone.
+ */
+export type RelayStatus = { runs: RelayRunStatus[]; light?: RelayLightLine[] }
 
 declare module 'claude-code' {
   interface PluginState {

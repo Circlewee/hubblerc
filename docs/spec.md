@@ -264,8 +264,9 @@ Run: 2026-11-07-todo    (relay 워커만: brief의 커밋 명령이 붙임)
 
 **화면**
 - 대화: relay 호출·결과를 한 줄로(`relay-view.tsx`). 호출 줄은 작업 키 대신 제목, 결과 줄은 `↳`. 결과 줄은 도구 결과 글의 첫 줄 문구를 읽어 만드므로 `relay.ts`의 문구를 바꾸면 `tests/relay.test.tsx`가 깨진다. 펼친 보기는 엔진 기본.
-- 사이드바 relay 상자: 안 끝난 run이 있을 때만. 작업마다 `<상태>  <제목>  rN · 모델/effort · 시각`(좁으면 시각 → 모델 → revision 순으로 뺌), 사용자 답을 기다리는 결정 수, 마지막 verdict(`= HEAD` / `≠ HEAD`). 상태 말은 ready·launching·running·done·`done (concerns)`·`needs context`·blocked·`blocked (live)`·cancelled이고, 상자에서만 긴 셋을 `concerns`·`needs ctx`·`blocked!`로 줄인다. 렌더는 상태 `relayStatus`만 읽는다(파일 읽기 0 [확인: 테스트 키트]).
+- 사이드바 relay 상자: 안 끝난 run이 있거나 이 세션의 가벼운 위임이 있을 때만. 작업마다 `<상태>  <제목>  rN · 모델/effort · 시각`(좁으면 시각 → 모델 → revision 순으로 뺌), 사용자 답을 기다리는 결정 수, 마지막 verdict(`= HEAD` / `≠ HEAD`). 상태 말은 ready·launching·running·done·`done (concerns)`·`needs context`·blocked·`blocked (live)`·cancelled이고, 상자에서만 긴 셋을 `concerns`·`needs ctx`·`blocked!`로 줄인다. 렌더는 상태 `relayStatus`만 읽는다(파일 읽기 0 [확인: 테스트 키트]).
 - 용어(2026-11-17): 도구 결과·상자 문구에서 relay의 작업 단위는 `task`, git 작업 트리는 이름을 쓰지 않고 검사하는 것 자체로 적는다(`git status: 깨끗함`, `커밋하지 않은 변경: …`). 전에는 둘 다 "작업"이라 한 거절 글 안에 "끝나지 않은 작업"과 "작업 트리에 …"가 섞였고, `working tree`로 바꿔 보니 Orca의 worktree와 헷갈렸다. 세션 폴더를 뜻하는 "작업 폴더"는 그대로. 도구 인자·기록 형식은 원래 `task`라 바뀌지 않았다.
+- 가벼운 위임(2026-11-19): spec_text로 만든 task는 run·state.json이 없어 전에는 상자에 아무것도 안 보였다(11-17 할 일 21·22를 돌릴 때 사용자가 물음). 이제 상자 맨 위 `light (spec_text)` 아래에 run의 task 줄과 같은 모양으로 보인다(`hooks/relay/relay-light.ts`). 상태는 `relayStatus.light`에만 두고 파일로 쓰지 않는다: 다른 세션이 이어받지 않는 길이라 세션 안에서만 보이면 된다. 바뀌는 때는 모두 이미 받던 이벤트다: spec_text → ready, 그 명세의 머리 줄(`# Task <id>: …`)을 담은 서브에이전트 생성(`agent.spawn`, run 경로가 없는 프롬프트) → running, 그 서브에이전트의 `turn.complete` → done(중단 cancelled, 오류·거절 blocked), SendMessage가 그 서브에이전트를 이어 받으면 다시 running. 끝난 줄은 끝난 그 답변 동안 남고 다음 메인 답변이 끝날 때 지운다. 새 spec_text 때 모두 끝나 있으면 목록을 새로 시작한다. 6줄까지. gate 검사(모델·명세 바뀜)는 하지 않는다. 한계: Orca 워커(`--spec "<글>"`)는 끝남을 알 이벤트가 없어 따라가지 않는다. 엔진이 서브에이전트 턴 끝에 `turn.complete`를 `agentId`와 함께 부른다는 것은 타입 문서와 키트로만 봤다 [추정: 실제 세션 확인 전].
 - `/relay-status`: 같은 내용을 자르지 않고 글로. 부를 때 run을 다시 읽는다(다른 세션이 바꾼 run을 반영하는 길).
 
 **한계**
@@ -335,7 +336,7 @@ Run: 2026-11-07-todo    (relay 워커만: brief의 커밋 명령이 붙임)
 | 모델별 주간 한도 | 네트워크 요청은 Fable로 일하는 동안 많아야 1분 1번(응답 약 2.6KB) |
 | 5h·7d 공유 | store 읽기는 답변 끝·30초 주기에 1번, 쓰기는 값이 다를 때만 |
 | 커밋 trailer | Bash마다 명령을 셸 해석기로 읽어 `git commit`을 찾음, 커밋마다 `git config --bool` 1번, 첫 커밋 때 기종 읽기 1번(0.26초) |
-| relay | Bash·서브에이전트·SendMessage 호출마다 글자 검사(띄우기나 brief 경로가 보일 때만 run을 읽음), 메인 답변 끝마다 `.relay/runs` 확인(run이 있으면 `state.json`, 후보가 있으면 `git rev-parse HEAD`), 세션 시작 때 `git rev-parse`·`.relay/runs` 읽기 1번. 상자 렌더는 파일 읽기 0 |
+| relay | Bash·서브에이전트·SendMessage 호출마다 글자 검사(띄우기나 brief 경로가 보일 때만 run을 읽음), 가벼운 위임(2026-11-19): spec_text·run 밖 서브에이전트 생성·모든 `turn.complete`마다 상태 한 번 읽기, 바뀔 때만 쓰기(파일·프로세스 0, 새 타이머 없음, 상태에 많아야 6줄), 메인 답변 끝마다 `.relay/runs` 확인(run이 있으면 `state.json`, 후보가 있으면 `git rev-parse HEAD`), 세션 시작 때 `git rev-parse`·`.relay/runs` 읽기 1번. 상자 렌더는 파일 읽기 0 |
 | aside 리서치 | 스킬 설명 558자가 스킬 목록에 |
 
 **기능을 더할 때 점검**: 기능을 더하거나 바꿀 때마다 아래를 보고, 결과를 위 표(새 타이머나 주기 작업이 생기면 "지금 도는 것")에 날짜와 함께 반영한다.

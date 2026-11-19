@@ -195,8 +195,8 @@ export async function toggleSidebar($: EngineInterface, layout: Layout, presenta
 
 /**
  * The sidebar, in four boxes each titled on its top border: the band's status, one item a line,
- * and how long since the last request; what runs; relay's runs not finished, only while there are
- * any (`boxes/relay.tsx`); the files the session changed, with the answers
+ * and how long since the last request; what runs; relay's runs not finished and this session's
+ * light delegations, only while there are any (`boxes/relay.tsx`); the files the session changed, with the answers
  * that changed them; and the contents, the session's answers newest first, each a press away from
  * its place in the conversation. A press on a box's title folds it to one line, and back. What each
  * answer did is on its own closing line, not here.
