@@ -30,6 +30,18 @@ Why first, even inside Orca: an Orca Codex worker's sandbox blocks its connectio
   `resume` has no `--sandbox` or `-C` (codex-cli 0.167.0): give the sandbox as a config value (`-c 'sandbox_mode="read-only"'`), keep it read-only, and run the command from the repository root. Never use `--last`: another Codex session may be newer.
 - It cannot ask you anything while it runs. A question in its verdict (`unverified` with a reason) is answered by the next package or by the user.
 
+## A check outside a run
+
+Light delegation or direct work has no package: put the question and the material's paths in a prompt file, and ask for each finding with what it looked at. Run it in the background and end your turn.
+```bash
+codex exec -C <folder with the material> --sandbox read-only --ephemeral --skip-git-repo-check \
+  -o <answer path> -i <image> -i <image> < <prompt file>
+```
+- `--skip-git-repo-check`: outside a git repository Codex refuses to start without it ("Not inside a trusted directory…").
+- `-i/--image` takes several files: a prompt argument after it is read as one more image, and with `< /dev/null` Codex then stops with "No prompt provided via stdin". With no prompt argument it reads the prompt from stdin, as above (codex-cli 0.171.0, 2026-11-24).
+- A missing image path did not stop the run (2026-11-24): ask it to name each image it opened, and compare with what you passed.
+- Before the first check with options you have not run, or when its answer is needed by a deadline, run one tiny check with the same options and read its answer. It shows each of the above, and an expired login (seen 2026-11-23), which only the user can renew.
+
 ## If it fails
 
 A non-zero exit or a missing verdict file is not a pass: report it to the user, with the command's last lines. Do not fall back to a Claude model and call it cross-model verification; if the user agrees to a same-family check, say so in the report.

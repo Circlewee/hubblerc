@@ -1,6 +1,6 @@
 # Runtime: Claude subagents
 
-Claude Code's own subagents (the Agent tool). No Orca needed; Claude workers only. Use them where Orca is absent, or when a task needs no workspace or terminal of its own.
+Claude Code's own subagents (the Agent tool). No Orca needed; Claude workers only. Use them where Orca is absent, or for a small task where speed does not matter and no workspace or terminal of its own is needed. With Orca available and speed mattering, the user prefers Orca workers (SKILL.md section 6).
 
 ## Dispatch
 
