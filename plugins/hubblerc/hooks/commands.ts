@@ -10,6 +10,7 @@ import type { Layout } from './sidebar/sidebar'
 import { activityTable } from './activity/summary'
 import { relayStatusText } from './relay/relay'
 import { runTodoCommand } from './todo/todo'
+import { runFindSessionCommand } from './status/find-session'
 
 const turns = atom({ plugin: 'hubblerc', key: 'turns' } as const, [])
 const autoPick = atom({ plugin: 'hubblerc', key: 'autoPick' } as const, null)
@@ -54,6 +55,12 @@ export async function registerCommand($: EngineInterface): Promise<void> {
     immediate: true,
   })
   await $.command.register({
+    name: 'find-session',
+    description: '커밋의 Session id(또는 커밋 sha)로 그 세션 찾기: 떠 있으면 메시지용 이름을 복사, 끝났으면 대화 기록과 이어 가는 명령 (hubblerc)',
+    argumentHint: '<session id | 커밋>',
+    immediate: true,
+  })
+  await $.command.register({
     name: 'relay-status',
     description: '이 저장소의 안 끝난 relay run: 작업별 상태·모델·실행 환경, 사용자 답을 기다리는 결정, 마지막 verdict (hubblerc)',
     immediate: true,
@@ -68,6 +75,7 @@ export function answerCommands(on: On, layout: Layout): void {
   on('command.run', { command: 'setup' }, async $ => ({ text: await runSetup($).catch((error: unknown) => `hubblerc 설정 점검 실패: ${String(error)}`) }))
   on('command.run', { command: 'relaunch' }, async $ => ({ text: await requestRestart($) }))
   on('command.run', { command: 'todo' }, async ($, e) => ({ text: await runTodoCommand($, e.args).catch((error: unknown) => `할 일을 다루지 못했습니다: ${String(error)}`) }))
+  on('command.run', { command: 'find-session' }, async ($, e) => ({ text: await runFindSessionCommand($, e.args).catch((error: unknown) => `세션을 찾지 못했습니다: ${String(error)}`) }))
   on('command.run', { command: 'relay-status' }, async $ => ({ text: await relayStatusText($).catch((error: unknown) => `relay run을 읽지 못했습니다: ${String(error)}`) }))
   on('command.run', { command: 'panel' }, async ($, e) => {
     const text = await toggleSidebar($, layout, e.presentation)

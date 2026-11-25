@@ -88,6 +88,8 @@ export type StandIn = {
   grantsFocus: boolean
   /** The key the keychain holds under `hubblerc-likely` (null: no such item), and how many times it was read. */
   keychain: string | null
+  /** A test's own answer to a command, asked before the stand-in's: undefined passes it on. */
+  run: (argv: readonly string[]) => { exitCode: number; stdout: string } | undefined
   keychainReads: number
 }
 
@@ -117,7 +119,7 @@ const decoder = new TextDecoder()
  * opens placed and shown unless `placeOnOpen` is false (a terminal too narrow for it).
  */
 export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen = true } = {}): StandIn {
-  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), modelId: 'claude-opus-5-5', panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, signIn: null, usageAnswer: { status: 200, body: {} }, usageCalls: [], gitStatusArgs: [], gitNumstat: '', mainTree: null, sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true }
+  const standIn: StandIn = { clock: mock.clock(on, { now: NOW }), modelId: 'claude-opus-5-5', panes: [], paneReads: 0, opened: [], sessionId: 'session-1', messages: [], sent: [], agentMessages: {}, toasts: [], completion: 'high', completionDelayMs: 0, completions: [], fiveHourPercent: 25, installedVersions: ['2.1.309', '2.1.310'], latestVersion: '2.1.310', fetches: 0, signIn: null, usageAnswer: { status: 200, body: {} }, usageCalls: [], gitStatusArgs: [], gitNumstat: '', mainTree: null, sessionName: null, ultracodeRow: '', ultracodeSetting: false, failMachineReads: 0, ran: [], agentListCalls: 0, root: '/repo/hubblerc', commands: [], tools: [], isSuggestionShown: true, suggestions: [], promptBox: { text: '', cursor: 0 }, isFillTaken: true, fills: [], anthropic: () => messageReply('{"answers":[{"probabilities":[0.5]}]}'), anthropicCalls: [], anthropicDelayMs: 0, files: {}, existing: [], keychain: null, keychainReads: 0, grantsFocus: true, run: () => undefined }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => {
@@ -199,6 +201,8 @@ export function standInForEngine(on: On, { agents = [] as unknown[], placeOnOpen
   on('fs.exists', (_, e) => ({ value: standIn.existing.includes(e.path) || standIn.files[e.path] !== undefined || Object.keys(standIn.files).some(path => path.startsWith(`${e.path}/`)) }))
   on('process.run', (_, e) => {
     const done = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    const own = standIn.run(e.argv)
+    if (own !== undefined) return { value: { ...own, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     // The decision log: appended to, made with its folder, read back in pieces; the machine's name; a zip.
     if (e.argv[0] === '/usr/bin/tee' && e.argv[1] === '-a') {
       const path = e.argv[2] ?? ''

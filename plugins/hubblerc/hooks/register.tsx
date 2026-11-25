@@ -27,6 +27,7 @@ import { judgeTodoEnd, judgeTodoStart, startTodoJudge } from './todo/todo-judge'
 import { gateLaunches, unverifiedLine } from './relay/gate'
 import { noteLightAnswerEnd, noteLightTurnEnd } from './relay/relay-light'
 import { registerRelayTool, serveRelayTool } from './relay/relay'
+import { registerFindSessionTool, serveFindSessionTool } from './status/find-session'
 import { showRelayLines } from './relay/relay-view'
 import { showToolLines } from './activity/tool-lines'
 
@@ -51,6 +52,7 @@ export const register: Register = (on, options) => {
     await startTodos($).catch(() => undefined)
     startTodoJudge()
     await registerRelayTool($).catch(() => undefined)
+    await registerFindSessionTool($).catch(() => undefined)
     await startLikely($).catch(() => undefined)
     await registerLikelyCommand($).catch(() => undefined)
     await startDevice($).catch(() => undefined)
@@ -191,6 +193,7 @@ export const register: Register = (on, options) => {
   trackPrompts(on)
   answerCommands(on, layout)
   serveTodoTool(on)
+  serveFindSessionTool(on)
   holdEditFocus(on)
   serveRelayTool(on)
   answerLikelyCommand(on)

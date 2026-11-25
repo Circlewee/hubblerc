@@ -238,6 +238,9 @@ Run: 2026-11-07-todo    (relay 워커만: brief의 커밋 명령이 붙임)
 - 끄기: 저장소별 `git config hubblerc.trailers false`(커밋마다 `git config --bool`로 읽는다).
 - 서명 줄 제거: `attribution.text` 훅이 `commit`·`pr`을 빈 글로 돌려 `Co-Authored-By: Claude …`와 "Generated with Claude Code"를 없앤다(저장소별 끄기와 상관없이 항상).
 - 실제 세션에서 trailer가 붙는 것 확인 [확인: 2026-11-09 임시 저장소]. heredoc·`-F`·`&&`·`git -C` 형태는 테스트 키트로만 확인.
+- 커밋한 세션 찾기(2026-11-25): `/find-session <session id | 커밋>`과 Claude 도구 `find_session`(deferred). 커밋이면 `git log -1 --format=%H%n%(trailers:key=Session,valueonly)`로 id를 읽고(짧은 sha와 id 앞 8자가 같은 모양이라 커밋을 먼저 보고, 커밋이 아니면 id 앞부분으로 본다), 세션 등록 파일(`<설정 폴더>/sessions/*.json`)에서 그 id를 가진 항목을 찾아 `ps -p`로 살아 있는 것만 남긴다. 떠 있으면 SendMessage 이름·시작·pid·폴더(명령은 세션 줄처럼 `이름 (시작 시각 시작)`을 복사), 끝났으면 대화 기록(`projects/*/<id>*.jsonl`, 앞 256KB에서 첫 `cwd`)과 `cd <폴더> && claude --resume <id>`. 실제 저장소에서 커밋 a69998f의 trailer와 이 세션의 대화 기록·폴더를 읽는 명령을 손으로 돌려 확인 [확인: 2026-11-25], 엔진 안 동작은 테스트 키트로만.
+  - trailer에 이름 대신 id를 남기는 이유(사용자와 정함): 이름은 `/rename`으로 바뀌어 커밋 때 이름으로는 나중에 못 찾는 것이 id와 같고, 바꾼 이름은 무엇이든 될 수 있어 공개 저장소에 남기지 않는다. id는 바뀌지 않고, 떠 있는 동안 등록 파일이 id와 지금 이름을 함께 갖고, 끝난 뒤엔 대화 기록 파일 이름이 id다.
+  - 모르는 것: `/clear`나 `--resume` 뒤 같은 프로세스의 sessionId가 바뀌는지 [미확인]. 바뀌면 그 전 커밋의 id는 떠 있는 세션과 안 맞고 "떠 있지 않음"(대화 기록) 쪽으로 답한다. 등록 파일 형식은 문서화되지 않았다(세션 줄과 같은 위험). 다른 기기의 세션은 못 찾는다.
 
 ### F13. relay
 큰 작업을 워커에게 나눠 돌리고, 다른 모델(Codex)로 검증하고, 긴 작업을 다른 세션이 이어받게 하는 스킬 `hubblerc:relay` + 도구 `mcp__hubblerc__relay` + gate 훅. 작은 일도 느리지 않게 하는 것이 같은 무게의 목표다. 흐름 그림은 `docs/relay.md`. 코드는 `skills/relay/`(SKILL.md + `references/runtime-{orca,subagent,codex-exec}.md`), `hooks/relay/`(`relay.ts`·`relay-format.ts`·`gate.ts`·`relay-view.tsx`·`relay-status.ts`), `sidebar/boxes/relay.tsx`.
@@ -357,6 +360,7 @@ Run: 2026-11-07-todo    (relay 워커만: brief의 커밋 명령이 붙임)
 | 5h·7d 공유 | store 읽기는 답변 끝·30초 주기에 1번, 쓰기는 값이 다를 때만 |
 | 커밋 trailer | Bash마다 명령을 셸 해석기로 읽어 `git commit`을 찾음, 커밋마다 `git config --bool` 1번, 첫 커밋 때 기종 읽기 1번(0.26초) |
 | 밴드 세션 이름·relay 줄(2026-11-19) | 이벤트 일 없음. 밴드 렌더마다 상태 4개를 더 읽고 화면 조각이 많아야 한 줄 늘어남(타이머·프로세스·파일 0) |
+| 세션 찾기(2026-11-25) | 부를 때만: 등록 파일 목록·읽기, 항목마다 `ps` 하나, 커밋이면 `git log` 하나, 못 찾으면 `sh`(ls·head) 하나. 타이머·감시 0. 도구는 deferred라 이름 한 줄만 목록에 |
 | relay | Bash·서브에이전트·SendMessage 호출마다 글자 검사(띄우기나 brief 경로가 보일 때만 run을 읽음), 가벼운 위임(2026-11-19): spec_text·run 밖 서브에이전트 생성·모든 `turn.complete`마다 상태 한 번 읽기, 바뀔 때만 쓰기(파일·프로세스 0, 새 타이머 없음, 상태에 많아야 6줄), 메인 답변 끝마다 `.relay/runs` 확인(run이 있으면 `state.json`, 후보가 있으면 `git rev-parse HEAD`), 세션 시작 때 `git rev-parse`·`.relay/runs` 읽기 1번. 상자 렌더는 파일 읽기 0. 2026-11-24 운영 교훈은 스킬 글만 바꿔 hubblerc 비용 변화 없음, 11-25 `Not checked and risks`는 report 때 이미 읽은 보고서·brief 글에서 절 하나를 더 볼 뿐(파일 읽기·타이머·프로세스 0); 스킬이 권하는 `--keep-open` 워커는 놓아줄 때까지 사용자 기기에 쉬는 세션으로 남는다 |
 | aside 리서치 | 스킬 설명 558자가 스킬 목록에 |
 
