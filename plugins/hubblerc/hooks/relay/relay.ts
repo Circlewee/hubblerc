@@ -25,6 +25,8 @@ import {
   isTestFile,
   judgeVerdict,
   lastLines,
+  NOT_CHECKED,
+  notCheckedLine,
   latestRevs,
   localDate,
   outsideScope,
@@ -869,6 +871,8 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
   }
   const spec = await readText($, task.specPath)
   if (spec === undefined || (await sha256($, spec)) !== (task.dispatchedHash ?? task.specHash)) warnings.push('brief가 보낸 뒤에 바뀌었거나 없습니다: 워커가 본 brief와 다를 수 있습니다.')
+  // Only a brief that asked for the section warns of its absence: one sent before it existed did not.
+  if (report.notChecked === null && spec?.includes(`## ${NOT_CHECKED}`) === true) warnings.push(`보고서에 ${NOT_CHECKED} 절이 없습니다(brief가 요구함): 확인하지 못한 것을 워커에게 물어보세요.`)
 
   // The effort it ran at: what hubblerc signed its commits with, else what the report itself says.
   const signed: string[] = []
@@ -902,11 +906,12 @@ async function reportAction($: EngineInterface, root: string, state: RelayState,
     ...(wasLive ? ['띄운 뒤 막혀 있던 task의 워커가 보고했습니다: 이제 점유하지 않습니다(보고대로 처리).'] : []),
     ...(notPassed.length === 0 ? [] : [`기준(워커 보고): ${notPassed.map(criterion => `${criterion.id} ${criterion.result}`).join(', ')}`]),
     ...(tried.length === 0 ? [] : [`tries: ${tried.join(', ')}`]),
+    ...(report.notChecked === null || report.notChecked.length === 0 ? [] : [notCheckedLine(report.notChecked)]),
     ...(look.outside.length === 0 ? [] : [`범위 밖 파일: ${look.outside.join(', ')}`]),
     ...(look.tests.length === 0 ? [] : [`테스트·검사 파일 변경: ${look.tests.join(', ')}`]),
     ...(ran === undefined || ran === task.effort.trim().toLowerCase() ? [] : [`effort: brief ${task.effort} · 실제 ${ran}(${signed.length > 0 ? '커밋 trailer' : '보고서'})`]),
     // The report is to be read when it is not a plain DONE (concerns, a question), or when it disagrees.
-    ...(report.status !== 'DONE' || mismatches.length > 0 ? [`보고서: ${path}`] : []),
+    ...(report.status !== 'DONE' || mismatches.length > 0 || (report.notChecked?.length ?? 0) > 3 ? [`보고서: ${path}`] : []),
     ...(mismatches.length === 0 ? [] : ['', '보고서 불일치(워커에게 고쳐 달라고 하세요):', ...mismatches.map(problem => `- ${problem}`)]),
   ]
 

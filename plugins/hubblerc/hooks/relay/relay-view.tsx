@@ -209,6 +209,8 @@ function told(lines: readonly string[]): string | undefined {
     const mismatches = bulletsAfter(lines, line => line.startsWith('보고서 불일치')).length
     const parts = [match[1] ?? '', `범위 밖 ${countOf(after(lines, '범위 밖 파일:') ?? '')}`, `테스트 변경 ${countOf(after(lines, '테스트·검사 파일 변경:') ?? '')}`, `경고 ${warningsIn(lines).length}`]
     if (mismatches > 0) parts.push(`불일치 ${mismatches}`)
+    const notChecked = /^(\d+):/.exec(after(lines, '확인 못 함(워커 보고)') ?? '')?.[1]
+    if (notChecked !== undefined) parts.push(`확인 못 함 ${notChecked}`)
 
     return parts.join(' · ')
   }

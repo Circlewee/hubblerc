@@ -32,7 +32,7 @@ Why first, even inside Orca: an Orca Codex worker's sandbox blocks its connectio
 
 ## A check outside a run
 
-Light delegation or direct work has no package: put the question and the material's paths in a prompt file, and ask for each finding with what it looked at. Run it in the background and end your turn.
+Light delegation or direct work has no package: put the question and the material's paths in a prompt file, and ask for each finding with what it looked at, and at the end what it could not open or check. Run it in the background and end your turn.
 ```bash
 codex exec -C <folder with the material> --sandbox read-only --ephemeral --skip-git-repo-check \
   -o <answer path> -i <image> -i <image> < <prompt file>

@@ -19,7 +19,7 @@ Claude Code's own subagents (the Agent tool). No Orca needed; Claude workers onl
 ## Reports
 
 - Full run: the spec tells it to write the report file; its final answer only needs to say it is done. Run `report` and `check` as usual.
-- Light: its final answer is the report (header lines and one line per criterion).
+- Light: its final answer is the report (header lines, one line per criterion, and its Not checked and risks lines). No tool reads it: collect those lines yourself.
 
 ## Limits
 

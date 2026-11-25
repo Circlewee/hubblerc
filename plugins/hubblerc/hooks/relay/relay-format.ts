@@ -340,6 +340,17 @@ export function fenced(text: string, info = 'text'): string {
 }
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
+
+/** A report's Not checked lines as one line for the lead: the first 3, each cut at 160 characters. */
+export function notCheckedLine(lines: readonly string[]): string {
+  const shown = lines.slice(0, 3).map(line => {
+    const text = oneLine(line.replace(/^[-*]\s*/, ''))
+    return text.length > 160 ? `${text.slice(0, 159)}…` : text
+  })
+  const more = lines.length > 3 ? ` / 외 ${lines.length - 3}줄` : ''
+
+  return `확인 못 함(워커 보고) ${lines.length}: ${shown.join(' / ')}${more}`
+}
 const cell = (text: string): string => oneLine(text).replace(/\|/g, '\\|')
 const list = (items: readonly string[]): string => (items.length === 0 ? 'none' : items.join(', '))
 
@@ -409,7 +420,10 @@ function rules(input: BriefInput, context: BriefContext): string[] {
   const reportRule =
     context.kind === 'full'
       ? 'Write the report whole to a temporary file in the Report to folder, rename it, then say you are done (the message carries the path only).'
-      : 'Report in your reply: about 15 lines. Never drop evidence or a question to keep it short.'
+      : 'Report in your reply: about 15 lines. Never drop evidence, a question or a Not checked line to keep it short.'
+
+  const switchWay =
+    'When a criterion still fails after 2 tries, do not make the next one the same way: write down 2 or 3 other ways to read the criterion or the problem, take one and note it under Decisions I made, or report what blocks you.'
 
   return [
     'Change only what this task asks for, inside the Edit scope. Run git status as you start; ask if the scope holds changes you cannot account for.',
@@ -417,8 +431,8 @@ function rules(input: BriefInput, context: BriefContext): string[] {
     'Do not weaken the completion criteria or the tests. Report why you changed any test.',
     'Stop and ask only for what bears on the goal, permissions, inputs or the verdict (NEEDS_CONTEXT / BLOCKED). Make the small choices (a function name, how to split a file, wording) and report them after.',
     context.kind === 'full'
-      ? "Fix the same criterion 3 times at most, counted across revisions (tries). Where a criterion's line says 'tries carried N', count on from N. Once it passes, do not polish further."
-      : 'Fix the same criterion 3 times at most, counted across revisions (tries). Once it passes, do not polish further.',
+      ? `Fix the same criterion 3 times at most, counted across revisions (tries). Where a criterion's line says 'tries carried N', count on from N. ${switchWay} Once it passes, do not polish further.`
+      : `Fix the same criterion 3 times at most, counted across revisions (tries). ${switchWay} Once it passes, do not polish further.`,
     'No push, deploy, sending anything outside, spending money, or anything hard to undo without a specific approval.',
     `Commit: a new file first with \`git add <file>\` (--only does not commit a file git does not know), then \`${commit}\`. ${signedBy} Add no signature line (Co-Authored-By and the like). Leave changes someone else staged alone. On index.lock try again up to 3 times, then BLOCKED (do not delete the lock file). Never stash, reset, checkout, clean or commit -a.`,
     reportRule,
@@ -438,6 +452,8 @@ function reportFormat(input: BriefInput, context: BriefContext): string {
     '- Found at start: none | unchecked | <what you found>',
     '## Criteria',
     ...criteria,
+    `## ${NOT_CHECKED}   (always: 1 to 3 lines; none if there is none)`,
+    '- <what you did not check or could not see, and what could be wrong because of it>',
     '## Concerns   (only with DONE_WITH_CONCERNS)',
     '## Test changes   (<file>: <why>; none if there is none)',
     '## For whoever picks up',
@@ -452,6 +468,7 @@ function reportFormat(input: BriefInput, context: BriefContext): string {
     fenced(form, 'markdown'),
     '',
     '- Criteria: exactly one line for each criterion above, none missing or repeated. tries is the count of fixes made across revisions (a rerun alone is not one).',
+    `- ${NOT_CHECKED}: always there. It does not change the status: a criterion you could not check is still unverified under Criteria, and a problem you found goes under Concerns.`,
     '- Status: DONE = every criterion passes',
     '- DONE_WITH_CONCERNS = every criterion passes, with a concern outside the criteria (written under Concerns)',
     '- NEEDS_CONTEXT = an answer is needed (written under Question)',
@@ -613,7 +630,12 @@ export type ParsedReport = {
   criteria: { id: string; result: CriterionResult; tries: number | null; note: string }[]
   concerns: string[]
   testChanges: string[]
+  /** The Not checked and risks lines; [] for none, null when the report has no such section. */
+  notChecked: string[] | null
 }
+
+/** The report section a worker always writes: what it did not check, and the risks. */
+export const NOT_CHECKED = 'Not checked and risks'
 
 const NONE = /^(none|없음|-|n\/a)$/i
 
@@ -653,7 +675,8 @@ const contentLines = (lines: readonly string[] | undefined): string[] =>
 
 export function parseReport(text: string): ParsedReport {
   const all = sections(text)
-  const head = all.filter(section => !/^(criteria|concerns|test changes|for whoever|question)/i.test(section.title)).flatMap(section => section.lines)
+  const notChecked = sectionBody(text, NOT_CHECKED)
+  const head = all.filter(section => !/^(criteria|not checked|concerns|test changes|for whoever|question)/i.test(section.title)).flatMap(section => section.lines)
   const statusText = headValue(head, 'Status') ?? ''
   const status = (['DONE_WITH_CONCERNS', 'NEEDS_CONTEXT', 'BLOCKED', 'DONE'] as const).find(word => new RegExp(`^${word}\\b`, 'i').test(statusText)) ?? null
   const changeText = (headValue(head, 'Change') ?? '').toLowerCase()
@@ -676,6 +699,7 @@ export function parseReport(text: string): ParsedReport {
     criteria,
     concerns: contentLines(sectionBody(text, 'Concerns')),
     testChanges: contentLines(sectionBody(text, 'Test changes')),
+    notChecked: notChecked === undefined ? null : contentLines(notChecked),
   }
 }
 
@@ -991,6 +1015,7 @@ export function verifierInstructions(verdictPath: string, schemaPath: string, re
     '## Instructions for the verifier',
     '- Review to refute: do not look for confirmation that it passes; look for defects and show the grounds.',
     '- Give each criterion above pass / fail / unverified with evidence: the command you ran and its exit code, a few lines of output, file:line. One fail or unverified makes the result fail.',
+    "- Each report's Not checked and risks lines name what its worker did not check: start there; they are not the only places to look.",
     "- A pass without evidence is unverified. A pass in a worker's report is not evidence (the Checks the relay tool ran itself are).",
     '- Open each file under Files to review with its command and list it in reviewed_files. Do not list a file you did not open. A verdict missing any file of the list is refused.',
     '- A cancel reverts no code: commits of cancelled or blocked tasks and revisions are to be reviewed while they are in HEAD (the section Other commits of this run included).',

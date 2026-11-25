@@ -162,7 +162,7 @@ const TASK_A = {
   runner_kind: 'claude',
 }
 
-function report(fields: { status?: string; commits?: string; criteria?: string[]; concerns?: string; extra?: string } = {}): string {
+function report(fields: { status?: string; commits?: string; criteria?: string[]; concerns?: string; notChecked?: string | null; extra?: string } = {}): string {
   return [
     '# Report A-r1',
     `- Status: ${fields.status ?? 'DONE'}`,
@@ -172,6 +172,7 @@ function report(fields: { status?: string; commits?: string; criteria?: string[]
     '- Found at start: none',
     '## Criteria',
     ...(fields.criteria ?? ['- C1: pass · tries 1 · make test exit 0', '- C2: pass · tries 0 · read it']),
+    ...(fields.notChecked === null ? [] : ['## Not checked and risks', fields.notChecked ?? 'none']),
     ...(fields.concerns === undefined ? [] : ['## Concerns', fields.concerns]),
     '## Test changes',
     'none',
@@ -1299,7 +1300,7 @@ test('a new revision’s brief says the tries a criterion takes over, from 1 up;
   // A first revision carries nothing; its rule says where a carried count would be.
   const r1 = sim.files[`${DIR}/tasks/A-r1.md`] ?? ''
   expect(r1).not.toContain('· tries carried')
-  expect(r1).toContain("Fix the same criterion 3 times at most, counted across revisions (tries). Where a criterion's line says 'tries carried N', count on from N. Once it passes, do not polish further.")
+  expect(r1).toContain("Fix the same criterion 3 times at most, counted across revisions (tries). Where a criterion's line says 'tries carried N', count on from N. When a criterion still fails after 2 tries, do not make the next one the same way: write down 2 or 3 other ways to read the criterion or the problem, take one and note it under Decisions I made, or report what blocks you. Once it passes, do not polish further.")
   await relay($, { action: 'dispatched', run: RUN, task: 'A', runner: 'subagent a' })
   sim.commits[SHA_A] = { task: 'A-r1', subject: 'Try', files: ['hooks/relay/relay.ts'] }
   sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ status: 'BLOCKED', criteria: ['- C1: fail · tries 2 · red', '- C2: pass · tries 0 · ok', '- C3: fail · tries 1 · x'] })
@@ -1567,4 +1568,61 @@ test('V2 a run abandoned while the check’s last command runs: no result file i
   expect(checked.deny).toBe(`검사 도중 run이 버려져 멈췄습니다: ${RUN}(기준 명령 1개를 돌린 뒤, 결과 파일은 쓰지 않음)`)
   expect(sim.ran).toEqual(['make test'])
   expect(sim.files[`${DIR}/tasks/A-r1-checks.md`]).toBeUndefined()
+})
+
+// ── Not checked and risks ──────────────────────────────────────
+
+test('a report reads its Not checked and risks lines apart from the head: none is [], no section is null', () => {
+  expect(parseReport(report()).notChecked).toEqual([])
+  expect(parseReport(report({ notChecked: null })).notChecked).toBeNull()
+  // A line in the section that looks like a head line does not stand for the head.
+  const parsed = parseReport(report({ status: 'DONE', notChecked: '- Status: BLOCKED was not tried on Linux' }))
+  expect(parsed.status).toBe('DONE')
+  expect(parsed.notChecked).toEqual(['- Status: BLOCKED was not tried on Linux'])
+})
+
+test('report shows what the worker did not check, three lines at most, and warns of a missing section only when the brief asked for it', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  const path = `${DIR}/tasks/A-r1-report.md`
+
+  sim.files[path] = report({ notChecked: '- not run on Linux\n- the big repo case' })
+  const two = (await relay($, { action: 'report', run: RUN, task: 'A' })).result ?? ''
+  expect(two).toContain('\n확인 못 함(워커 보고) 2: not run on Linux / the big repo case')
+  expect(two).not.toContain('보고서:')
+  expect((await said($, { action: 'report', run: RUN, task: 'A' })).result).toBe('DONE · 범위 밖 0 · 테스트 변경 0 · 경고 0 · 확인 못 함 2')
+
+  sim.files[path] = report({ notChecked: ['- a', '- b', '- c', '- d', `- ${'x'.repeat(200)}`].join('\n') })
+  const five = (await relay($, { action: 'report', run: RUN, task: 'A' })).result ?? ''
+  expect(five).toContain('확인 못 함(워커 보고) 5: a / b / c / 외 2줄')
+  expect(five).toContain(`보고서: ${path}`)
+
+  // This brief asked for the section: its absence is a warning, not a mismatch.
+  sim.files[path] = report({ notChecked: null })
+  const missing = (await relay($, { action: 'report', run: RUN, task: 'A' })).result ?? ''
+  expect(missing).toContain('보고서에 Not checked and risks 절이 없습니다')
+  expect(state(sim).tasks[0]?.status).toBe('done')
+
+  // A brief without the section (one sent before it existed) did not ask for it: no such warning.
+  const specPath = state(sim).tasks[0]?.specPath ?? ''
+  sim.files[specPath] = (sim.files[specPath] ?? '').replace(/## Not checked and risks[^\n]*\n[^\n]*\n/, '')
+  const old = (await relay($, { action: 'report', run: RUN, task: 'A' })).result ?? ''
+  expect(old).not.toContain('Not checked and risks 절이 없습니다')
+  expect(old).toContain('brief가 보낸 뒤에 바뀌었거나')
+})
+
+test('the section is in every brief, light ones too, and reaches the verifier with the report', async ($, on) => {
+  const sim = standIn(on)
+  await doneA($, sim)
+  const { action: _, run: __, ...fields } = TASK_A
+  const light = (await relay($, { action: 'spec_text', ...fields })).result ?? ''
+  expect(light).toContain('## Not checked and risks   (always: 1 to 3 lines; none if there is none)')
+  expect(light).toContain('Never drop evidence, a question or a Not checked line to keep it short.')
+
+  sim.files[`${DIR}/tasks/A-r1-report.md`] = report({ notChecked: '- not run on Linux' })
+  await relay($, { action: 'report', run: RUN, task: 'A' })
+  expect((await relay($, { action: 'package', run: RUN })).deny).toBeUndefined()
+  const pack = sim.files[`${DIR}/reviews/V1-package.md`] ?? ''
+  expect(pack).toContain('not run on Linux')
+  expect(pack).toContain("Each report's Not checked and risks lines name what its worker did not check")
 })
